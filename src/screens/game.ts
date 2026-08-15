@@ -1,0 +1,418 @@
+import type { App, PostGameSummary } from '../app';
+import type { LogTone, SimEvent } from '../core/gameSim';
+import { GameSim } from '../core/gameSim';
+import type { Count } from '../core/pitching';
+import {
+  LEVELS,
+  advanceDay,
+  isSeasonOver,
+  nextGame,
+  parkForGame,
+  playerTeam,
+  simulateOtherTeams,
+  teamById,
+  teamKit,
+} from '../core/league';
+import { uniformFor } from '../core/uniforms';
+import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
+import { addStats } from '../core/player';
+import { gameXp, grantXp, recoverOvernight } from '../core/progression';
+import { clamp } from '../core/rng';
+import type { BattedBall } from '../core/types';
+import type { PlayOutcome, UserSide } from '../core/playSim';
+import { PlaySim } from '../core/playSim';
+import { toPositionId } from '../core/fieldGeometry';
+import { AtBatView } from '../game/atBatView';
+import { PlayView } from '../game/playView';
+import { esc, q } from '../ui/dom';
+import { isMuted, playSound, startAmbience, stopAmbience, toggleMuted } from '../ui/audio';
+
+const NORMAL_DELAY = 850;
+const FAST_DELAY = 220;
+
+export function renderGame(app: App, mount: HTMLElement): () => void {
+  const save = app.requireSave();
+  const { player, league } = save;
+  const level = LEVELS[league.levelId];
+  const upcoming = nextGame(league);
+
+  if (!upcoming) {
+    app.go('hub');
+    return () => {};
+  }
+
+  const scheduled = upcoming;
+  const opponent = teamById(league, scheduled.opponentId);
+  const myTeam = playerTeam(league);
+  const park = parkForGame(league, scheduled);
+
+  // Home team wears its home kit, the visitor its road kit.
+  const myKit = uniformFor(teamKit(league, myTeam.id), scheduled.home);
+  const theirKit = uniformFor(teamKit(league, opponent.id), !scheduled.home);
+  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng);
+
+  let delay = NORMAL_DELAY;
+  let timer = 0;
+  let soundTimer = 0;
+  let view: AtBatView | PlayView | null = null;
+  let count: Count = { balls: 0, strikes: 0 };
+  let disposed = false;
+
+  mount.classList.add('game-screen');
+  mount.innerHTML = `
+    <header class="scorebar">
+      <div class="teams">
+        <div><span id="awayName"></span><b id="awayScore">0</b></div>
+        <div><span id="homeName"></span><b id="homeScore">0</b></div>
+      </div>
+      <div class="diamond"><i class="b1"></i><i class="b2"></i><i class="b3"></i></div>
+      <div class="situation">
+        <b id="inning">Top 1</b>
+        <span id="outs">0 out</span>
+        <div class="count-pips" id="pips"></div>
+      </div>
+    </header>
+
+    <div class="stage" id="stage">
+      <div class="idle-stage" id="idle">
+        <div class="sub" id="idleSub">First pitch</div>
+        <div class="big" id="idleBig">${esc(scheduled.home ? 'vs' : '@')} ${esc(opponent.name)}<br/>
+          <span class="muted tiny">${esc(park.name)} · ${esc(sim.pitcher.name)} on the mound</span>
+        </div>
+      </div>
+      <div id="host"></div>
+      <button class="speed-toggle" id="speed">FAST ▸</button>
+      <button class="sound-toggle" id="sound" aria-label="Toggle sound"></button>
+    </div>
+
+    <div class="feed" id="feed"></div>
+  `;
+
+  const idle = q(mount, '#idle');
+  const host = q(mount, '#host');
+  const feed = q(mount, '#feed');
+  const speedBtn = q<HTMLButtonElement>(mount, '#speed');
+  const soundBtn = q<HTMLButtonElement>(mount, '#sound');
+
+  /* ------------------------------------------------------------ rendering */
+
+  const setIdle = (headline: string, sub: string): void => {
+    q(mount, '#idleBig').innerHTML = esc(headline);
+    q(mount, '#idleSub').textContent = sub;
+  };
+
+  const showIdle = (): void => {
+    idle.style.display = '';
+    host.style.display = 'none';
+  };
+
+  const showPlay = (): void => {
+    idle.style.display = 'none';
+    host.style.display = '';
+  };
+
+  const addFeed = (text: string, tone: LogTone | 'inning'): void => {
+    const line = document.createElement('div');
+    line.className = tone;
+    line.textContent = text;
+    feed.appendChild(line);
+    while (feed.childElementCount > 40) feed.removeChild(feed.firstChild!);
+    feed.scrollTop = feed.scrollHeight;
+  };
+
+  const update = (): void => {
+    const awayIsUs = !sim.playerIsHome;
+    q(mount, '#awayName').textContent = awayIsUs ? myTeam.name : opponent.name;
+    q(mount, '#homeName').textContent = awayIsUs ? opponent.name : myTeam.name;
+    q(mount, '#awayScore').textContent = String(awayIsUs ? sim.score.us : sim.score.them);
+    q(mount, '#homeScore').textContent = String(awayIsUs ? sim.score.them : sim.score.us);
+
+    q(mount, '#inning').textContent = sim.inningLabel;
+    q(mount, '#outs').textContent = `${sim.outs} out`;
+
+    for (let i = 0; i < 3; i++) {
+      q(mount, `.diamond .b${i + 1}`).classList.toggle('on', sim.bases[i]);
+    }
+
+    q(mount, '#pips').innerHTML =
+      [0, 1, 2].map((i) => `<i class="${count.balls > i ? 'ball' : ''}"></i>`).join('') +
+      [0, 1].map((i) => `<i class="${count.strikes > i ? 'strike' : ''}"></i>`).join('');
+  };
+
+  /* ------------------------------------------------------------ scheduling */
+
+  const schedule = (fn: () => void, ms = delay): void => {
+    if (disposed) return;
+    clearTimeout(timer);
+    timer = window.setTimeout(fn, ms);
+  };
+
+  const destroyView = (): void => {
+    if (view) {
+      view.destroy();
+      view = null;
+    }
+    showIdle();
+  };
+
+  /* ----------------------------------------------------------- game events */
+
+  const tick = (): void => {
+    if (disposed) return;
+    const event = sim.step();
+    update();
+
+    switch (event.kind) {
+      case 'inning':
+        addFeed(event.text, 'inning');
+        setIdle(event.text, sim.weAreBatting ? 'Your team is up' : 'In the field');
+        // Not every break — an organ riff between all eighteen half-innings
+        // stops being charming somewhere around the fourth.
+        if (app.rng.chance(0.3)) playSound('organ');
+        schedule(tick);
+        break;
+      case 'log':
+        addFeed(event.text, event.tone);
+        setIdle(event.text, sim.inningLabel);
+        schedule(tick);
+        break;
+      case 'atBat':
+        beginAtBat(event);
+        break;
+      case 'fielding':
+        beginFielding(event);
+        break;
+      case 'gameOver':
+        endGame();
+        break;
+    }
+  };
+
+  function beginAtBat(event: Extract<SimEvent, { kind: 'atBat' }>): void {
+    showPlay();
+    count = { balls: 0, strikes: 0 };
+    addFeed(`${player.name} steps in against ${event.pitcher.name}.`, 'neutral');
+
+    // The park picks up when you come up with something going on. Runners on
+    // gets the charge riff; otherwise an occasional ripple of clapping, so
+    // stepping in isn't always silent but isn't always the same either.
+    if (sim.bases.some(Boolean)) playSound('rally');
+    else if (app.rng.chance(0.25)) playSound('clap');
+
+    view = new AtBatView(host, {
+      // Gear plays: the sweet spot and the pitch read both come off it.
+      player: playerWithGear(player),
+      pitcher: event.pitcher,
+      pitcherKit: theirKit,
+      level,
+      rng: app.rng,
+      onCount: (c) => {
+        count = c;
+        update();
+      },
+      onBallInPlay: (battedBall) => {
+        destroyView();
+        count = { balls: 0, strikes: 0 };
+        update();
+        beginLivePlay(battedBall, 'offense');
+      },
+      onComplete: (outcome) => {
+        destroyView();
+        // A walk gets a ripple of approval; a strikeout gets the silence it
+        // deserves, since there's no free-licensed crowd groan in the set.
+        if (outcome.result === 'walk') playSound('cheerSoft');
+        const applied = sim.submitAtBat(outcome);
+        addFeed(`${player.name}: ${applied.text}`, applied.tone);
+        if (applied.runs > 0) {
+          addFeed(`${applied.runs} run${applied.runs === 1 ? '' : 's'} score.`, 'good');
+        }
+        count = { balls: 0, strikes: 0 };
+        setIdle(applied.text, sim.inningLabel);
+        update();
+        schedule(tick, delay + 350);
+      },
+    });
+  }
+
+  function beginFielding(event: Extract<SimEvent, { kind: 'fielding' }>): void {
+    addFeed(`${event.hitter} hits one your way...`, 'neutral');
+    beginLivePlay(event.battedBall, 'defense');
+  }
+
+  /** Hand a fair ball over to the top-down field, on whichever side we're on. */
+  function beginLivePlay(battedBall: BattedBall, side: UserSide): void {
+    showPlay();
+
+    const playSim = new PlaySim({
+      battedBall,
+      bats: player.bats,
+      attributes: effectiveAttributes(player),
+      userPosition: toPositionId(player.position),
+      userSide: side,
+      runnersOn: [...sim.bases],
+      outs: sim.outs,
+      opponentRating: level.defenseRating,
+      park,
+      rng: app.rng,
+    });
+
+    view = new PlayView(host, {
+      sim: playSim,
+      // On offense your team is running and theirs is in the field; on defense
+      // it's the other way round.
+      fieldingKit: side === 'offense' ? theirKit : myKit,
+      battingKit: side === 'offense' ? myKit : theirKit,
+      crowd: level.crowd,
+      onComplete: (result: PlayOutcome) => {
+        destroyView();
+        finishLivePlay(result, side);
+      },
+    });
+  }
+
+  function finishLivePlay(result: PlayOutcome, side: UserSide): void {
+    reactTo(result, side);
+    const applied = sim.submitLivePlay(result, side === 'offense' ? 'us' : 'them');
+    const prefix = side === 'offense' ? `${player.name}: ` : '';
+    addFeed(`${prefix}${applied.text}`, applied.tone);
+
+    if (result.runs > 0) {
+      addFeed(`${result.runs} run${result.runs === 1 ? '' : 's'} score.`, side === 'offense' ? 'good' : 'bad');
+    }
+    if (result.userPutout && side === 'defense') {
+      addFeed('Putout credited to you.', 'good');
+    }
+    if (result.userError) {
+      addFeed('Charged with an error.', 'bad');
+    }
+
+    setIdle(applied.text, sim.inningLabel);
+    update();
+    schedule(tick, delay + 300);
+  }
+
+  /**
+   * The crowd's take on what just happened. Only your side's good news gets a
+   * reaction — cheering the opposition's double from your own dugout reads as
+   * a bug, and firing something on every routine out would flatten the big
+   * moments this is here to sell.
+   */
+  function reactTo(result: PlayOutcome, side: UserSide): void {
+    if (side === 'defense') {
+      if (result.userPutout) playSound('cheerShort');
+      return;
+    }
+
+    if (result.kind === 'homeRun') {
+      playSound('homeRun');
+      // Let the roar establish before the organ answers it. Deliberately not
+      // `schedule` — that's the single-slot game clock, and borrowing it here
+      // would cancel the pending tick and stall the inning.
+      clearTimeout(soundTimer);
+      soundTimer = window.setTimeout(() => playSound('fanfare'), 1400);
+      return;
+    }
+    if (result.kind === 'foul' || result.kind === 'out') return;
+    // A hit that drove in runs deserves more than a hit that didn't.
+    playSound(result.runs > 0 ? 'cheerBig' : 'cheerShort');
+  }
+
+  /* -------------------------------------------------------------- wrap up */
+
+  function endGame(): void {
+    destroyView();
+
+    scheduled.played = true;
+    scheduled.playerTeamScore = sim.score.us;
+    scheduled.opponentScore = sim.score.them;
+
+    if (sim.score.us > sim.score.them) {
+      myTeam.wins++;
+      opponent.losses++;
+    } else if (sim.score.us < sim.score.them) {
+      myTeam.losses++;
+      opponent.wins++;
+    }
+    simulateOtherTeams(league, app.rng, [opponent.id]);
+
+    addStats(player.season, sim.gameStats);
+    addStats(player.career, sim.gameStats);
+    player.fielding.chances += sim.putouts + sim.errors;
+    player.fielding.putouts += sim.putouts;
+    player.fielding.errors += sim.errors;
+
+    const xp = gameXp(sim.gameStats, sim.putouts);
+    const report = grantXp(player, xp);
+
+    // Payday, then a game's worth of wear on everything in the bag.
+    const earnings = gameEarnings(
+      league.levelId,
+      player.contract,
+      sim.gameStats,
+      sim.putouts,
+      sim.score.us > sim.score.them,
+    );
+    player.money += earnings.total;
+    const wornOut = wearGear(player).map((g) => g.name);
+
+    // A game takes a real bite out of conditioning, then the day rolls over.
+    player.stamina = clamp(player.stamina - (6 + Math.round(app.rng.next() * 4)), 0, 100);
+    advanceDay(league);
+    recoverOvernight(player);
+
+    const summary: PostGameSummary = {
+      win: sim.score.us > sim.score.them,
+      tie: sim.score.us === sim.score.them,
+      score: { ...sim.score },
+      opponent: opponent.name,
+      home: sim.playerIsHome,
+      stats: { ...sim.gameStats },
+      putouts: sim.putouts,
+      errors: sim.errors,
+      xp,
+      earnings,
+      wornOut,
+      levelsGained: report.levelsGained,
+      pointsGained: report.pointsGained,
+      // Not `nextGame(league) === null` — that's also true on an ordinary off
+      // day, which would end the season after the first one.
+      seasonComplete: isSeasonOver(league),
+    };
+
+    app.lastGame = summary;
+    app.persist();
+    app.go('postgame');
+  }
+
+  /* ---------------------------------------------------------------- input */
+
+  speedBtn.addEventListener('click', () => {
+    delay = delay === NORMAL_DELAY ? FAST_DELAY : NORMAL_DELAY;
+    speedBtn.textContent = delay === FAST_DELAY ? 'FAST ▸▸' : 'FAST ▸';
+  });
+
+  const syncSoundBtn = (): void => {
+    soundBtn.textContent = isMuted() ? '🔇' : '🔊';
+    soundBtn.classList.toggle('off', isMuted());
+  };
+
+  soundBtn.addEventListener('click', () => {
+    toggleMuted();
+    syncSoundBtn();
+  });
+
+  showIdle();
+  update();
+  syncSoundBtn();
+  addFeed(`${myTeam.name} ${scheduled.home ? 'host' : 'visit'} the ${opponent.name}.`, 'neutral');
+  startAmbience();
+  schedule(tick, 1100);
+
+  return () => {
+    disposed = true;
+    clearTimeout(timer);
+    clearTimeout(soundTimer);
+    stopAmbience();
+    if (view) view.destroy();
+  };
+}

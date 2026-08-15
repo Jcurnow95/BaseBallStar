@@ -1,0 +1,42 @@
+appId: com.baseballstar.desktop
+productName: Baseball Star
+copyright: Baseball Star
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the built web bundle and the Electron entry point. Source, the native
+# mobile projects and the toolchain are all irrelevant to the desktop build.
+files:
+  - dist/**/*
+  - electron/**/*
+  # Dev-only harness that boots main.js and interrogates the live window.
+  - '!electron/smoke.js'
+  - package.json
+
+# Left unpacked. Nearly all of the payload is 19 MB of audio that gains nothing
+# from being archived, the protocol handler streams it straight off disk with
+# byte ranges, and it keeps the licensing notes in dist/audio/README.md
+# readable in the installed folder rather than sealed inside an archive.
+asar: false
+
+win:
+  target:
+    # A single double-clickable .exe that needs no installation, plus a normal
+    # installer for anyone who'd rather have a Start Menu entry.
+    - target: portable
+      arch: [x64]
+    - target: nsis
+      arch: [x64]
+
+portable:
+  artifactName: BaseballStar-${version}-portable.exe
+
+nsis:
+  artifactName: BaseballStar-${version}-setup.exe
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Baseball Star

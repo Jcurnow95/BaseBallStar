@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Desktop build output — a couple of 100 MB installers per run.
+release/
+
+# Native build output. The android/ and ios/ project folders themselves are
+# meant to be committed once generated — you customize icons, splash screens
+# and permissions in there.
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/.idea/
+ios/App/Pods/
+ios/App/build/
+ios/App/App/App.entitlements
+
+# The web build, copied in by `cap sync`. This is a verbatim duplicate of
+# dist/ — including 19 MB of audio — landing in the tree twice, so it stays
+# out of git and gets regenerated on every sync.
+android/app/src/main/assets/public/
+ios/App/App/public/
+
+# Also written by the sync, from capacitor.config.ts.
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+ios/App/App/capacitor.config.json

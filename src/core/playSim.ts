@@ -113,12 +113,33 @@ const HOLD_LIMIT = 4.5;
 /** Fielding the ball, transferring to the hand and setting to throw. */
 const TRANSFER_TIME = 0.75;
 /**
- * How deep a ball has to land before the batter tries to stretch it into a
- * double. A runner already on first only has 90 feet to the next bag, but the
- * batter has 180, so the same "it reached the outfield" read that works for
- * them runs the hitter into an out on an ordinary single.
+ * How much a runner has to beat the return throw by before trying for a base.
+ * The defense only throws when it wins the race, so a runner who leaves with
+ * less cushion than this is running into an out.
+ */
+const RUNNER_CAUTION = 0.35;
+/**
+ * How deep the ball has to settle before the batter will think about second.
+ *
+ * A thrown ball moves six times faster than a runner, and the batter starts
+ * 180 feet from second rather than 90, so scoring that trip strictly means
+ * they lose every race an outfielder is involved in and every hit is a
+ * single.
  */
 const STRETCH_DISTANCE = 250;
+/**
+ * The most of a basepath a runner is credited with having already covered
+ * when the read is made.
+ *
+ * Runners sit frozen on their bag until `planRunnerIntents` gives them an
+ * intent, which doesn't happen until the ball is down — but the defense's
+ * clock starts at that same instant, so the race was scored as if the runner
+ * had spent the ball's entire flight standing still. A real runner is well
+ * off the bag by then. Without this the man on second never took third on a
+ * clean single, because he was made to run all 90 feet after the outfielder
+ * had already caught up to the ball.
+ */
+const MAX_LEAD = 0.4;
 /** Fielders pull up this far short of the wall, so they stand in front of it. */
 const WALL_MARGIN = 3;
 /** Gap kept between runners, as a fraction of a basepath — about seven feet. */
@@ -661,16 +682,69 @@ export class PlaySim {
     // Nothing is decided until the ball is down and through.
     if (!this.ball.bounced) return;
 
+    this.ensurePlanned();
+
+    // Once a fielder has it, the running decisions are made.
+    if (!this.battedBallLive) this.freezeIntents();
+  }
+
+  /** Work out where the ball settles and make the runners' reads, once. */
+  private ensurePlanned(): void {
+    if (this.restPoint) return;
     // Where the ball ends up, not just where it first touched down. A grounder
     // that skips through the infield and rolls to the track is two bases for
     // everyone aboard; judging it on the landing point alone treated it as an
     // infield single and left runners stranded 90 feet short all game.
-    if (!this.restPoint) this.restPoint = predictRest(this.ball);
-    const extra = isOutfield(this.landingPoint) || isOutfield(this.restPoint) ? 2 : 1;
-    // The batter is the only one starting 180 feet from second, so they need
-    // the ball to actually get into a gap — or roll to the corner — first.
-    const deepest = Math.max(magnitude(this.landingPoint), magnitude(this.restPoint));
-    const batterExtra = extra > 1 && deepest >= STRETCH_DISTANCE ? 2 : 1;
+    this.restPoint = predictRest(this.ball);
+    this.planRunnerIntents();
+  }
+
+  /**
+   * Forced off their bag: every base behind them, back to the batter, is
+   * occupied, so standing still surrenders the force. Only these runners owe
+   * the defense a base — everyone else gets to choose.
+   */
+  private isForced(runner: RunnerState): boolean {
+    if (runner.startBase === 0) return true;
+    for (let base = 1; base < runner.startBase; base++) {
+      if (!this.setup.runnersOn[base - 1]) return false;
+    }
+    return true;
+  }
+
+  /**
+   * One read per play, made when the ball first touches down.
+   *
+   * Runners used to be handed a flat allotment — two bases if the ball
+   * reached the outfield grass, one otherwise, forced or not. Since the
+   * defense only throws when it wins the race, every one of those blind reads
+   * was an out: the man on third broke for home on routine grounders, and the
+   * man on second ran into a tag at third on balls hit right in front of him.
+   *
+   * Now each runner races the same clock the defense uses in
+   * `bestThrowTarget`: nearest fielder to the ball, pickup, transfer, throw.
+   * Forced runners take the base they owe; nobody takes another one without
+   * beating the return throw by a margin.
+   */
+  private planRunnerIntents(): void {
+    const rest = this.restPoint!;
+
+    let nearest: FielderState | null = null;
+    let nearestDist = Infinity;
+    for (const fielder of this.fielders) {
+      const d = distance(fielder, rest);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = fielder;
+      }
+    }
+    const pickupTime = nearest ? nearestDist / nearest.speed : 1;
+    const armSpeed = nearest ? this.armSpeedFor(nearest) : 130;
+
+    // Judged on where it finishes as well as where it landed, so a grounder
+    // that skips through and rolls to the corner counts as the gap ball it is.
+    const stretched =
+      Math.max(magnitude(this.landingPoint), magnitude(rest)) >= STRETCH_DISTANCE;
 
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
@@ -679,14 +753,38 @@ export class PlaySim {
       // a ball into the gap was still only ever a single unless they hit GO —
       // while every CPU hitter took the extra base for free.
       if (runner.isUser && this.userIntentSet) continue;
-      // Only set intent here. `done` belongs to moveRunners — clearing it here
-      // too would keep the play permanently "in progress".
-      const reach = runner.startBase === 0 ? batterExtra : extra;
-      runner.intent = Math.min(4, runner.startBase + reach);
-    }
 
-    // Once a fielder has it, the running decisions are made.
-    if (!this.battedBallLive) this.freezeIntents();
+      // Ground they'd have covered while the ball was in the air. The batter
+      // ran out of the box on contact; everyone else was off on the pitch.
+      const lead = Math.min((this.elapsed * runner.speed) / BASE_DISTANCE, MAX_LEAD);
+      const from = runner.at + runner.progress + lead;
+
+      // The base they owe, then every further one they can win the race to.
+      // Only set intent here. `done` belongs to moveRunners — clearing it
+      // here too would keep the play permanently "in progress".
+      let target = this.isForced(runner) ? runner.startBase + 1 : runner.startBase;
+      // On a gap ball the batter runs the race for second without the cushion
+      // every other read gets: it's a coin flip they're willing to take, and
+      // with a lead runner aboard second isn't where the defense wants the
+      // ball anyway. Everyone else is already 90 feet from the next bag and
+      // wins outright on a ball hit this deep, so the race below covers them.
+      if (stretched && runner.startBase === 0) {
+        const runTime = ((2 - from) * BASE_DISTANCE) / runner.speed;
+        const returnTime = pickupTime + TRANSFER_TIME + this.throwFlightTime(rest, 2, armSpeed);
+        if (runTime <= returnTime) target = 2;
+      }
+      while (target < 4) {
+        const next = target + 1;
+        const runTime = ((next - from) * BASE_DISTANCE) / runner.speed;
+        const returnTime =
+          pickupTime +
+          TRANSFER_TIME +
+          this.throwFlightTime(rest, (next % 4) as BaseId, armSpeed);
+        if (runTime + RUNNER_CAUTION > returnTime) break;
+        target = next;
+      }
+      runner.intent = Math.min(4, target);
+    }
   }
 
   /**
@@ -861,7 +959,10 @@ export class PlaySim {
       this.errorOnPlay = true;
       if (fielder.isUser) this.userError = true;
       this.lastEvent = fielder.isUser ? 'You dropped it!' : `Muffed by the ${fielder.id}!`;
-      // A misplay everyone can see: runners take off.
+      // A misplay everyone can see: runners take off. Plan first so the
+      // extra base is stacked on their normal read instead of being
+      // overwritten by it on the next frame.
+      this.ensurePlanned();
       for (const runner of this.runners) {
         if (runner.out || runner.at >= 4) continue;
         runner.intent = Math.min(4, runner.intent + 1);

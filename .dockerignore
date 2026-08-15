@@ -1,0 +1,19 @@
+# The native app projects. Committed to the repo so icons and permissions stay
+# under version control, but the web build has no use for them and they are the
+# bulk of the tree.
+android/
+ios/
+
+# Desktop build output and the Electron entry point — the container serves the
+# browser build only.
+release/
+electron/
+
+node_modules/
+dist/
+
+.git/
+.gitignore
+.claude/
+*.log
+.DS_Store

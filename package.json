@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "start": "serve dist --no-clipboard",
     "preview": "vite preview",
     "sync": "npm run build && cap sync",
     "android": "npm run sync && cap open android",
@@ -16,6 +17,9 @@
     "run:ios": "npm run sync && cap run ios",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
@@ -32,6 +36,7 @@
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
     "@capacitor/splash-screen": "^8.0.2",
-    "@capacitor/status-bar": "^8.0.3"
+    "@capacitor/status-bar": "^8.0.3",
+    "serve": "^14.2.6"
   }
 }

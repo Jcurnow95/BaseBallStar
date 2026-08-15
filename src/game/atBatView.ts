@@ -349,8 +349,12 @@ export class AtBatView {
       zoneHW: W * 0.185,
       zoneHH: H * 0.1,
       mound: { x: W / 2, y: H * 0.315 },
-      minR: Math.max(2.2, W * 0.011),
-      maxR: W * 0.105,
+      minR: Math.max(3, W * 0.015),
+      // Sized for a fingertip, not for realism. Tap offsets are measured in ball
+      // radii (see `core/swing.ts`), so a bigger ball is a bigger target in
+      // pixels at exactly the same difficulty. The floor keeps it thumb-sized on
+      // a short or narrow stage, where a purely proportional ball goes tiny.
+      maxR: Math.max(W * 0.14, 32),
     };
   }
 
@@ -373,7 +377,10 @@ export class AtBatView {
 
     // Perspective: slow apparent movement early, rushing at the end.
     const travel = Math.pow(capped, 2.15);
-    const grow = Math.pow(capped, 2.5);
+    // Flatter than `travel`, so the ball is already a fat target through the
+    // swing window rather than only at the instant it reaches the plate. The
+    // flight itself is unchanged — this is size, not speed.
+    const grow = Math.pow(capped, 2);
     // Break arrives late, which is what makes a slider a slider.
     const breakIn = Math.pow(capped, this.pitch.def.breakSharpness);
 

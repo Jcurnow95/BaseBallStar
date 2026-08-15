@@ -112,7 +112,13 @@ export class CatchOverlay {
 
     const x = lerp(originX, target.x, eased);
     const y = lerp(originY, target.y, eased);
-    const r = lerp(Math.max(3, basis * 0.014), basis * 0.115, Math.pow(Math.min(p, 1), 1.9));
+    // Same reasoning as the swing: the catch window is measured in ball radii,
+    // so a bigger ball is a bigger fingertip target at the same difficulty.
+    const r = lerp(
+      Math.max(4, basis * 0.018),
+      Math.max(basis * 0.13, 26),
+      Math.pow(Math.min(p, 1), 1.6),
+    );
 
     if (p > 1) {
       const over = p - 1;

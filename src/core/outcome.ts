@@ -110,7 +110,14 @@ export function resolveBattedBall(
   // Hard contact in the right launch window leaves the yard. Checked before
   // the trajectory buckets so a 25-degree rocket isn't classed as a fly out.
   // Tougher leagues play in front of better outfields and deeper parks.
-  const hr = homeRunChance(ev, la) * (1 - defense * 0.25);
+  // A true barrel carries better than its raw numbers: the extra effective
+  // exit velo lets lower-Power hitters clear the 94 mph floor on a perfect
+  // tap, and the multiplier rewards the hardest input to execute.
+  const barrelCarry = quality === 'barrel' ? 4 : 0;
+  const barrelBonus = quality === 'barrel' ? 1.4 : 1;
+  const hr =
+    clamp(homeRunChance(ev + barrelCarry, la) * barrelBonus, 0, 0.92) *
+    (1 - defense * 0.25);
   if (hr > 0 && rng.chance(hr)) {
     return hit('homeRun', `Deep to ${field}... that ball is GONE!`, 4, bb);
   }

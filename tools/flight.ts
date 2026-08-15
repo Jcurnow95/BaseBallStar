@@ -69,4 +69,29 @@ for (const spray of [-1, -0.6, -0.2, 0, 0.2, 0.6, 1]) {
       `  fence ${fenceDistanceAt(landing.point).toFixed(0)}ft`,
   );
 }
+
+// Curve from sidespin: how far a ball bends off the straight line, and whether
+// a ball sprayed toward the corner hooks foul.
+console.log('\n=== Sidespin curve (bend vs a straight ball, in feet) ===\n');
+console.log('  EV   LA  spray  side   straight x   curved x   bend   fair?');
+const CURVE_CASES: [number, number, number][] = [
+  [95, 25, 0],
+  [95, 25, -0.5],
+  [95, 25, -0.65],
+  [85, 35, -0.6],
+  [95, 12, -0.6],
+  [90, 30, 0.5],
+];
+for (const [ev, la, spray] of CURVE_CASES) {
+  const straight = predictLanding(launchBall(ev, la, spray, 1, 0)).point;
+  for (const side of [-1, -0.6, -0.3, 0.3, 0.6, 1]) {
+    const landing = predictLanding(launchBall(ev, la, spray, 1, side));
+    const fair = Math.abs(landing.point.x) <= landing.point.y;
+    console.log(
+      `  ${ev}  ${String(la).padStart(3)}  ${String(spray).padStart(5)}  ${String(side).padStart(4)}` +
+        `   ${straight.x.toFixed(0).padStart(9)}   ${landing.point.x.toFixed(0).padStart(8)}` +
+        `   ${(landing.point.x - straight.x).toFixed(0).padStart(4)}   ${fair ? 'fair' : 'FOUL'}`,
+    );
+  }
+}
 console.log('');

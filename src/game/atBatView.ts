@@ -277,7 +277,9 @@ export class AtBatView {
     // Two ways to foul one off: hit it outside the lines, or catch it badly
     // enough that it goes back to the screen. The second keeps counts
     // developing at the rate the plate-appearance balance was tuned for.
-    const landing = predictLanding(launchBall(bb.exitVelocity, bb.launchAngle, bb.spray));
+    const landing = predictLanding(
+      launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, 1, bb.sideSpin ?? 0),
+    );
     const sprayedFoul = !isFair(landing.point);
     const chippedFoul = this.opts.rng.chance(foulChanceFor(bb.quality));
 
@@ -760,8 +762,9 @@ export class AtBatView {
 
   /**
    * The perfect hit zone, unlocked at 120 combined Contact and Vision. Marks
-   * the ideal contact point on the ball as it comes in — purely an aid, it
-   * changes nothing about how contact resolves.
+   * the sweet spot on the ball as it comes in — the barrel zone that gives the
+   * home-run chance. The whole ball is hittable; this is just where the damage
+   * is. Purely an aid, it changes nothing about how contact resolves.
    */
   private drawPerfectZone(ctx: CanvasRenderingContext2D, ball: BallState): void {
     if (!this.perfectZoneUnlocked) return;

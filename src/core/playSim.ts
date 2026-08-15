@@ -213,7 +213,7 @@ export class PlaySim {
 
     // Barrels carry more backspin, mishits much less.
     const spin = bb.quality === 'barrel' ? 1.1 : bb.quality === 'solid' ? 1 : 0.85;
-    this.ball = launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, spin);
+    this.ball = launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, spin, bb.sideSpin ?? 0);
 
     const prediction = predictLanding(this.ball);
     this.landingPoint = prediction.point;

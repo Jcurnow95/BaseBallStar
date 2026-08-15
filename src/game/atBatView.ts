@@ -380,7 +380,12 @@ export class AtBatView {
     // Flatter than `travel`, so the ball is already a fat target through the
     // swing window rather than only at the instant it reaches the plate. The
     // flight itself is unchanged — this is size, not speed.
-    const grow = Math.pow(capped, 2);
+    //
+    // Flattened again for the read rather than the swing: at 2 the ball was
+    // still under 30px across for the first 40% of the flight, which is the
+    // window the pitch has to be identified in (the readout appears at 0.22).
+    // The size at the plate is set by `maxR` and is untouched by this.
+    const grow = Math.pow(capped, 1.6);
     // Break arrives late, which is what makes a slider a slider.
     const breakIn = Math.pow(capped, this.pitch.def.breakSharpness);
 

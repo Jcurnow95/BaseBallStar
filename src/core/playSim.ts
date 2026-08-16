@@ -404,8 +404,12 @@ export class PlaySim {
    * next one up.
    */
   private goTargetFor(runner: RunnerState): number {
-    const committed = this.committedBase(runner);
-    return Math.min(4, committed + 1, this.roomAheadOf(runner));
+    // One base past wherever they're already committed. Deliberately NOT capped
+    // by `roomAheadOf`: this drives the player's GO button, and taking a base
+    // the man ahead is sitting on is allowed — pressing GO shoves him along too
+    // (`makeRoomAhead`). The auto-read and `moveRunners` still respect the cap,
+    // so nobody piles onto an occupied bag unless the player asks for it.
+    return Math.min(4, this.committedBase(runner) + 1);
   }
 
   /** The base a runner is going to end up on if nothing changes. */
@@ -494,9 +498,30 @@ export class PlaySim {
     if (!runner || runner.out || runner.at >= 4) return;
     const target = this.goTargetFor(runner);
     if (target <= this.committedBase(runner)) return;
+    // Clear the path first: any runner ahead sitting on the bag we're taking is
+    // forced along, and his man too, on up the line. Without this the frame
+    // loop's collision cap (`roomAheadOf`) would just snap our man back to the
+    // base behind the traffic, and pressing GO would do nothing.
+    this.makeRoomAhead(runner, target);
     runner.intent = target;
     runner.done = false;
     this.userIntentSet = true;
+  }
+
+  /**
+   * Push everyone ahead of `runner` far enough forward that `target` is open.
+   * A runner can't share a bag, so taking one the man ahead holds forces him to
+   * the next — and if someone's on that one too, it cascades up to the plate.
+   * Home takes any number of runners, so nothing needs clearing past it.
+   */
+  private makeRoomAhead(runner: RunnerState, target: number): void {
+    const ahead = this.runnerAhead(runner);
+    if (!ahead) return;
+    const need = target + 1;
+    if (need > 4 || this.committedBase(ahead) >= need) return;
+    this.makeRoomAhead(ahead, need);
+    ahead.intent = need;
+    ahead.done = false;
   }
 
   /** Offense: pull up at the base you're heading for. */

@@ -861,16 +861,28 @@ table.standings tr.me td {
 .play-btn {
   pointer-events: auto;
   flex: 1 1 0;
-  max-width: 150px;
+  /* Must be allowed to shrink below the label's natural width, or a long one
+     like "HOLD AT SECOND" keeps the button at its content size, flex-grow
+     never kicks in, and the pair overflows the stage. */
+  min-width: 0;
+  max-width: 160px;
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(10, 18, 32, 0.72);
   color: #fff;
   font: inherit;
   font-weight: 800;
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  padding: 13px 6px;
+  /* Scales with the stage so the label stays on one line on a narrow phone
+     without shrinking the tap target on a wide one. */
+  font-size: clamp(11px, 3.4vw, 14px);
+  letter-spacing: 0.04em;
+  /* One line, always. Without this the label wraps into a three-line tower
+     that spills out of the field. Ellipsis is the safety net if it still
+     can't fit; the status line above spells the base out in full anyway. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 13px 8px;
   border-radius: 11px;
   cursor: pointer;
   backdrop-filter: blur(2px);

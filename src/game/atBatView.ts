@@ -71,7 +71,18 @@ export class AtBatView {
   private readonly opts: AtBatOptions;
 
   private phase: Phase = 'windup';
-  private phaseStart = 0;
+  /**
+   * Milliseconds into the current phase, advanced by the frame loop.
+   *
+   * This used to be read off the wall clock. The frame loop stops whenever the
+   * app is minimised or backgrounded, but the wall clock doesn't, so coming
+   * back to the game found the pitch long past the plate and rang up a called
+   * strike the player never saw — and left the pitcher frozen mid-delivery
+   * until something woke the loop up. Advancing the clock only by frames means
+   * time simply doesn't pass while you're away.
+   */
+  private phaseElapsed = 0;
+  private lastFrame = 0;
   private raf = 0;
   private destroyed = false;
 
@@ -84,7 +95,6 @@ export class AtBatView {
   private tapPoint: { x: number; y: number } | null = null;
   private frozenBall: BallState | null = null;
   private afterFreeze: (() => void) | null = null;
-  private hiddenAt = 0;
   private readonly perfectZoneUnlocked: boolean;
 
   constructor(root: HTMLElement, opts: AtBatOptions) {
@@ -109,6 +119,7 @@ export class AtBatView {
 
     this.opts.onCount(this.count);
     this.nextPitch();
+    this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.loop);
   }
 
@@ -139,7 +150,7 @@ export class AtBatView {
 
   private setPhase(phase: Phase): void {
     this.phase = phase;
-    this.phaseStart = performance.now();
+    this.phaseElapsed = 0;
   }
 
   private freezeThen(text: string, tone: string, action: () => void): void {
@@ -199,24 +210,16 @@ export class AtBatView {
   /* ----------------------------------------------------------------- input */
 
   /**
-   * Flight timing runs off the wall clock, but rAF stops when the app is
-   * backgrounded. Without this, taking a phone call mid-pitch would come back
-   * as a called strike the player never saw. Re-deliver instead.
+   * The phase clock only advances with frames, so being backgrounded costs no
+   * game time. But a pitch you were half-way through reading is gone — coming
+   * back to a ball already on top of you isn't a fair swing. Re-deliver it.
    */
   private onVisibilityChange = (): void => {
-    if (document.hidden) {
-      this.hiddenAt = performance.now();
-      return;
-    }
-    if (!this.hiddenAt) return;
-    const away = performance.now() - this.hiddenAt;
-    this.hiddenAt = 0;
-
+    if (document.hidden) return;
+    this.lastFrame = performance.now();
     if (this.phase === 'flight' && !this.swung) {
       this.trail = [];
       this.setPhase('windup');
-    } else {
-      this.phaseStart += away;
     }
   };
 
@@ -230,11 +233,11 @@ export class AtBatView {
     const { x, y } = this.toStage(tap.x, tap.y);
 
     if (this.phase === 'windup') {
-      // Jumped before the pitch was even thrown.
-      this.swung = true;
-      vibrate(15);
-      playSound('whiff');
-      this.registerStrike('Way early — swing and a miss.');
+      // Before the pitch is even thrown. This used to be scored as a swing
+      // and a miss, which mostly punished people prodding the screen to see
+      // if the game was still alive — a real early swing (the first frame of
+      // the flight) already whiffs on its own. Just say so.
+      this.readout.textContent = 'WAIT FOR THE PITCH…';
       return;
     }
 
@@ -313,8 +316,7 @@ export class AtBatView {
   /* ------------------------------------------------------------ simulation */
 
   private flightProgress(): number {
-    const elapsed = performance.now() - this.phaseStart;
-    return elapsed / this.pitch.def.duration;
+    return this.phaseElapsed / this.pitch.def.duration;
   }
 
   /**
@@ -415,9 +417,13 @@ export class AtBatView {
   private loop = (): void => {
     if (this.destroyed) return;
     const now = performance.now();
+    // Capped, so a hitch or a spell in the background is a pause, not a jump.
+    this.phaseElapsed += Math.min(now - this.lastFrame, 50);
+    this.lastFrame = now;
 
-    if (this.phase === 'windup' && now - this.phaseStart >= WINDUP_MS) {
+    if (this.phase === 'windup' && this.phaseElapsed >= WINDUP_MS) {
       this.setPhase('flight');
+      this.readout.textContent = '';
     } else if (this.phase === 'flight') {
       const t = this.flightProgress();
       // The pitch reveals itself out of the hand — how reliably depends on Vision.
@@ -431,7 +437,7 @@ export class AtBatView {
         if (this.pitch.isStrike) this.registerStrike('Called strike.', 'bad');
         else this.registerBall();
       }
-    } else if (this.phase === 'freeze' && now - this.phaseStart >= FREEZE_MS) {
+    } else if (this.phase === 'freeze' && this.phaseElapsed >= FREEZE_MS) {
       const action = this.afterFreeze;
       this.afterFreeze = null;
       if (action) action();
@@ -573,11 +579,10 @@ export class AtBatView {
     ctx.ellipse(L.mound.x, L.mound.y + L.H * 0.02, L.W * 0.11, L.H * 0.022, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const windup =
-      this.phase === 'windup' ? clamp((performance.now() - this.phaseStart) / WINDUP_MS, 0, 1) : 1;
+    const windup = this.phase === 'windup' ? clamp(this.phaseElapsed / WINDUP_MS, 0, 1) : 1;
     const afterRelease = this.phase !== 'windup';
     // How far through the follow-through we are, once the ball is gone.
-    const follow = afterRelease ? clamp((performance.now() - this.phaseStart) / 420, 0, 1) : 0;
+    const follow = afterRelease ? clamp(this.phaseElapsed / 420, 0, 1) : 0;
 
     const kit = this.opts.pitcherKit;
     const bodyH = L.H * 0.062;

@@ -240,11 +240,18 @@ export class PlayView {
         } else if (target > runner.at) {
           text = `RUNNING TO ${BASE_LABELS[target]}`;
           tone = 'going';
+        } else if (runner.progress > 0) {
+          // Nowhere to go — the bag ahead is taken — so back to the last one.
+          text = `BACK TO ${BASE_LABELS[runner.at]}`;
+          tone = 'holding';
         } else {
           text = `HOLDING AT ${BASE_LABELS[runner.at]}`;
           tone = 'holding';
         }
       }
+    } else if (sim.setup.userSide === 'defense' && sim.userHasBall) {
+      text = 'TAP A BASE TO THROW';
+      tone = 'going';
     }
 
     if (text === this.statusText) return;

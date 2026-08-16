@@ -135,6 +135,10 @@ Beyond wrapping the page, the app configures the things a browser gives you for 
   shouldn't throw one away.
 - **Crowd ambience suspends** when the app is backgrounded and resumes when it returns,
   rather than streaming over whatever the player switched to.
+- **Game time stops with the frames.** The pitch and the stretch catch run off a clock that
+  only advances while frames are being drawn (capped at 50 ms a frame), so minimising the
+  app mid-pitch is a pause, not a called strike you never saw. Come back mid-flight and the
+  pitch is delivered again. A tap during the windup is a no-op, not a swing.
 - **Splash screen** hidden from JS on first paint rather than on a timer, so it never
   flashes away early or lingers over a game that's already up.
 
@@ -153,6 +157,19 @@ The game is portrait-first, and it holds its shape rather than stretching to fil
   width-to-height ratio at every size, so a barrel is a barrel on any device.
 - Rather than showing black letterbox bars, the sky and grass **bleed past the play area**
   to cover the whole canvas. A wider screen shows more ballpark, not more nothing.
+
+## Learning it
+
+The first **Play Ball** of a new install goes by way of a five-card **How to Play** —
+hitting, running, fielding, the stretch catch, throwing — and it stays reachable from the
+clubhouse and the title screen. On top of that the first at-bat, the first ball hit your
+way and the first time you're on the bases each get a one-line coach tip over the play,
+gone on the first touch. Both are remembered per install (`baseball-star:howto-seen`,
+`baseball-star:tips-seen`), not per career.
+
+The **FAST** toggle only speeds up the simulated stretches between your moments; it
+disappears while you're actually batting or fielding so it can't read as the pitch being
+sped up.
 
 ## At the plate
 
@@ -188,10 +205,13 @@ in Player &amp; Development.
 Hit a fair ball and the view cuts to a **top-down field** with a camera that follows the
 play, zooming out when the ball and your player spread apart.
 
-**Batting — run the bases.** Your runner takes off for first automatically. Two buttons,
-each labelled with the base it actually commits you to: **GO FOR SECOND** to push on,
-**HOLD AT FIRST** to pull up. They only appear when there's a real choice — no HOLD when
-you're already stopping there anyway.
+**Batting — run the bases.** Your runner takes off for first automatically, and reads the
+ball like any runner would: an extra base that's clearly there gets taken (the banner says
+**Waved on!**), a coin-flip doesn't — that one is yours to call. Two buttons, each labelled
+with the base it actually commits you to: **GO FOR SECOND** to push on, **HOLD AT FIRST**
+to pull up. They only appear when there's a real choice — no HOLD when you're already
+stopping there anyway, and no GO into a bag a team-mate is standing on. A runner who finds
+the bag ahead taken turns round and goes back (**BACK TO FIRST**).
 
 The feedback is on screen while you decide:
 
@@ -372,8 +392,8 @@ src/
     league.ts        Levels, teams, home parks, schedule, calendar, standings
     progression.ts   XP, attribute points, training, promotion checks
   game/            Canvas views: atBatView (catcher POV), playView (top-down field),
-                   catchOverlay (the stretch-catch minigame)
-  screens/         Title, create player, hub, training, gear store, game day, results
+                   catchOverlay (the stretch-catch minigame), coachTips (one-time hints)
+  screens/         Title, create player, hub, how-to-play, training, gear store, game day, results
   ui/              Canvas helpers, DOM helpers, modal, sprites (animated players)
 tools/             Headless harnesses — see below
 ```

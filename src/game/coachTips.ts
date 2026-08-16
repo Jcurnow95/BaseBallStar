@@ -8,7 +8,7 @@ import { esc } from '../ui/dom';
  * once per install, not once per career — a second career doesn't need it.
  */
 
-export type TipId = 'bat' | 'field' | 'run';
+export type TipId = 'bat' | 'field' | 'run' | 'wind' | 'rain';
 
 const KEY = 'baseball-star:tips-seen';
 
@@ -19,6 +19,10 @@ function seenTips(): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+export function tipSeen(id: TipId): boolean {
+  return seenTips().has(id);
 }
 
 export function markTipSeen(id: TipId): void {

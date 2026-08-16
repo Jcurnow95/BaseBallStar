@@ -13,6 +13,9 @@ import type { LeagueLevel } from '../core/league';
 import { createSurface, pointerPos, vibrate } from '../ui/canvas';
 import type { Surface } from '../ui/canvas';
 import { playSound } from '../ui/audio';
+import type { AirConditions, Weather } from '../core/weather';
+import { CALM, airFor } from '../core/weather';
+import { drawGloom, drawRain, drawWindFlag } from './weatherFx';
 
 /**
  * The at-bat minigame.
@@ -29,6 +32,8 @@ export interface AtBatOptions {
   rng: Rng;
   /** Uniform the opposing pitcher is wearing. */
   pitcherKit: Uniform;
+  /** The day's weather. Drawn, and used to judge whether contact stays fair. */
+  weather?: Weather;
   onCount(count: Count): void;
   /** A fair ball was put in play — the play itself resolves on the field. */
   onBallInPlay(battedBall: BattedBall): void;
@@ -98,6 +103,10 @@ export class AtBatView {
   private frozenBall: BallState | null = null;
   private afterFreeze: (() => void) | null = null;
   private readonly perfectZoneUnlocked: boolean;
+  private readonly weather: Weather;
+  private readonly air: AirConditions;
+  /** Seconds the weather has been animating; only advances while unpaused. */
+  private weatherClock = 0;
 
   constructor(root: HTMLElement, opts: AtBatOptions) {
     this.root = root;
@@ -105,6 +114,8 @@ export class AtBatView {
     this.root.classList.add('atbat');
     this.root.innerHTML = '';
     this.perfectZoneUnlocked = hasPerfectZone(opts.player.attributes);
+    this.weather = opts.weather ?? CALM;
+    this.air = airFor(this.weather);
 
     this.surface = createSurface(this.root);
 
@@ -284,7 +295,7 @@ export class AtBatView {
     // enough that it goes back to the screen. The second keeps counts
     // developing at the rate the plate-appearance balance was tuned for.
     const landing = predictLanding(
-      launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, 1, bb.sideSpin ?? 0),
+      launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, 1, bb.sideSpin ?? 0, this.air),
     );
     const sprayedFoul = !isFair(landing.point);
     const chippedFoul = this.opts.rng.chance(foulChanceFor(bb.quality));
@@ -421,7 +432,11 @@ export class AtBatView {
     if (this.destroyed) return;
     const now = performance.now();
     // Capped, so a hitch or a spell in the background is a pause, not a jump.
-    if (!this.paused) this.phaseElapsed += Math.min(now - this.lastFrame, 50);
+    if (!this.paused) {
+      const step = Math.min(now - this.lastFrame, 50);
+      this.phaseElapsed += step;
+      this.weatherClock += step / 1000;
+    }
     this.lastFrame = now;
 
     if (this.phase === 'windup' && this.phaseElapsed >= WINDUP_MS) {
@@ -479,6 +494,12 @@ export class AtBatView {
     }
 
     ctx.restore();
+
+    // Weather sits over the whole canvas, not just the stage.
+    drawGloom(ctx, L.canvasW, L.canvasH, this.weather);
+    drawRain(ctx, L.canvasW, L.canvasH, this.weather, this.weatherClock);
+    // Under the pause button, clear of the readout across the top.
+    drawWindFlag(ctx, 10, 52, this.weather);
   }
 
   private drawField(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
@@ -490,9 +511,18 @@ export class AtBatView {
     const bottom = L.canvasH - L.oy;
     const fullW = L.canvasW;
 
+    // Clear nights are deep blue; cloud flattens the sky to slate.
     const sky = ctx.createLinearGradient(0, top, 0, L.horizon);
-    sky.addColorStop(0, '#0a1024');
-    sky.addColorStop(1, '#1d2c4d');
+    if (this.weather.sky === 'clear') {
+      sky.addColorStop(0, '#0a1024');
+      sky.addColorStop(1, '#1d2c4d');
+    } else if (this.weather.sky === 'overcast') {
+      sky.addColorStop(0, '#12161f');
+      sky.addColorStop(1, '#2b3341');
+    } else {
+      sky.addColorStop(0, '#0d1017');
+      sky.addColorStop(1, '#232a36');
+    }
     ctx.fillStyle = sky;
     ctx.fillRect(left, top, fullW, L.horizon - top);
 

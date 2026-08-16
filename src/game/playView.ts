@@ -9,6 +9,7 @@ import type { PlayerColors, SpriteAnim } from '../ui/sprites';
 import { createAnim, drawPlayer, updateAnim } from '../ui/sprites';
 import { CROWD_COLOURS } from './atBatView';
 import { CatchOverlay } from './catchOverlay';
+import { drawGloom, drawRain, drawWindFlag } from './weatherFx';
 
 /**
  * Top-down view of a live play. Camera tracks the ball and whoever the player
@@ -90,6 +91,8 @@ export class PlayView {
   /** Last rendered control set, so the DOM is only rebuilt when it changes. */
   private controlSignature = '';
   private statusText = '';
+  /** Seconds the rain has been falling; frozen while paused. */
+  private weatherClock = 0;
   /** Animation state per fielder/runner, so run cycles persist across frames. */
   private anims = new Map<string, SpriteAnim>();
   /** Outfield seats in world space, built once — the bowl never moves. */
@@ -480,6 +483,12 @@ export class PlayView {
     this.drawFielders(ctx, dt);
     this.drawBall(ctx);
     if (this.joystick.active) this.drawJoystick(ctx);
+
+    this.weatherClock += dt;
+    drawGloom(ctx, W, H, this.sim.weather);
+    drawRain(ctx, W, H, this.sim.weather, this.weatherClock);
+    // Under the pause button, clear of the coach tip once it's gone.
+    drawWindFlag(ctx, 10, 52, this.sim.weather);
   }
 
   private drawGrass(ctx: CanvasRenderingContext2D, W: number, H: number): void {

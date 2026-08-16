@@ -15,6 +15,8 @@ import {
 } from './fieldGeometry';
 import type { Ballpark } from './ballpark';
 import { DEFAULT_PARK, fenceAt, wallHeightAt } from './ballpark';
+import type { AirConditions, Weather } from './weather';
+import { CALM, airFor } from './weather';
 import { Rng, clamp } from './rng';
 
 /**
@@ -99,6 +101,8 @@ export interface PlaySetup {
   opponentRating: number;
   /** The park being played in. Defaults to the symmetrical one. */
   park?: Ballpark;
+  /** The day's weather. Defaults to a calm, dry one. */
+  weather?: Weather;
   rng: Rng;
 }
 
@@ -159,6 +163,8 @@ export class PlaySim {
   readonly landingPoint: Vec2;
   readonly hangTime: number;
   readonly park: Ballpark;
+  readonly weather: Weather;
+  readonly air: AirConditions;
 
   phase: PlayPhase = 'live';
   elapsed = 0;
@@ -209,11 +215,20 @@ export class PlaySim {
   constructor(setup: PlaySetup) {
     this.setup = setup;
     this.park = setup.park ?? DEFAULT_PARK;
+    this.weather = setup.weather ?? CALM;
+    this.air = airFor(this.weather);
     const bb = setup.battedBall;
 
     // Barrels carry more backspin, mishits much less.
     const spin = bb.quality === 'barrel' ? 1.1 : bb.quality === 'solid' ? 1 : 0.85;
-    this.ball = launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, spin, bb.sideSpin ?? 0);
+    this.ball = launchBall(
+      bb.exitVelocity,
+      bb.launchAngle,
+      bb.spray,
+      spin,
+      bb.sideSpin ?? 0,
+      this.air,
+    );
 
     const prediction = predictLanding(this.ball);
     this.landingPoint = prediction.point;
@@ -926,10 +941,15 @@ export class PlaySim {
    * baseball.
    */
   private cleanRatioFor(fielder: FielderState): number {
-    if (!fielder.isUser) return CLEAN_CATCH_RATIO;
+    // A wet ball is a slippery ball: in the rain a few more chances become
+    // stretch catches instead of routine ones.
+    const slick = this.air.wet * 0.06;
+    if (!fielder.isUser) return CLEAN_CATCH_RATIO - slick;
     // Capped: even a Gold Glove should still have to earn one occasionally,
     // otherwise the best fielders never see the minigame at all.
-    return Math.min(0.97, 0.9 + (clamp(this.setup.attributes.fielding, 1, 99) / 100) * 0.09);
+    return (
+      Math.min(0.97, 0.9 + (clamp(this.setup.attributes.fielding, 1, 99) / 100) * 0.09) - slick
+    );
   }
 
   private attemptCatch(fielder: FielderState, ratio: number, wasFly: boolean): void {
@@ -955,9 +975,12 @@ export class PlaySim {
     // Kept low deliberately: professionals convert nearly everything they get
     // a glove on, and a few points here move league batting average a lot.
     const skill = clamp(this.setup.opponentRating, 10, 99) / 100;
-    const errorChance = clean
-      ? 0.008 + (1 - skill) * 0.015
-      : 0.028 + (1 - skill) * 0.06 + (ratio - cleanLimit) * 0.07;
+    const errorChance =
+      (clean
+        ? 0.008 + (1 - skill) * 0.015
+        : 0.028 + (1 - skill) * 0.06 + (ratio - cleanLimit) * 0.07) *
+      // Wet ball, wet glove: a downpour roughly doubles the muff rate.
+      (1 + this.air.wet);
 
     if (this.setup.rng.chance(errorChance)) this.dropBall(fielder, clean, wasFly);
     else this.completeCatch(fielder, wasFly);

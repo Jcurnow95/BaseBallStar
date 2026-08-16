@@ -291,6 +291,31 @@ purely cosmetic, but it's the fastest read on how far you've come. Measured over
 runs from **3.5% at Cavern Field to 14.4% at The Bandbox** — and Ironworks, despite being
 one of the shortest parks, sits at 7.9% because of that wall.
 
+## Weather
+
+Every game on the schedule has a forecast, rolled with the season and shown in the
+clubhouse and on the first-pitch card, so you can read it before you play. About 60% of
+days are clear; the rest are overcast, rain, or the occasional storm. Wind blows in any
+direction at 0–25 mph and holds steady all game — there's a flag in the corner of both
+the at-bat and field views with an arrow the way it's going and the speed — and rain
+streaks across the screen, heavier in a storm.
+
+Both act on the batted ball, in `core/ballFlight.ts`:
+
+- **Wind** enters the drag term as the air the ball is actually flying through, so with the
+  wind at its back it holds speed and carries, and into it it gets shoved back. A crosswind
+  bends fly balls sideways. Scaled to real batted-ball data — roughly 3 ft per mph — because
+  the fitted drag is heavier than real air and unscaled wind moved balls twice as far as it
+  should. A 100 mph, 28° ball goes 378 ft calm, **406 with 10 mph out, 351 with 10 in**, and
+  a 15 mph crosswind drifts it about 23 ft. A 25 mph storm blowing in turns that home-run
+  swing into a 282 ft fly out.
+- **Rain** makes the air heavier and takes spin off the ball (about 20 ft of carry in a
+  downpour), and soaks the turf: bounces die, rollers stop early (a hard grounder that runs
+  to 137 ft dry pulls up at 115 ft wet), and gloves get slippery — a few more chances become
+  stretch catches, and AI fielders muff about twice as often.
+
+`npx tsx tools/weather.ts` prints the carry table across a range of days.
+
 ## Uniforms
 
 Every club has its own colour identity and two kits: a bold home strip and a darker road
@@ -388,6 +413,7 @@ src/
     swing.ts         Tap offset -> contact quality, exit velocity, launch angle
     ballFlight.ts    Batted-ball physics: drag, backspin lift, bounce and roll
     ballpark.ts      Park layouts: per-angle fence distances and wall heights
+    weather.ts       Game-day wind and rain, and what they do to the air and the turf
     gear.ts          Equipment, wear, contracts and per-game earnings
     uniforms.ts      Team colour identities, home and away kits
     fieldGeometry.ts Diamond coordinates in feet, fair/foul, base coverage
@@ -398,7 +424,8 @@ src/
     league.ts        Levels, teams, home parks, schedule, calendar, standings
     progression.ts   XP, attribute points, training, promotion checks
   game/            Canvas views: atBatView (catcher POV), playView (top-down field),
-                   catchOverlay (the stretch-catch minigame), coachTips (one-time hints)
+                   catchOverlay (the stretch-catch minigame), coachTips (one-time hints),
+                   weatherFx (rain streaks and the wind flag)
   screens/         Title, create player, hub, how-to-play, training, gear store, game day, results
   ui/              Canvas helpers, DOM helpers, modal, sprites (animated players)
 tools/             Headless harnesses — see below

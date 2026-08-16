@@ -9,6 +9,8 @@ import type { PositionId } from './fieldGeometry';
 import { ALL_POSITIONS, FIELDER_HOME, distance, isFair, toPositionId } from './fieldGeometry';
 import type { PlayOutcome } from './playSim';
 import { fieldFor, infielderFor } from './outcome';
+import type { AirConditions, Weather } from './weather';
+import { CALM, airFor } from './weather';
 
 /**
  * Drives a nine-inning game. Everything that doesn't involve the player is
@@ -77,17 +79,27 @@ export class GameSim {
   putouts = 0;
   errors = 0;
 
+  /** The day's air, so "is this ball mine?" is judged on the same flight the field plays. */
+  private readonly air: AirConditions;
   private lineupIndex = 0;
   private opponentLineupIndex = 0;
   private pending: SimEvent | null = null;
   private inningAnnounced = false;
 
-  constructor(player: PlayerProfile, level: LeagueLevel, opponentName: string, home: boolean, rng: Rng) {
+  constructor(
+    player: PlayerProfile,
+    level: LeagueLevel,
+    opponentName: string,
+    home: boolean,
+    rng: Rng,
+    weather: Weather = CALM,
+  ) {
     this.player = player;
     this.level = level;
     this.opponentName = opponentName;
     this.playerIsHome = home;
     this.rng = rng;
+    this.air = airFor(weather);
     this.pitcher = {
       name: pitcherName(rng),
       rating: clamp(level.pitcherRating + rng.gaussian() * 8, 10, 99),
@@ -257,7 +269,7 @@ export class GameSim {
   /** True when the player's position is the closest one to where it lands. */
   private isUserPlay(battedBall: BattedBall): boolean {
     const landing = predictLanding(
-      launchBall(battedBall.exitVelocity, battedBall.launchAngle, battedBall.spray),
+      launchBall(battedBall.exitVelocity, battedBall.launchAngle, battedBall.spray, 1, 0, this.air),
     );
     if (!isFair(landing.point)) return false;
 

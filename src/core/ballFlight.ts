@@ -1,4 +1,6 @@
 import type { Vec2 } from './fieldGeometry';
+import type { AirConditions } from './weather';
+import { STILL_AIR } from './weather';
 
 /**
  * Batted-ball flight. Quadratic drag matters enormously for a baseball — a
@@ -76,6 +78,21 @@ const BOUNCE_RESTITUTION = 0.3;
 const BOUNCE_FRICTION = 0.56;
 /** Rolling deceleration on grass, ft/s^2. */
 const ROLL_FRICTION = 26;
+/** How much a soaked field (wet = 1) adds to rolling friction, as a fraction. */
+const WET_ROLL_PENALTY = 0.9;
+/** How much a soaked field takes off the bounce, and off the speed kept through it. */
+const WET_BOUNCE_PENALTY = 0.5;
+const WET_SKID_PENALTY = 0.25;
+/** Height, in feet, by which the ball feels the full wind. Nothing blows at grass level. */
+const WIND_EXPOSURE_HEIGHT = 6;
+/**
+ * How much of the wind the ball actually feels. The fitted `drag` is heavier
+ * than real air, so a raw wind vector shoves the ball around far too much —
+ * unscaled, 10 mph out added 70 ft to a fly ball. Real batted-ball data puts
+ * it near 3-4 ft per mph, and this lands there: about 30 ft for 10 mph out,
+ * with a 25 mph storm blowing in taking roughly 90 ft off a home-run swing.
+ */
+const WIND_GRIP = 0.42;
 
 export interface BallPhysics {
   x: number;
@@ -91,6 +108,11 @@ export interface BallPhysics {
   /** Once true, the ball can no longer be caught for an out. */
   bounced: boolean;
   atRest: boolean;
+  /**
+   * The air it flies through. Wind and rain live on the ball rather than as a
+   * step parameter so a probe copy inherits them for free.
+   */
+  air: AirConditions;
 }
 
 export function launchBall(
@@ -99,6 +121,7 @@ export function launchBall(
   spray: number,
   spin = 1,
   sideSpin = 0,
+  air: AirConditions = STILL_AIR,
 ): BallPhysics {
   const speed = exitVelocity * 1.4667; // mph -> ft/s
   const elevation = (launchAngle * Math.PI) / 180;
@@ -119,6 +142,7 @@ export function launchBall(
     sideSpin,
     bounced: false,
     atRest: false,
+    air,
   };
 }
 
@@ -129,16 +153,25 @@ export function stepBall(ball: BallPhysics, dt: number): void {
   // would treat a ball still falling hard at knee level as already rolling,
   // and it would never pay the friction of actually landing.
   if (ball.z > 0.08 || Math.abs(ball.vz) > 0.6) {
-    const speed = Math.hypot(ball.vx, ball.vy, ball.vz) || 0.001;
-    const decay = FLIGHT.drag * speed;
-    ball.vx -= ball.vx * decay * dt;
-    ball.vy -= ball.vy * decay * dt;
+    const air = ball.air;
+    // Drag works against the air, not the ground. With the wind at its back
+    // the ball feels a gentler headwind and keeps its speed; into it, the ball
+    // gets shoved back. The wind fades out near the turf, so a grounder or a
+    // ball on its last hop isn't pushed around.
+    const exposure = Math.min(1, ball.z / WIND_EXPOSURE_HEIGHT) * WIND_GRIP;
+    const relX = ball.vx - air.windX * exposure;
+    const relY = ball.vy - air.windY * exposure;
+    const relSpeed = Math.hypot(relX, relY, ball.vz) || 0.001;
+    const decay = FLIGHT.drag * air.density * relSpeed;
+    ball.vx -= relX * decay * dt;
+    ball.vy -= relY * decay * dt;
     ball.vz -= (ball.vz * decay + GRAVITY) * dt;
 
+    const speed = Math.hypot(ball.vx, ball.vy, ball.vz) || 0.001;
     if (ball.spin > 0) {
       // Lift acts perpendicular to the flight path, in the vertical plane.
       const horizontal = Math.hypot(ball.vx, ball.vy) || 0.001;
-      const accel = FLIGHT.lift * speed * ball.spin;
+      const accel = FLIGHT.lift * speed * ball.spin * air.liftScale;
       const ux = ball.vx / horizontal;
       const uy = ball.vy / horizontal;
       ball.vx += accel * (-(ball.vz / speed) * ux) * dt;
@@ -151,7 +184,7 @@ export function stepBall(ball: BallPhysics, dt: number): void {
       // horizontal plane. Positive sideSpin pushes toward +x, so a ball flying
       // to centre (heading +y) with positive spin drifts toward right field.
       const horizontal = Math.hypot(ball.vx, ball.vy) || 0.001;
-      const accel = FLIGHT.sideLift * speed * ball.sideSpin;
+      const accel = FLIGHT.sideLift * speed * ball.sideSpin * air.liftScale;
       const ux = ball.vx / horizontal;
       const uy = ball.vy / horizontal;
       ball.vx += accel * uy * dt;
@@ -168,7 +201,10 @@ export function stepBall(ball: BallPhysics, dt: number): void {
       ball.atRest = true;
       return;
     }
-    const drop = Math.min(speed, ROLL_FRICTION * dt);
+    // Wet grass grabs the ball: a soaked outfield nearly doubles the drag on a
+    // roller, so what runs to the wall on a dry day pulls up in the gap.
+    const friction = ROLL_FRICTION * (1 + ball.air.wet * WET_ROLL_PENALTY);
+    const drop = Math.min(speed, friction * dt);
     ball.vx -= (ball.vx / speed) * drop;
     ball.vy -= (ball.vy / speed) * drop;
     ball.vz = 0;
@@ -183,9 +219,11 @@ export function stepBall(ball: BallPhysics, dt: number): void {
     ball.z = 0;
     ball.bounced = true;
     if (ball.vz < -2) {
-      ball.vz = -ball.vz * BOUNCE_RESTITUTION;
-      ball.vx *= BOUNCE_FRICTION;
-      ball.vy *= BOUNCE_FRICTION;
+      // A wet ball on wet turf sits down instead of skipping.
+      const wet = ball.air.wet;
+      ball.vz = -ball.vz * BOUNCE_RESTITUTION * (1 - wet * WET_BOUNCE_PENALTY);
+      ball.vx *= BOUNCE_FRICTION * (1 - wet * WET_SKID_PENALTY);
+      ball.vy *= BOUNCE_FRICTION * (1 - wet * WET_SKID_PENALTY);
     } else {
       ball.vz = 0;
     }

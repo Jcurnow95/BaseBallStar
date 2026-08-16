@@ -3,6 +3,8 @@ import type { Ballpark } from './ballpark';
 import { BALLPARKS, ballparkById } from './ballpark';
 import type { TeamKit } from './uniforms';
 import { TEAM_KITS, kitFor } from './uniforms';
+import type { Weather } from './weather';
+import { rollWeather } from './weather';
 
 /**
  * Demo season length. A real season would be 140+ games at each level; 24
@@ -116,6 +118,12 @@ export interface ScheduledGame {
   played: boolean;
   playerTeamScore?: number;
   opponentScore?: number;
+  /**
+   * The forecast for the day, rolled with the schedule so the clubhouse can
+   * warn you about it. Optional so saves from before weather still load; a
+   * missing one is rolled the first time it's asked for.
+   */
+  weather?: Weather;
 }
 
 export interface LeagueState {
@@ -167,6 +175,7 @@ export function createLeague(levelId: number, rng: Rng): LeagueState {
       opponentId: opponents[i % opponents.length].id,
       home: Math.floor(i / opponents.length) % 2 === 0,
       played: false,
+      weather: rollWeather(rng),
     });
   }
 
@@ -229,6 +238,16 @@ export function teamKit(league: LeagueState, teamId: string): TeamKit {
 export function parkForGame(league: LeagueState, game: ScheduledGame): Ballpark {
   const hostId = game.home ? league.playerTeamId : game.opponentId;
   return ballparkById(teamById(league, hostId).parkId);
+}
+
+/**
+ * The weather a scheduled game is played in. Older saves have no forecast on
+ * the schedule, so one is rolled and pinned the first time it's needed —
+ * pinned, so the clubhouse and the game agree on the day.
+ */
+export function weatherForGame(game: ScheduledGame, rng: Rng): Weather {
+  if (!game.weather) game.weather = rollWeather(rng);
+  return game.weather;
 }
 
 export function teamById(league: LeagueState, id: string): Team {

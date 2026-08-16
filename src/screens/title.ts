@@ -1,6 +1,7 @@
 import type { App } from '../app';
 import { q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
+import { openHowto } from './howto';
 
 export function renderTitle(app: App, mount: HTMLElement): void {
   const hasSave = !!app.save;
@@ -26,6 +27,7 @@ export function renderTitle(app: App, mount: HTMLElement): void {
         <p class="tiny muted" style="margin:0">
           <b style="color:var(--text)">In the field:</b> get your glove on the ball before it lands.
         </p>
+        <button class="btn ghost tiny" id="howto" style="margin-top:10px">Show me — How to Play</button>
       </div>
 
       <div class="panel">
@@ -59,4 +61,6 @@ export function renderTitle(app: App, mount: HTMLElement): void {
   if (hasSave) {
     q(mount, '#continue').addEventListener('click', () => app.go('hub'));
   }
+
+  q(mount, '#howto').addEventListener('click', () => openHowto(app, 'title'));
 }

@@ -29,6 +29,7 @@ import { seasonScore, xpForLevel } from '../core/progression';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 import { devMenuEnabled } from './dev';
+import { howtoSeen, openHowto } from './howto';
 
 export function renderHub(app: App, mount: HTMLElement): void {
   const save = app.requireSave();
@@ -76,7 +77,8 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const storeButton = `
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? ` · ${fraying} wearing out` : ''}
-    </button>`;
+    </button>
+    <button class="btn ghost tiny" id="howto" style="margin-top:8px">How to Play</button>`;
 
   let matchupHtml: string;
   if (seasonDone) {
@@ -227,10 +229,16 @@ export function renderHub(app: App, mount: HTMLElement): void {
   `;
 
   if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('seasonEnd'));
-  else if (upcoming) q(mount, '#play').addEventListener('click', () => app.go('game'));
+  else if (upcoming) {
+    // First game ever goes by way of the how-to; after that, straight in.
+    q(mount, '#play').addEventListener('click', () =>
+      howtoSeen() ? app.go('game') : openHowto(app, 'game'),
+    );
+  }
 
   q(mount, '#train').addEventListener('click', () => app.go('training'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
+  q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
 
   if (devEnabled) q(mount, '#devmenu').addEventListener('click', () => app.go('dev'));
 

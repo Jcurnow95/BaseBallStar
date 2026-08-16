@@ -404,8 +404,48 @@ export class PlaySim {
    * next one up.
    */
   private goTargetFor(runner: RunnerState): number {
-    const committed = runner.intent > runner.at ? runner.intent : runner.at;
-    return Math.min(4, committed + 1);
+    const committed = this.committedBase(runner);
+    return Math.min(4, committed + 1, this.roomAheadOf(runner));
+  }
+
+  /** The base a runner is going to end up on if nothing changes. */
+  private committedBase(runner: RunnerState): number {
+    return runner.intent > runner.at ? runner.intent : runner.at;
+  }
+
+  /**
+   * The runner directly in front of this one who is still on the bases.
+   * Runners are stored lead-first and can't pass each other, so it's the
+   * nearest earlier entry still in play.
+   */
+  private runnerAhead(runner: RunnerState): RunnerState | null {
+    const index = this.runners.indexOf(runner);
+    for (let i = index - 1; i >= 0; i--) {
+      const ahead = this.runners[i];
+      if (ahead.out || ahead.at >= 4) continue;
+      return ahead;
+    }
+    return null;
+  }
+
+  /**
+   * The furthest base this runner can be sent to without running into the man
+   * ahead: one short of wherever he is committed to. Never less than the base
+   * they already own, and never less than the one they're forced to take —
+   * a forced runner's man ahead is forced too, so he will be moving.
+   *
+   * Without this the batter was allowed to run all the way up to a runner
+   * standing on second and park next to him, so a clean single ended with two
+   * men on the same bag.
+   */
+  private roomAheadOf(runner: RunnerState): number {
+    // Everybody trots home on a homer; nobody is in anybody's way.
+    if (this.homeRun) return 4;
+    const ahead = this.runnerAhead(runner);
+    if (!ahead) return 4;
+    const room = this.committedBase(ahead) - 1;
+    const owed = this.isForced(runner) ? runner.startBase + 1 : runner.startBase;
+    return Math.max(room, runner.at, owed);
   }
 
   /**
@@ -421,7 +461,8 @@ export class PlaySim {
     const runner = this.userRunner;
     if (!runner || runner.out || runner.at >= 4 || this.phase === 'dead') return null;
     const target = this.goTargetFor(runner);
-    return target > runner.at ? target : null;
+    // Nothing to go for when the next bag is spoken for.
+    return target > this.committedBase(runner) ? target : null;
   }
 
   /** Base the HOLD button would stop them at, or null if holding is meaningless. */
@@ -451,7 +492,9 @@ export class PlaySim {
   advanceRunner(): void {
     const runner = this.userRunner;
     if (!runner || runner.out || runner.at >= 4) return;
-    runner.intent = this.goTargetFor(runner);
+    const target = this.goTargetFor(runner);
+    if (target <= this.committedBase(runner)) return;
+    runner.intent = target;
     runner.done = false;
     this.userIntentSet = true;
   }
@@ -624,8 +667,24 @@ export class PlaySim {
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
 
+      // Nobody runs into an occupied bag. If the man ahead has pulled up, the
+      // target is the base behind him — and a runner already past that base
+      // turns round and goes back to it.
+      const room = this.roomAheadOf(runner);
+      if (runner.intent > room) runner.intent = room;
+
       if (runner.at >= runner.intent) {
-        runner.done = true;
+        if (runner.progress > 0) {
+          // Caught off the bag with nowhere to go: back to the one they left.
+          runner.done = false;
+          runner.progress -= (runner.speed * dt) / BASE_DISTANCE;
+          if (runner.progress <= 0) {
+            runner.progress = 0;
+            runner.done = true;
+          }
+        } else {
+          runner.done = true;
+        }
       } else {
         runner.done = false;
         runner.progress += (runner.speed * dt) / BASE_DISTANCE;
@@ -768,7 +827,10 @@ export class PlaySim {
       // with a lead runner aboard second isn't where the defense wants the
       // ball anyway. Everyone else is already 90 feet from the next bag and
       // wins outright on a ball hit this deep, so the race below covers them.
-      if (stretched && runner.startBase === 0) {
+      // The player's runner doesn't take that gamble on their behalf — the GO
+      // button is how they choose to. Watching your man take off for second
+      // uninvited and get thrown out is a fair complaint.
+      if (stretched && runner.startBase === 0 && !runner.isUser) {
         const runTime = ((2 - from) * BASE_DISTANCE) / runner.speed;
         const returnTime = pickupTime + TRANSFER_TIME + this.throwFlightTime(rest, 2, armSpeed);
         if (runTime <= returnTime) target = 2;
@@ -783,7 +845,13 @@ export class PlaySim {
         if (runTime + RUNNER_CAUTION > returnTime) break;
         target = next;
       }
-      runner.intent = Math.min(4, target);
+      runner.intent = Math.min(4, target, this.roomAheadOf(runner));
+      // Say so when the read sends the player's runner past first on its own,
+      // so an extra base never looks like the game running them unasked. The
+      // HOLD button is up the whole time.
+      if (runner.isUser && runner.startBase === 0 && runner.intent > 1) {
+        this.lastEvent = 'Waved on!';
+      }
     }
   }
 
@@ -795,7 +863,9 @@ export class PlaySim {
     this.intentsFrozen = true;
     for (const runner of this.runners) {
       if (runner.isUser || runner.out || runner.at >= 4) continue;
-      if (runner.progress > 0) runner.intent = Math.max(runner.intent, runner.at + 1);
+      if (runner.progress > 0 && runner.intent > runner.at) {
+        runner.intent = Math.max(runner.intent, runner.at + 1);
+      }
     }
   }
 
@@ -1029,12 +1099,20 @@ export class PlaySim {
    * waiting glove rather than into open space.
    */
   private throwInTarget(carrier: FielderState): BaseId | null {
-    let lead = 0;
+    // The runner worth getting in front of is the furthest one still moving.
+    // A man parked on second isn't going anywhere, and firing the ball to
+    // third with the batter still legging it to first looked, as one tester
+    // put it, like the AI throwing to a base with nobody on it. Fall back to
+    // the lead runner only if nobody is moving.
+    let lead = -1;
+    let parked = 0;
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
-      if (runner.at > lead) lead = runner.at;
+      if (!runner.done && runner.at > lead) lead = runner.at;
+      if (runner.at > parked) parked = runner.at;
     }
-    // The bag in front of the lead runner, then whatever else is manned. Home
+    if (lead < 0) lead = parked;
+    // The bag in front of that runner, then whatever else is manned. Home
     // is not a throw-in target — with nothing to play for you get it to an
     // infielder, you don't fire it at the catcher.
     const preferred = clamp(lead + 1, 1, 3) as BaseId;
@@ -1112,8 +1190,10 @@ export class PlaySim {
 
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
-      // A runner standing on a base can't be forced off it.
+      // A runner standing on a base can't be forced off it, and one heading
+      // back to the bag he left isn't forced at the next one.
       if (runner.progress <= 0 && runner.done) continue;
+      if (runner.intent <= runner.at) continue;
 
       // How far up the line they are, 1..4, where 4 is the plate. The bag id
       // wraps home round to 0, so the two are tracked apart — ranking on raw
@@ -1245,7 +1325,9 @@ export class PlaySim {
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
       // Parked on a bag: you can only be forced off one you have to leave.
+      // Same for a runner scrambling back to the one he came from.
       if (runner.progress <= 0 && runner.done) continue;
+      if (runner.intent <= runner.at) continue;
       if ((runner.at + 1) % 4 !== base) continue;
       // Whoever is closest to the bag is the one the force is against.
       if (!victim || runner.progress > victim.progress) victim = runner;

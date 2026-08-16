@@ -24,6 +24,7 @@ import { PlaySim } from '../core/playSim';
 import { toPositionId } from '../core/fieldGeometry';
 import { AtBatView } from '../game/atBatView';
 import { PlayView } from '../game/playView';
+import { showCoachTip } from '../game/coachTips';
 import { esc, q } from '../ui/dom';
 import { isMuted, playSound, startAmbience, stopAmbience, toggleMuted } from '../ui/audio';
 
@@ -101,14 +102,19 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     q(mount, '#idleSub').textContent = sub;
   };
 
+  // The speed toggle only governs the simulated stretches between your
+  // moments. Left on screen during an at-bat it read as "the pitch is being
+  // sped up", so it goes away whenever you're actually playing.
   const showIdle = (): void => {
     idle.style.display = '';
     host.style.display = 'none';
+    speedBtn.style.display = '';
   };
 
   const showPlay = (): void => {
     idle.style.display = 'none';
     host.style.display = '';
+    speedBtn.style.display = 'none';
   };
 
   const addFeed = (text: string, tone: LogTone | 'inning'): void => {
@@ -232,6 +238,12 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         schedule(tick, delay + 350);
       },
     });
+    showCoachTip(
+      host,
+      'bat',
+      'Tap the ball as it reaches the plate. A hair under centre is a barrel.',
+      7000,
+    );
   }
 
   function beginFielding(event: Extract<SimEvent, { kind: 'fielding' }>): void {
@@ -268,6 +280,20 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         finishLivePlay(result, side);
       },
     });
+
+    if (side === 'defense') {
+      showCoachTip(
+        host,
+        'field',
+        'Drag anywhere to run. Get under the gold ring, then tap a base to throw.',
+      );
+    } else {
+      showCoachTip(
+        host,
+        'run',
+        'GO takes the next base, HOLD pulls up. A red line means a throw is beating you.',
+      );
+    }
   }
 
   function finishLivePlay(result: PlayOutcome, side: UserSide): void {

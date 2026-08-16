@@ -35,7 +35,9 @@ export class CatchOverlay {
   private readonly opts: CatchOverlayOptions;
 
   private phase: Phase = 'incoming';
-  private start = performance.now();
+  /** Milliseconds into the current phase. Frame-driven, so backgrounding pauses it. */
+  private elapsed = 0;
+  private lastFrame = performance.now();
   private raf = 0;
   private destroyed = false;
   private acted = false;
@@ -62,6 +64,14 @@ export class CatchOverlay {
     this.prompt.textContent = opts.wasFly ? 'REACH FOR IT!' : 'KNOCK IT DOWN!';
     host.appendChild(this.prompt);
 
+    // The prompt says what's happening; this says what to do about it. Left
+    // up every time — it's small, and the moment is too quick to learn from
+    // once.
+    const sub = document.createElement('div');
+    sub.className = 'catch-sub';
+    sub.textContent = 'tap the ball as it reaches you';
+    host.appendChild(sub);
+
     const d = clamp(opts.difficulty, 0, 1);
     this.duration = lerp(1000, 620, d);
     this.fromAngle = opts.rng.range(0, Math.PI * 2);
@@ -86,7 +96,7 @@ export class CatchOverlay {
   }
 
   private progress(): number {
-    return (performance.now() - this.start) / this.duration;
+    return this.elapsed / this.duration;
   }
 
   /**
@@ -154,12 +164,14 @@ export class CatchOverlay {
     this.prompt.textContent = this.success ? 'GOT IT!' : t <= 0.5 ? 'TOO EARLY!' : 'DROPPED!';
     this.prompt.className = `catch-prompt ${this.success ? 'good' : 'bad'}`;
     this.phase = 'freeze';
-    this.start = performance.now();
+    this.elapsed = 0;
   };
 
   private loop = (): void => {
     if (this.destroyed) return;
     const now = performance.now();
+    this.elapsed += Math.min(now - this.lastFrame, 50);
+    this.lastFrame = now;
 
     if (this.phase === 'incoming' && this.progress() >= 1.2 && !this.acted) {
       this.acted = true;
@@ -168,8 +180,8 @@ export class CatchOverlay {
       this.prompt.textContent = 'IT GETS BY!';
       this.prompt.className = 'catch-prompt bad';
       this.phase = 'freeze';
-      this.start = now;
-    } else if (this.phase === 'freeze' && now - this.start >= FREEZE_MS) {
+      this.elapsed = 0;
+    } else if (this.phase === 'freeze' && this.elapsed >= FREEZE_MS) {
       this.opts.onComplete(this.success);
       return;
     }

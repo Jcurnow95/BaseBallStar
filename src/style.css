@@ -1106,6 +1106,134 @@ table.standings tr.me td {
   border-color: #7a6122;
 }
 
+/* ------------------------------------------------------------- coach tips */
+
+/* Sits in the top band of the stage: below the pitch readout, above the
+   strike zone and the ball, and clear of the fielding joystick at the bottom. */
+.coach-tip {
+  position: absolute;
+  left: 10px;
+  right: 52px;
+  top: 8px;
+  z-index: 7;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: rgba(10, 18, 32, 0.86);
+  border: 1px solid rgba(255, 209, 102, 0.55);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  text-shadow: none;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.coach-tip.show {
+  opacity: 1;
+  transform: none;
+}
+
+.coach-tip .who {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 3px;
+}
+
+.catch-sub {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(12% + 30px);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- how to play */
+
+.howto-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 10px;
+  letter-spacing: 0.16em;
+}
+
+.howto-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.howto-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.howto-dots i.on {
+  background: var(--gold);
+}
+
+.howto-card h2 {
+  margin: 12px 0 6px;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text);
+}
+
+.howto-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.howto-card p b {
+  color: var(--text);
+}
+
+.howto-card p b.good {
+  color: var(--accent);
+}
+
+.howto-card p b.gold {
+  color: var(--gold);
+}
+
+.howto-card p b.bad {
+  color: var(--red);
+}
+
+.howto-art {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  line-height: 0;
+}
+
+.howto-art svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.howto-nav {
+  margin-top: 10px;
+}
+
 /* ----------------------------------------------------------------- modal */
 
 .modal-backdrop {

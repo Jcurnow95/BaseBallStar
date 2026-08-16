@@ -85,6 +85,8 @@ export class AtBatView {
   private lastFrame = 0;
   private raf = 0;
   private destroyed = false;
+  /** Frozen: the loop keeps drawing but no time passes and taps are ignored. */
+  paused = false;
 
   private count: Count = { balls: 0, strikes: 0 };
   private pitch!: Pitch;
@@ -225,6 +227,7 @@ export class AtBatView {
 
   private onPointerDown = (e: PointerEvent): void => {
     e.preventDefault();
+    if (this.paused) return;
     if (this.phase === 'freeze' || this.swung) return;
 
     // Ball positions live in stage space, so the tap has to be moved into it
@@ -418,7 +421,7 @@ export class AtBatView {
     if (this.destroyed) return;
     const now = performance.now();
     // Capped, so a hitch or a spell in the background is a pause, not a jump.
-    this.phaseElapsed += Math.min(now - this.lastFrame, 50);
+    if (!this.paused) this.phaseElapsed += Math.min(now - this.lastFrame, 50);
     this.lastFrame = now;
 
     if (this.phase === 'windup' && this.phaseElapsed >= WINDUP_MS) {

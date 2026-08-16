@@ -26,7 +26,15 @@ import { AtBatView } from '../game/atBatView';
 import { PlayView } from '../game/playView';
 import { showCoachTip } from '../game/coachTips';
 import { esc, q } from '../ui/dom';
-import { isMuted, playSound, startAmbience, stopAmbience, toggleMuted } from '../ui/audio';
+import {
+  isMuted,
+  playSound,
+  resumeAmbience,
+  startAmbience,
+  stopAmbience,
+  suspendAmbience,
+  toggleMuted,
+} from '../ui/audio';
 
 const NORMAL_DELAY = 850;
 const FAST_DELAY = 220;
@@ -84,6 +92,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       <div id="host"></div>
       <button class="speed-toggle" id="speed">FAST ▸</button>
       <button class="sound-toggle" id="sound" aria-label="Toggle sound"></button>
+      <button class="pause-toggle" id="pause" aria-label="Pause">❚❚</button>
+      <div class="pause-overlay" id="paused">
+        <div class="pause-card">
+          <div class="pause-title">PAUSED</div>
+          <div class="tiny muted" id="pauseSub"></div>
+          <button class="btn primary" id="resume">Resume</button>
+        </div>
+      </div>
     </div>
 
     <div class="feed" id="feed"></div>
@@ -147,10 +163,52 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   /* ------------------------------------------------------------ scheduling */
 
+  // The single-slot game clock. Remembered as (what, when) rather than just a
+  // timer id so a pause can lift it and put it back with the time it had left.
+  let pendingFn: (() => void) | null = null;
+  let pendingAt = 0;
+  let pendingLeft = 0;
+  let paused = false;
+
   const schedule = (fn: () => void, ms = delay): void => {
     if (disposed) return;
     clearTimeout(timer);
-    timer = window.setTimeout(fn, ms);
+    pendingFn = fn;
+    pendingAt = performance.now() + ms;
+    if (paused) return;
+    timer = window.setTimeout(() => {
+      pendingFn = null;
+      fn();
+    }, ms);
+  };
+
+  /* --------------------------------------------------------------- pausing */
+
+  const pauseBtn = q<HTMLButtonElement>(mount, '#pause');
+  const pauseOverlay = q(mount, '#paused');
+
+  /**
+   * Everything that moves stops: the pitch or play in progress, the wait
+   * before the next event, and the crowd. Nothing is lost — resume picks up
+   * exactly where it left off, with whatever was left on the clock.
+   */
+  const setPaused = (value: boolean): void => {
+    if (disposed || value === paused) return;
+    paused = value;
+    pauseOverlay.classList.toggle('show', value);
+    pauseBtn.style.display = value ? 'none' : '';
+    if (view) view.paused = value;
+
+    if (value) {
+      clearTimeout(timer);
+      // Freeze what's left on the clock; wall time keeps going while paused.
+      pendingLeft = Math.max(0, pendingAt - performance.now());
+      suspendAmbience();
+      q(mount, '#pauseSub').textContent = `${sim.inningLabel} · ${sim.outs} out`;
+    } else {
+      resumeAmbience();
+      if (pendingFn) schedule(pendingFn, pendingLeft);
+    }
   };
 
   const destroyView = (): void => {
@@ -412,6 +470,15 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   /* ---------------------------------------------------------------- input */
 
+  pauseBtn.addEventListener('click', () => setPaused(true));
+  q(mount, '#resume').addEventListener('click', () => setPaused(false));
+  // Backgrounding the app pauses the game rather than leaving a pitch or a
+  // play to run on (or freeze) behind a phone call.
+  const onVisibility = (): void => {
+    if (document.hidden) setPaused(true);
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+
   speedBtn.addEventListener('click', () => {
     delay = delay === NORMAL_DELAY ? FAST_DELAY : NORMAL_DELAY;
     speedBtn.textContent = delay === FAST_DELAY ? 'FAST ▸▸' : 'FAST ▸';
@@ -439,6 +506,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     clearTimeout(timer);
     clearTimeout(soundTimer);
     stopAmbience();
+    document.removeEventListener('visibilitychange', onVisibility);
     if (view) view.destroy();
   };
 }

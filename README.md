@@ -171,6 +171,12 @@ The **FAST** toggle only speeds up the simulated stretches between your moments;
 disappears while you're actually batting or fielding so it can't read as the pitch being
 sped up.
 
+A **pause** button (top-left of the stage) freezes everything at once: the pitch or play
+in progress, the wait before the next event, and the crowd. It's a true freeze — the
+frame-driven at-bat/catch clocks stop advancing and the play-by-play timer keeps whatever
+it had left, so **Resume** picks up exactly where you were rather than jumping. Sending the
+app to the background pauses it for you.
+
 ## At the plate
 
 The ball leaves the pitcher's hand small and far away, grows as it comes, and **breaks

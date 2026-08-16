@@ -755,23 +755,18 @@ export class PlayView {
     const ground = this.toScreen({ x: sim.ball.x, y: sim.ball.y });
     const air = this.toScreen({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
 
-    // The ball is the one thing the player has to track here, and at this zoom
-    // a true-to-scale baseball is about two pixels across. Size it against the
-    // canvas rather than in fixed pixels: the old 3-7.5px radius drew a 6px dot
-    // on a phone and stayed 6px whether the camera was tight on an infield play
-    // or pulled right out for a ball on the warning track.
-    const base = clamp(Math.min(this.surface.width, this.surface.height) * 0.019, 7, 12);
-    // Still grows with height, so a ball up in the air reads as airborne.
-    const radius = base * clamp(1 + sim.ball.z / 110, 1, 1.8);
-
     if (sim.ball.z > 1) {
       const shrink = clamp(1 - sim.ball.z / 260, 0.55, 1);
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.beginPath();
-      ctx.ellipse(ground.x, ground.y, base * 0.9 * shrink, base * 0.5 * shrink, 0, 0, Math.PI * 2);
+      ctx.ellipse(ground.x, ground.y, 4 * shrink, 2.2 * shrink, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
+    // Small fixed-pixel ball, growing a little with height so a fly ball reads
+    // as airborne. A canvas-scaled version was tried and read as far too big
+    // against the fielders and the diamond.
+    const radius = clamp(3.2 + sim.ball.z / 34, 3, 7.5);
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.4)';
     ctx.shadowBlur = 5;

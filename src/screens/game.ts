@@ -26,6 +26,8 @@ import { AtBatView } from '../game/atBatView';
 import { PlayView } from '../game/playView';
 import { showCoachTip } from '../game/coachTips';
 import { esc, q } from '../ui/dom';
+import type { FeedIcon } from '../ui/feedIcons';
+import { feedIconFor, feedIconSvg } from '../ui/feedIcons';
 import {
   isMuted,
   playSound,
@@ -133,10 +135,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     speedBtn.style.display = 'none';
   };
 
-  const addFeed = (text: string, tone: LogTone | 'inning'): void => {
+  const addFeed = (text: string, tone: LogTone | 'inning', icon?: FeedIcon): void => {
     const line = document.createElement('div');
     line.className = tone;
-    line.textContent = text;
+    // Inning breaks always get the diamond; everything else is read off the
+    // words unless the caller knows better.
+    const glyph = icon ?? (tone === 'inning' ? 'inning' : feedIconFor(text));
+    line.innerHTML = `<i class="feed-icon ${glyph}">${feedIconSvg(glyph)}</i><span></span>`;
+    line.lastElementChild!.textContent = text;
     feed.appendChild(line);
     while (feed.childElementCount > 40) feed.removeChild(feed.firstChild!);
     feed.scrollTop = feed.scrollHeight;
@@ -255,7 +261,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   function beginAtBat(event: Extract<SimEvent, { kind: 'atBat' }>): void {
     showPlay();
     count = { balls: 0, strikes: 0 };
-    addFeed(`${player.name} steps in against ${event.pitcher.name}.`, 'neutral');
+    addFeed(`${player.name} steps in against ${event.pitcher.name}.`, 'neutral', 'batter');
 
     // The park picks up when you come up with something going on. Runners on
     // gets the charge riff; otherwise an occasional ripple of clapping, so
@@ -288,7 +294,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         const applied = sim.submitAtBat(outcome);
         addFeed(`${player.name}: ${applied.text}`, applied.tone);
         if (applied.runs > 0) {
-          addFeed(`${applied.runs} run${applied.runs === 1 ? '' : 's'} score.`, 'good');
+          addFeed(`${applied.runs} run${applied.runs === 1 ? '' : 's'} score.`, 'good', 'run');
         }
         count = { balls: 0, strikes: 0 };
         setIdle(applied.text, sim.inningLabel);
@@ -305,7 +311,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   }
 
   function beginFielding(event: Extract<SimEvent, { kind: 'fielding' }>): void {
-    addFeed(`${event.hitter} hits one your way...`, 'neutral');
+    addFeed(`${event.hitter} hits one your way...`, 'neutral', 'alert');
     beginLivePlay(event.battedBall, 'defense');
   }
 
@@ -364,13 +370,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     addFeed(`${prefix}${applied.text}`, applied.tone);
 
     if (result.runs > 0) {
-      addFeed(`${result.runs} run${result.runs === 1 ? '' : 's'} score.`, side === 'offense' ? 'good' : 'bad');
+      addFeed(`${result.runs} run${result.runs === 1 ? '' : 's'} score.`, side === 'offense' ? 'good' : 'bad', 'run');
     }
     if (result.userPutout && side === 'defense') {
-      addFeed('Putout credited to you.', 'good');
+      addFeed('Putout credited to you.', 'good', 'catch');
     }
     if (result.userError) {
-      addFeed('Charged with an error.', 'bad');
+      addFeed('Charged with an error.', 'bad', 'error');
     }
 
     setIdle(applied.text, sim.inningLabel);

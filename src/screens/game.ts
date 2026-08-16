@@ -12,7 +12,9 @@ import {
   simulateOtherTeams,
   teamById,
   teamKit,
+  weatherForGame,
 } from '../core/league';
+import { describeWeather, windLabel, windMph } from '../core/weather';
 import { uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
 import { addStats } from '../core/player';
@@ -24,7 +26,7 @@ import { PlaySim } from '../core/playSim';
 import { toPositionId } from '../core/fieldGeometry';
 import { AtBatView } from '../game/atBatView';
 import { PlayView } from '../game/playView';
-import { showCoachTip } from '../game/coachTips';
+import { showCoachTip, tipSeen } from '../game/coachTips';
 import { esc, q } from '../ui/dom';
 import type { FeedIcon } from '../ui/feedIcons';
 import { feedIconFor, feedIconSvg } from '../ui/feedIcons';
@@ -56,11 +58,12 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const opponent = teamById(league, scheduled.opponentId);
   const myTeam = playerTeam(league);
   const park = parkForGame(league, scheduled);
+  const weather = weatherForGame(scheduled, app.rng);
 
   // Home team wears its home kit, the visitor its road kit.
   const myKit = uniformFor(teamKit(league, myTeam.id), scheduled.home);
   const theirKit = uniformFor(teamKit(league, opponent.id), !scheduled.home);
-  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng);
+  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng, weather);
 
   let delay = NORMAL_DELAY;
   let timer = 0;
@@ -88,7 +91,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       <div class="idle-stage" id="idle">
         <div class="sub" id="idleSub">First pitch</div>
         <div class="big" id="idleBig">${esc(scheduled.home ? 'vs' : '@')} ${esc(opponent.name)}<br/>
-          <span class="muted tiny">${esc(park.name)} · ${esc(sim.pitcher.name)} on the mound</span>
+          <span class="muted tiny">${esc(park.name)} · ${esc(sim.pitcher.name)} on the mound</span><br/>
+          <span class="muted tiny">${esc(describeWeather(weather))}</span>
         </div>
       </div>
       <div id="host"></div>
@@ -274,6 +278,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       player: playerWithGear(player),
       pitcher: event.pitcher,
       pitcherKit: theirKit,
+      weather,
       level,
       rng: app.rng,
       onCount: (c) => {
@@ -302,12 +307,32 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         schedule(tick, delay + 350);
       },
     });
+    // The first time the weather is going to matter, say so — but only once
+    // the batting tip has had its turn, so the two don't stack.
+    const batTipDone = tipSeen('bat');
     showCoachTip(
       host,
       'bat',
       'Tap the ball as it reaches the plate. A hair under centre is a barrel.',
       7000,
     );
+    if (!batTipDone) return;
+    if (windMph(weather) >= 10) {
+      const out = weather.wind.y > 0;
+      showCoachTip(
+        host,
+        'wind',
+        `Wind ${windLabel(weather)}. ${out ? 'Fly balls carry today — get it in the air.' : 'Fly balls die out there — line drives play.'}`,
+        7000,
+      );
+    } else if (weather.rain > 0) {
+      showCoachTip(
+        host,
+        'rain',
+        'Wet field. Balls die in the grass and gloves get slippery.',
+        7000,
+      );
+    }
   }
 
   function beginFielding(event: Extract<SimEvent, { kind: 'fielding' }>): void {
@@ -329,6 +354,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       outs: sim.outs,
       opponentRating: level.defenseRating,
       park,
+      weather,
       rng: app.rng,
     });
 

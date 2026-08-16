@@ -9,8 +9,10 @@ import {
   standings,
   teamById,
   teamKit,
+  weatherForGame,
 } from '../core/league';
 import { ballparkById } from '../core/ballpark';
+import { describeWeather } from '../core/weather';
 import {
   GEAR_SLOTS,
   effectiveAttributes,
@@ -91,12 +93,17 @@ export function renderHub(app: App, mount: HTMLElement): void {
       ${storeButton}`;
   } else if (upcoming) {
     const park = parkForGame(league, upcoming);
+    // A pre-weather save gets its forecast rolled here; pin it so the game
+    // plays in the weather the clubhouse promised.
+    const hadForecast = !!upcoming.weather;
+    const weather = weatherForGame(upcoming, app.rng);
+    if (!hadForecast) app.persist();
     matchupHtml = `
       <div class="matchup">
         <div>
           <span class="vs">Game ${gamesPlayed + 1} of ${SEASON_GAMES}</span>
           <strong>${upcoming.home ? 'vs' : '@'} ${esc(teamById(league, upcoming.opponentId).name)}</strong>
-          <span class="tiny muted">${esc(park.name)}</span>
+          <span class="tiny muted">${esc(park.name)} · ${esc(describeWeather(weather))}</span>
         </div>
         <div class="ovr">
           <b>${team.wins}-${team.losses}</b>

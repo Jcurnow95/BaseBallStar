@@ -69,6 +69,7 @@ export class PlayView {
   private lastEvent = '';
   private completed = false;
   private catchOverlay: CatchOverlay | null = null;
+  private _paused = false;
   /** Last rendered control set, so the DOM is only rebuilt when it changes. */
   private controlSignature = '';
   private statusText = '';
@@ -141,6 +142,7 @@ export class PlayView {
 
   private onPointerDown = (e: PointerEvent): void => {
     e.preventDefault();
+    if (this._paused) return;
     if (this.sim.setup.userSide !== 'defense') return;
     const p = pointerPos(this.surface.canvas, e);
     this.joystick = {
@@ -173,7 +175,7 @@ export class PlayView {
    */
   private onControlDown = (e: PointerEvent): void => {
     const target = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
-    if (!target) return;
+    if (!target || this._paused) return;
     e.preventDefault();
     const act = target.dataset.act;
     vibrate(12);
@@ -262,10 +264,21 @@ export class PlayView {
 
   /* ------------------------------------------------------------------- loop */
 
+  /** Frozen: still drawn, but the sim doesn't advance and input is ignored. */
+  get paused(): boolean {
+    return this._paused;
+  }
+
+  set paused(value: boolean) {
+    this._paused = value;
+    if (value) this.joystick.active = false;
+    if (this.catchOverlay) this.catchOverlay.paused = value;
+  }
+
   private loop = (): void => {
     if (this.destroyed) return;
     const now = performance.now();
-    const dt = Math.min((now - this.lastFrame) / 1000, 1 / 20);
+    const dt = this._paused ? 0 : Math.min((now - this.lastFrame) / 1000, 1 / 20);
     this.lastFrame = now;
 
     const sim = this.sim;
@@ -282,7 +295,7 @@ export class PlayView {
       }
     }
 
-    sim.update(dt);
+    if (!this._paused) sim.update(dt);
     this.syncCatchOverlay();
 
     if (sim.userHasBall !== hadBall) this.controlSignature = '';
@@ -345,6 +358,7 @@ export class PlayView {
         this.renderControls();
       },
     });
+    this.catchOverlay.paused = this._paused;
   }
 
   private toneFor(event: string): string {

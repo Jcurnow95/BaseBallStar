@@ -38,6 +38,8 @@ export class CatchOverlay {
   /** Milliseconds into the current phase. Frame-driven, so backgrounding pauses it. */
   private elapsed = 0;
   private lastFrame = performance.now();
+  /** Frozen: drawn but not advancing, and taps ignored. */
+  paused = false;
   private raf = 0;
   private destroyed = false;
   private acted = false;
@@ -143,7 +145,7 @@ export class CatchOverlay {
 
   private onPointerDown = (e: PointerEvent): void => {
     e.preventDefault();
-    if (this.acted || this.phase !== 'incoming') return;
+    if (this.paused || this.acted || this.phase !== 'incoming') return;
 
     const p = pointerPos(this.surface.canvas, e);
     const t = this.progress();
@@ -170,7 +172,7 @@ export class CatchOverlay {
   private loop = (): void => {
     if (this.destroyed) return;
     const now = performance.now();
-    this.elapsed += Math.min(now - this.lastFrame, 50);
+    if (!this.paused) this.elapsed += Math.min(now - this.lastFrame, 50);
     this.lastFrame = now;
 
     if (this.phase === 'incoming' && this.progress() >= 1.2 && !this.acted) {

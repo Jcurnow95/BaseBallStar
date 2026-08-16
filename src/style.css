@@ -1047,6 +1047,68 @@ table.standings tr.me td {
   opacity: 0.55;
 }
 
+/* Top-left, mirroring the sound toggle, for the same reason: clear of the
+   joystick and the play buttons at the bottom. */
+.pause-toggle {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 5;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 99px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 8, 16, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+.pause-overlay.show {
+  display: flex;
+}
+
+.pause-card {
+  width: 100%;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 18px 18px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  text-align: center;
+}
+
+.pause-card .btn {
+  margin-top: 8px;
+}
+
+.pause-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  color: var(--gold);
+}
+
 /* ------------------------------------------------------------- box score */
 
 .result-hero {

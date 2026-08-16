@@ -24,8 +24,17 @@ import { PlaySim } from '../core/playSim';
 import { toPositionId } from '../core/fieldGeometry';
 import { AtBatView } from '../game/atBatView';
 import { PlayView } from '../game/playView';
+import { showCoachTip } from '../game/coachTips';
 import { esc, q } from '../ui/dom';
-import { isMuted, playSound, startAmbience, stopAmbience, toggleMuted } from '../ui/audio';
+import {
+  isMuted,
+  playSound,
+  resumeAmbience,
+  startAmbience,
+  stopAmbience,
+  suspendAmbience,
+  toggleMuted,
+} from '../ui/audio';
 
 const NORMAL_DELAY = 850;
 const FAST_DELAY = 220;
@@ -83,6 +92,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       <div id="host"></div>
       <button class="speed-toggle" id="speed">FAST ▸</button>
       <button class="sound-toggle" id="sound" aria-label="Toggle sound"></button>
+      <button class="pause-toggle" id="pause" aria-label="Pause">❚❚</button>
+      <div class="pause-overlay" id="paused">
+        <div class="pause-card">
+          <div class="pause-title">PAUSED</div>
+          <div class="tiny muted" id="pauseSub"></div>
+          <button class="btn primary" id="resume">Resume</button>
+        </div>
+      </div>
     </div>
 
     <div class="feed" id="feed"></div>
@@ -101,14 +118,19 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     q(mount, '#idleSub').textContent = sub;
   };
 
+  // The speed toggle only governs the simulated stretches between your
+  // moments. Left on screen during an at-bat it read as "the pitch is being
+  // sped up", so it goes away whenever you're actually playing.
   const showIdle = (): void => {
     idle.style.display = '';
     host.style.display = 'none';
+    speedBtn.style.display = '';
   };
 
   const showPlay = (): void => {
     idle.style.display = 'none';
     host.style.display = '';
+    speedBtn.style.display = 'none';
   };
 
   const addFeed = (text: string, tone: LogTone | 'inning'): void => {
@@ -141,10 +163,52 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   /* ------------------------------------------------------------ scheduling */
 
+  // The single-slot game clock. Remembered as (what, when) rather than just a
+  // timer id so a pause can lift it and put it back with the time it had left.
+  let pendingFn: (() => void) | null = null;
+  let pendingAt = 0;
+  let pendingLeft = 0;
+  let paused = false;
+
   const schedule = (fn: () => void, ms = delay): void => {
     if (disposed) return;
     clearTimeout(timer);
-    timer = window.setTimeout(fn, ms);
+    pendingFn = fn;
+    pendingAt = performance.now() + ms;
+    if (paused) return;
+    timer = window.setTimeout(() => {
+      pendingFn = null;
+      fn();
+    }, ms);
+  };
+
+  /* --------------------------------------------------------------- pausing */
+
+  const pauseBtn = q<HTMLButtonElement>(mount, '#pause');
+  const pauseOverlay = q(mount, '#paused');
+
+  /**
+   * Everything that moves stops: the pitch or play in progress, the wait
+   * before the next event, and the crowd. Nothing is lost — resume picks up
+   * exactly where it left off, with whatever was left on the clock.
+   */
+  const setPaused = (value: boolean): void => {
+    if (disposed || value === paused) return;
+    paused = value;
+    pauseOverlay.classList.toggle('show', value);
+    pauseBtn.style.display = value ? 'none' : '';
+    if (view) view.paused = value;
+
+    if (value) {
+      clearTimeout(timer);
+      // Freeze what's left on the clock; wall time keeps going while paused.
+      pendingLeft = Math.max(0, pendingAt - performance.now());
+      suspendAmbience();
+      q(mount, '#pauseSub').textContent = `${sim.inningLabel} · ${sim.outs} out`;
+    } else {
+      resumeAmbience();
+      if (pendingFn) schedule(pendingFn, pendingLeft);
+    }
   };
 
   const destroyView = (): void => {
@@ -232,6 +296,12 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         schedule(tick, delay + 350);
       },
     });
+    showCoachTip(
+      host,
+      'bat',
+      'Tap the ball as it reaches the plate. A hair under centre is a barrel.',
+      7000,
+    );
   }
 
   function beginFielding(event: Extract<SimEvent, { kind: 'fielding' }>): void {
@@ -263,11 +333,28 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       fieldingKit: side === 'offense' ? theirKit : myKit,
       battingKit: side === 'offense' ? myKit : theirKit,
       crowd: level.crowd,
+      // Home fills the first-base dugout: that's us when we're hosting and in
+      // the field, or when we're visiting and at bat.
+      homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',
       onComplete: (result: PlayOutcome) => {
         destroyView();
         finishLivePlay(result, side);
       },
     });
+
+    if (side === 'defense') {
+      showCoachTip(
+        host,
+        'field',
+        'Drag anywhere to run. Get under the gold ring, then tap a base to throw.',
+      );
+    } else {
+      showCoachTip(
+        host,
+        'run',
+        'GO takes the next base, HOLD pulls up. A red line means a throw is beating you.',
+      );
+    }
   }
 
   function finishLivePlay(result: PlayOutcome, side: UserSide): void {
@@ -386,6 +473,15 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   /* ---------------------------------------------------------------- input */
 
+  pauseBtn.addEventListener('click', () => setPaused(true));
+  q(mount, '#resume').addEventListener('click', () => setPaused(false));
+  // Backgrounding the app pauses the game rather than leaving a pitch or a
+  // play to run on (or freeze) behind a phone call.
+  const onVisibility = (): void => {
+    if (document.hidden) setPaused(true);
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+
   speedBtn.addEventListener('click', () => {
     delay = delay === NORMAL_DELAY ? FAST_DELAY : NORMAL_DELAY;
     speedBtn.textContent = delay === FAST_DELAY ? 'FAST ▸▸' : 'FAST ▸';
@@ -413,6 +509,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     clearTimeout(timer);
     clearTimeout(soundTimer);
     stopAmbience();
+    document.removeEventListener('visibilitychange', onVisibility);
     if (view) view.destroy();
   };
 }

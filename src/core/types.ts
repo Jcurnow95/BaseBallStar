@@ -125,6 +125,12 @@ export interface BattedBall {
   launchAngle: number;
   /** -1 = extreme pull, 0 = center, +1 = extreme opposite field. */
   spray: number;
+  /**
+   * Sidespin, -1..1, signed like `spray`: negative bends the ball toward left
+   * field, positive toward right. Comes from catching the ball off its centre.
+   * Absent on simulated (non-player) batted balls, which fly straight.
+   */
+  sideSpin?: number;
 }
 
 export type PlayResult =

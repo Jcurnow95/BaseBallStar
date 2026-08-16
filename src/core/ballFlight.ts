@@ -35,6 +35,15 @@ export const FLIGHT = {
   spinFalloffRate: 0.075,
   /** Extra backspin per mph of exit velocity above 90. Harder contact spins more. */
   evSpin: 0.09,
+  /**
+   * Magnus force from sidespin, per unit of `sideSpin`. Acts sideways,
+   * perpendicular to the flight path, so a ball caught on its edge visibly
+   * hooks or slices. Not fitted against data like `lift` — it's tuned so a
+   * full-rim tap bends a fly ball roughly 60-70 ft over its flight, enough to
+   * carry a ball down the line into foul ground, while a tap in the middle
+   * third of the ball barely bends at all.
+   */
+  sideLift: 0.09,
 };
 
 /**
@@ -77,6 +86,8 @@ export interface BallPhysics {
   vz: number;
   /** Backspin, as a multiplier on lift. 1 is a normally struck ball. */
   spin: number;
+  /** Sidespin, -1..1. Negative curves toward -x (left field), positive right. */
+  sideSpin: number;
   /** Once true, the ball can no longer be caught for an out. */
   bounced: boolean;
   atRest: boolean;
@@ -87,6 +98,7 @@ export function launchBall(
   launchAngle: number,
   spray: number,
   spin = 1,
+  sideSpin = 0,
 ): BallPhysics {
   const speed = exitVelocity * 1.4667; // mph -> ft/s
   const elevation = (launchAngle * Math.PI) / 180;
@@ -104,6 +116,7 @@ export function launchBall(
     vy: horizontal * Math.cos(bearing),
     vz: speed * Math.sin(elevation),
     spin: spinForBattedBall(exitVelocity, launchAngle, spin),
+    sideSpin,
     bounced: false,
     atRest: false,
   };
@@ -131,6 +144,18 @@ export function stepBall(ball: BallPhysics, dt: number): void {
       ball.vx += accel * (-(ball.vz / speed) * ux) * dt;
       ball.vy += accel * (-(ball.vz / speed) * uy) * dt;
       ball.vz += accel * (horizontal / speed) * dt;
+    }
+
+    if (ball.sideSpin !== 0) {
+      // Sidespin bends the ball sideways: perpendicular to its heading, in the
+      // horizontal plane. Positive sideSpin pushes toward +x, so a ball flying
+      // to centre (heading +y) with positive spin drifts toward right field.
+      const horizontal = Math.hypot(ball.vx, ball.vy) || 0.001;
+      const accel = FLIGHT.sideLift * speed * ball.sideSpin;
+      const ux = ball.vx / horizontal;
+      const uy = ball.vy / horizontal;
+      ball.vx += accel * uy * dt;
+      ball.vy += accel * -ux * dt;
     }
   } else {
     // On the ground: roll and slow down.

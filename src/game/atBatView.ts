@@ -71,9 +71,22 @@ export class AtBatView {
   private readonly opts: AtBatOptions;
 
   private phase: Phase = 'windup';
-  private phaseStart = 0;
+  /**
+   * Milliseconds into the current phase, advanced by the frame loop.
+   *
+   * This used to be read off the wall clock. The frame loop stops whenever the
+   * app is minimised or backgrounded, but the wall clock doesn't, so coming
+   * back to the game found the pitch long past the plate and rang up a called
+   * strike the player never saw — and left the pitcher frozen mid-delivery
+   * until something woke the loop up. Advancing the clock only by frames means
+   * time simply doesn't pass while you're away.
+   */
+  private phaseElapsed = 0;
+  private lastFrame = 0;
   private raf = 0;
   private destroyed = false;
+  /** Frozen: the loop keeps drawing but no time passes and taps are ignored. */
+  paused = false;
 
   private count: Count = { balls: 0, strikes: 0 };
   private pitch!: Pitch;
@@ -84,7 +97,6 @@ export class AtBatView {
   private tapPoint: { x: number; y: number } | null = null;
   private frozenBall: BallState | null = null;
   private afterFreeze: (() => void) | null = null;
-  private hiddenAt = 0;
   private readonly perfectZoneUnlocked: boolean;
 
   constructor(root: HTMLElement, opts: AtBatOptions) {
@@ -109,6 +121,7 @@ export class AtBatView {
 
     this.opts.onCount(this.count);
     this.nextPitch();
+    this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.loop);
   }
 
@@ -139,7 +152,7 @@ export class AtBatView {
 
   private setPhase(phase: Phase): void {
     this.phase = phase;
-    this.phaseStart = performance.now();
+    this.phaseElapsed = 0;
   }
 
   private freezeThen(text: string, tone: string, action: () => void): void {
@@ -199,29 +212,22 @@ export class AtBatView {
   /* ----------------------------------------------------------------- input */
 
   /**
-   * Flight timing runs off the wall clock, but rAF stops when the app is
-   * backgrounded. Without this, taking a phone call mid-pitch would come back
-   * as a called strike the player never saw. Re-deliver instead.
+   * The phase clock only advances with frames, so being backgrounded costs no
+   * game time. But a pitch you were half-way through reading is gone — coming
+   * back to a ball already on top of you isn't a fair swing. Re-deliver it.
    */
   private onVisibilityChange = (): void => {
-    if (document.hidden) {
-      this.hiddenAt = performance.now();
-      return;
-    }
-    if (!this.hiddenAt) return;
-    const away = performance.now() - this.hiddenAt;
-    this.hiddenAt = 0;
-
+    if (document.hidden) return;
+    this.lastFrame = performance.now();
     if (this.phase === 'flight' && !this.swung) {
       this.trail = [];
       this.setPhase('windup');
-    } else {
-      this.phaseStart += away;
     }
   };
 
   private onPointerDown = (e: PointerEvent): void => {
     e.preventDefault();
+    if (this.paused) return;
     if (this.phase === 'freeze' || this.swung) return;
 
     // Ball positions live in stage space, so the tap has to be moved into it
@@ -230,11 +236,11 @@ export class AtBatView {
     const { x, y } = this.toStage(tap.x, tap.y);
 
     if (this.phase === 'windup') {
-      // Jumped before the pitch was even thrown.
-      this.swung = true;
-      vibrate(15);
-      playSound('whiff');
-      this.registerStrike('Way early — swing and a miss.');
+      // Before the pitch is even thrown. This used to be scored as a swing
+      // and a miss, which mostly punished people prodding the screen to see
+      // if the game was still alive — a real early swing (the first frame of
+      // the flight) already whiffs on its own. Just say so.
+      this.readout.textContent = 'WAIT FOR THE PITCH…';
       return;
     }
 
@@ -277,7 +283,9 @@ export class AtBatView {
     // Two ways to foul one off: hit it outside the lines, or catch it badly
     // enough that it goes back to the screen. The second keeps counts
     // developing at the rate the plate-appearance balance was tuned for.
-    const landing = predictLanding(launchBall(bb.exitVelocity, bb.launchAngle, bb.spray));
+    const landing = predictLanding(
+      launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, 1, bb.sideSpin ?? 0),
+    );
     const sprayedFoul = !isFair(landing.point);
     const chippedFoul = this.opts.rng.chance(foulChanceFor(bb.quality));
 
@@ -311,8 +319,7 @@ export class AtBatView {
   /* ------------------------------------------------------------ simulation */
 
   private flightProgress(): number {
-    const elapsed = performance.now() - this.phaseStart;
-    return elapsed / this.pitch.def.duration;
+    return this.phaseElapsed / this.pitch.def.duration;
   }
 
   /**
@@ -380,7 +387,12 @@ export class AtBatView {
     // Flatter than `travel`, so the ball is already a fat target through the
     // swing window rather than only at the instant it reaches the plate. The
     // flight itself is unchanged — this is size, not speed.
-    const grow = Math.pow(capped, 2);
+    //
+    // Flattened again for the read rather than the swing: at 2 the ball was
+    // still under 30px across for the first 40% of the flight, which is the
+    // window the pitch has to be identified in (the readout appears at 0.22).
+    // The size at the plate is set by `maxR` and is untouched by this.
+    const grow = Math.pow(capped, 1.6);
     // Break arrives late, which is what makes a slider a slider.
     const breakIn = Math.pow(capped, this.pitch.def.breakSharpness);
 
@@ -408,9 +420,13 @@ export class AtBatView {
   private loop = (): void => {
     if (this.destroyed) return;
     const now = performance.now();
+    // Capped, so a hitch or a spell in the background is a pause, not a jump.
+    if (!this.paused) this.phaseElapsed += Math.min(now - this.lastFrame, 50);
+    this.lastFrame = now;
 
-    if (this.phase === 'windup' && now - this.phaseStart >= WINDUP_MS) {
+    if (this.phase === 'windup' && this.phaseElapsed >= WINDUP_MS) {
       this.setPhase('flight');
+      this.readout.textContent = '';
     } else if (this.phase === 'flight') {
       const t = this.flightProgress();
       // The pitch reveals itself out of the hand — how reliably depends on Vision.
@@ -424,7 +440,7 @@ export class AtBatView {
         if (this.pitch.isStrike) this.registerStrike('Called strike.', 'bad');
         else this.registerBall();
       }
-    } else if (this.phase === 'freeze' && now - this.phaseStart >= FREEZE_MS) {
+    } else if (this.phase === 'freeze' && this.phaseElapsed >= FREEZE_MS) {
       const action = this.afterFreeze;
       this.afterFreeze = null;
       if (action) action();
@@ -566,11 +582,10 @@ export class AtBatView {
     ctx.ellipse(L.mound.x, L.mound.y + L.H * 0.02, L.W * 0.11, L.H * 0.022, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const windup =
-      this.phase === 'windup' ? clamp((performance.now() - this.phaseStart) / WINDUP_MS, 0, 1) : 1;
+    const windup = this.phase === 'windup' ? clamp(this.phaseElapsed / WINDUP_MS, 0, 1) : 1;
     const afterRelease = this.phase !== 'windup';
     // How far through the follow-through we are, once the ball is gone.
-    const follow = afterRelease ? clamp((performance.now() - this.phaseStart) / 420, 0, 1) : 0;
+    const follow = afterRelease ? clamp(this.phaseElapsed / 420, 0, 1) : 0;
 
     const kit = this.opts.pitcherKit;
     const bodyH = L.H * 0.062;
@@ -755,8 +770,9 @@ export class AtBatView {
 
   /**
    * The perfect hit zone, unlocked at 120 combined Contact and Vision. Marks
-   * the ideal contact point on the ball as it comes in — purely an aid, it
-   * changes nothing about how contact resolves.
+   * the sweet spot on the ball as it comes in — the barrel zone that gives the
+   * home-run chance. The whole ball is hittable; this is just where the damage
+   * is. Purely an aid, it changes nothing about how contact resolves.
    */
   private drawPerfectZone(ctx: CanvasRenderingContext2D, ball: BallState): void {
     if (!this.perfectZoneUnlocked) return;

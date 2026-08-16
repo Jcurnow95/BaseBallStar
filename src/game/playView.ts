@@ -26,6 +26,11 @@ export interface PlayViewOptions {
   battingKit: PlayerColors;
   /** How full the stands are, 0-1. Comes from the level being played. */
   crowd: number;
+  /**
+   * Which of the two sides is the home team. Home takes the first-base
+   * dugout, the visitors sit on the third-base side.
+   */
+  homeSide: 'fielding' | 'batting';
   onComplete(outcome: PlayOutcome): void;
 }
 
@@ -37,6 +42,18 @@ const HEIGHT_SCALE = 0.62;
 /** How deep the outfield stand is, in feet, and how many seats it holds. */
 const STAND_DEPTH = 70;
 const SEAT_COUNT = 1500;
+
+/**
+ * Dugouts sit in foul territory, parallel to the lines. Measured in feet:
+ * how far down the line the bench is centred, how far off the line it sits,
+ * and its footprint. Eight players stand at the rail in each — the rest of the
+ * side that isn't on the field or the bases.
+ */
+const DUGOUT_ALONG = 74;
+const DUGOUT_OFFSET = 34;
+const DUGOUT_LENGTH = 62;
+const DUGOUT_DEPTH = 13;
+const DUGOUT_BENCH = 8;
 
 const GRASS_DARK = '#1f7a3f';
 const GRASS_LIGHT = '#26924b';
@@ -69,6 +86,7 @@ export class PlayView {
   private lastEvent = '';
   private completed = false;
   private catchOverlay: CatchOverlay | null = null;
+  private _paused = false;
   /** Last rendered control set, so the DOM is only rebuilt when it changes. */
   private controlSignature = '';
   private statusText = '';
@@ -141,6 +159,7 @@ export class PlayView {
 
   private onPointerDown = (e: PointerEvent): void => {
     e.preventDefault();
+    if (this._paused) return;
     if (this.sim.setup.userSide !== 'defense') return;
     const p = pointerPos(this.surface.canvas, e);
     this.joystick = {
@@ -173,7 +192,7 @@ export class PlayView {
    */
   private onControlDown = (e: PointerEvent): void => {
     const target = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
-    if (!target) return;
+    if (!target || this._paused) return;
     e.preventDefault();
     const act = target.dataset.act;
     vibrate(12);
@@ -240,11 +259,18 @@ export class PlayView {
         } else if (target > runner.at) {
           text = `RUNNING TO ${BASE_LABELS[target]}`;
           tone = 'going';
+        } else if (runner.progress > 0) {
+          // Nowhere to go — the bag ahead is taken — so back to the last one.
+          text = `BACK TO ${BASE_LABELS[runner.at]}`;
+          tone = 'holding';
         } else {
           text = `HOLDING AT ${BASE_LABELS[runner.at]}`;
           tone = 'holding';
         }
       }
+    } else if (sim.setup.userSide === 'defense' && sim.userHasBall) {
+      text = 'TAP A BASE TO THROW';
+      tone = 'going';
     }
 
     if (text === this.statusText) return;
@@ -255,10 +281,21 @@ export class PlayView {
 
   /* ------------------------------------------------------------------- loop */
 
+  /** Frozen: still drawn, but the sim doesn't advance and input is ignored. */
+  get paused(): boolean {
+    return this._paused;
+  }
+
+  set paused(value: boolean) {
+    this._paused = value;
+    if (value) this.joystick.active = false;
+    if (this.catchOverlay) this.catchOverlay.paused = value;
+  }
+
   private loop = (): void => {
     if (this.destroyed) return;
     const now = performance.now();
-    const dt = Math.min((now - this.lastFrame) / 1000, 1 / 20);
+    const dt = this._paused ? 0 : Math.min((now - this.lastFrame) / 1000, 1 / 20);
     this.lastFrame = now;
 
     const sim = this.sim;
@@ -275,7 +312,7 @@ export class PlayView {
       }
     }
 
-    sim.update(dt);
+    if (!this._paused) sim.update(dt);
     this.syncCatchOverlay();
 
     if (sim.userHasBall !== hadBall) this.controlSignature = '';
@@ -338,6 +375,7 @@ export class PlayView {
         this.renderControls();
       },
     });
+    this.catchOverlay.paused = this._paused;
   }
 
   private toneFor(event: string): string {
@@ -436,6 +474,7 @@ export class PlayView {
     this.drawFence(ctx);
     this.drawInfield(ctx);
     this.drawBases(ctx);
+    this.drawDugouts(ctx, dt);
     this.drawLandingMarker(ctx);
     this.drawRunners(ctx, dt);
     this.drawFielders(ctx, dt);
@@ -624,6 +663,120 @@ export class PlayView {
     ctx.restore();
   }
 
+  /**
+   * The two dugouts, one either side of the plate in foul ground, with each
+   * team's bench standing at the rail in its own uniform. Home is on the
+   * first-base side, so which kit fills which dugout follows from who's
+   * hosting, not who's batting.
+   */
+  private drawDugouts(ctx: CanvasRenderingContext2D, dt: number): void {
+    const homeIsFielding = this.opts.homeSide === 'fielding';
+    const homeKit = homeIsFielding ? this.opts.fieldingKit : this.opts.battingKit;
+    const awayKit = homeIsFielding ? this.opts.battingKit : this.opts.fieldingKit;
+    this.drawDugout(ctx, dt, 1, homeKit);
+    this.drawDugout(ctx, dt, -1, awayKit);
+  }
+
+  private drawDugout(
+    ctx: CanvasRenderingContext2D,
+    dt: number,
+    side: 1 | -1,
+    kit: PlayerColors,
+  ): void {
+    // Unit vectors along the foul line and away from it, into foul ground.
+    const along: Vec2 = { x: side / Math.SQRT2, y: 1 / Math.SQRT2 };
+    const out: Vec2 = { x: side / Math.SQRT2, y: -1 / Math.SQRT2 };
+    const at = (a: number, o: number): Vec2 =>
+      this.toScreen({ x: along.x * a + out.x * o, y: along.y * a + out.y * o });
+
+    const a0 = DUGOUT_ALONG - DUGOUT_LENGTH / 2;
+    const a1 = DUGOUT_ALONG + DUGOUT_LENGTH / 2;
+    const o0 = DUGOUT_OFFSET;
+    const o1 = DUGOUT_OFFSET + DUGOUT_DEPTH;
+
+    const W = this.surface.width;
+    const H = this.surface.height;
+    const corners = [at(a0, o0), at(a1, o0), at(a1, o1), at(a0, o1)];
+    const xs = corners.map((c) => c.x);
+    const ys = corners.map((c) => c.y);
+    const margin = 60;
+    if (
+      Math.max(...xs) < -margin || Math.min(...xs) > W + margin ||
+      Math.max(...ys) < -margin || Math.min(...ys) > H + margin
+    ) {
+      return;
+    }
+
+    const poly = (points: Vec2[]) => {
+      ctx.beginPath();
+      points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+      ctx.closePath();
+    };
+
+    ctx.save();
+
+    // Dirt apron in front, so the bench doesn't sit straight on the grass.
+    ctx.fillStyle = DIRT;
+    poly([at(a0 - 3, o0 - 5), at(a1 + 3, o0 - 5), at(a1 + 3, o0 + 1), at(a0 - 3, o0 + 1)]);
+    ctx.fill();
+
+    // The sunken floor, then the roof shading the back half.
+    ctx.fillStyle = '#4a5468';
+    poly(corners);
+    ctx.fill();
+    ctx.fillStyle = '#2b3243';
+    poly([
+      at(a0, o0 + DUGOUT_DEPTH * 0.55),
+      at(a1, o0 + DUGOUT_DEPTH * 0.55),
+      at(a1, o1),
+      at(a0, o1),
+    ]);
+    ctx.fill();
+
+    // Bench along the back wall, in the team's colour.
+    ctx.strokeStyle = kit.shirt;
+    ctx.lineWidth = Math.max(2, 2.2 * this.scale);
+    ctx.lineCap = 'butt';
+    const b0 = at(a0 + 2, o1 - 2.5);
+    const b1 = at(a1 - 2, o1 - 2.5);
+    ctx.beginPath();
+    ctx.moveTo(b0.x, b0.y);
+    ctx.lineTo(b1.x, b1.y);
+    ctx.stroke();
+
+    // Outline of the pit, and the rail on the field side.
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = Math.max(1, 0.8 * this.scale);
+    poly(corners);
+    ctx.stroke();
+    ctx.strokeStyle = '#d7dbe6';
+    ctx.lineWidth = Math.max(1.5, 1.1 * this.scale);
+    const r0 = at(a0, o0);
+    const r1 = at(a1, o0);
+    ctx.beginPath();
+    ctx.moveTo(r0.x, r0.y);
+    ctx.lineTo(r1.x, r1.y);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // The bench, spread along the rail, all watching the plate. A touch
+    // smaller than the nine in play so the dugout reads as background.
+    const height = this.spriteHeight() * 0.8;
+    const stride = (DUGOUT_LENGTH - 10) / (DUGOUT_BENCH - 1);
+    const plate = this.toScreen(BASES[0]);
+    for (let i = 0; i < DUGOUT_BENCH; i++) {
+      // A little stagger so they don't stand in a parade line.
+      const stagger = ((i * 7 + (side > 0 ? 3 : 0)) % 5) * 0.6;
+      const p = at(a0 + 5 + i * stride, o0 + 3.5 + stagger);
+      // Fed a fixed point rather than the screen position, so a camera pan
+      // doesn't set their legs churning — they only idle.
+      const anim = this.animFor(`d:${side}:${i}`, { x: 0, y: 0 }, dt);
+      anim.facing = Math.atan2(plate.y - p.y, plate.x - p.x);
+      drawPlayer(ctx, p.x, p.y, { height, colors: kit, anim });
+    }
+  }
+
   private drawBases(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = '#f4f6fa';
     for (let i = 1; i <= 3; i++) {
@@ -763,6 +916,9 @@ export class PlayView {
       ctx.fill();
     }
 
+    // Small fixed-pixel ball, growing a little with height so a fly ball reads
+    // as airborne. A canvas-scaled version was tried and read as far too big
+    // against the fielders and the diamond.
     const radius = clamp(3.2 + sim.ball.z / 34, 3, 7.5);
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.4)';

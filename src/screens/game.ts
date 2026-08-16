@@ -263,6 +263,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       fieldingKit: side === 'offense' ? theirKit : myKit,
       battingKit: side === 'offense' ? myKit : theirKit,
       crowd: level.crowd,
+      // Home fills the first-base dugout: that's us when we're hosting and in
+      // the field, or when we're visiting and at bat.
+      homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',
       onComplete: (result: PlayOutcome) => {
         destroyView();
         finishLivePlay(result, side);

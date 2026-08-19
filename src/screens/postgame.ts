@@ -1,6 +1,7 @@
 import type { App } from '../app';
 import { battingAverage } from '../core/player';
 import { contractById, formatMoney } from '../core/gear';
+import { ROUND_LABEL } from '../core/playoffs';
 import { esc, q } from '../ui/dom';
 
 export function renderPostGame(app: App, mount: HTMLElement): void {
@@ -12,8 +13,42 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
 
   const save = app.requireSave();
   const { stats } = summary;
-  const verdict = summary.tie ? 'TIE' : summary.win ? 'WIN' : 'LOSS';
-  const verdictClass = summary.tie ? 'tie' : summary.win ? 'win' : 'loss';
+  const playoff = summary.playoff;
+  const champion = playoff?.status === 'champion';
+  const verdict = champion ? 'CHAMPIONS' : summary.tie ? 'TIE' : summary.win ? 'WIN' : 'LOSS';
+  const verdictClass = champion ? 'champ' : summary.tie ? 'tie' : summary.win ? 'win' : 'loss';
+
+  // Where the series stands, and what it means.
+  const seriesHtml = ((): string => {
+    if (!playoff) return '';
+    const round = ROUND_LABEL[playoff.round];
+    const tally = `${playoff.us}-${playoff.them}`;
+    let note: string;
+    let cls = '';
+    switch (playoff.status) {
+      case 'champion':
+        note = `You win the ${round} ${tally}. The trophy is yours.`;
+        break;
+      case 'advanced':
+        note = `You take the ${round} ${tally} and move on to the ${ROUND_LABEL.final}.`;
+        break;
+      case 'eliminated':
+        note = `The ${esc(playoff.opponent)} take the ${round} ${tally}. Your season is over.`;
+        cls = 'warn';
+        break;
+      default: {
+        const need = Math.ceil(playoff.bestOf / 2);
+        if (playoff.us > playoff.them) {
+          note = `You lead the ${round} ${tally}.${playoff.us === need - 1 ? " One more and it's yours." : ''}`;
+        } else if (playoff.us < playoff.them) {
+          note = `You trail the ${round} ${tally}.${playoff.them === need - 1 ? ' Win or go home.' : ''}`;
+        } else {
+          note = `The ${round} is level at ${tally}.`;
+        }
+      }
+    }
+    return `<div class="notice ${cls}" style="margin-bottom:12px"><b>${round}</b> · ${note}</div>`;
+  })();
 
   const line = [
     `${stats.hits}-for-${stats.ab}`,
@@ -33,6 +68,8 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
           summary.home ? 'vs' : '@'
         } ${esc(summary.opponent)}</div>
       </div>
+
+      ${seriesHtml}
 
       <div class="panel">
         <h2>Your line</h2>

@@ -4,6 +4,7 @@ import { clearSave, loadSave, writeSave } from './core/save';
 import type { BattingStats } from './core/types';
 import type { Earnings } from './core/gear';
 import type { GameScore } from './core/gameSim';
+import type { PlayoffGameOutcome } from './core/playoffs';
 
 export type Route =
   | 'title'
@@ -33,6 +34,8 @@ export interface PostGameSummary {
   wornOut: string[];
   levelsGained: number;
   pointsGained: number;
+  /** Where the series stands after this game, when it was a playoff game. */
+  playoff?: PlayoffGameOutcome;
   seasonComplete: boolean;
 }
 

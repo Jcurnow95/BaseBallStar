@@ -439,6 +439,11 @@ select {
   border-color: var(--line);
 }
 
+.cal-day.playoff {
+  background: var(--gold);
+  opacity: 0.75;
+}
+
 .cal-day.past {
   opacity: 0.32;
 }
@@ -623,6 +628,128 @@ table.standings th:not(:first-child) {
 table.standings tr.me td {
   color: var(--accent);
   font-weight: 700;
+}
+
+table.standings tr.cut td {
+  border-bottom: 1px dashed var(--gold);
+}
+
+table.standings tr.clinched td:first-child::after {
+  content: 'x';
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--gold);
+  font-weight: 700;
+}
+
+/* -------------------------------------------------------------- playoffs */
+
+.bracket {
+  display: grid;
+  gap: 12px;
+}
+
+.bracket-title {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.series-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px 10px;
+  background: var(--panel-2);
+  margin-bottom: 6px;
+}
+
+.series-card:last-child {
+  margin-bottom: 0;
+}
+
+.series-card.pending {
+  padding: 12px 10px;
+  text-align: center;
+  border-style: dashed;
+  background: transparent;
+}
+
+.series-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.series-row + .series-row {
+  border-top: 1px solid var(--line);
+}
+
+.series-row .seed {
+  width: 14px;
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.series-row .name {
+  flex: 1;
+}
+
+.series-row .wins {
+  font-weight: 800;
+  min-width: 28px;
+  text-align: right;
+}
+
+.series-row.leading .wins,
+.series-row.won .wins {
+  color: var(--gold);
+}
+
+.series-row.me .name {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.series-row.lost {
+  opacity: 0.45;
+}
+
+.champion-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-weight: 800;
+  color: var(--gold);
+}
+
+.champion-line .trophy {
+  font-size: 20px;
+}
+
+.result-hero .verdict.champ {
+  color: var(--gold);
+  text-shadow: 0 0 18px rgba(255, 209, 102, 0.45);
+}
+
+.playoff-tag {
+  display: inline-block;
+  margin: 4px 0 2px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.16);
+  border: 1px solid rgba(255, 209, 102, 0.5);
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* ------------------------------------------------------------ game screen */

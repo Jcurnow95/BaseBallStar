@@ -50,6 +50,12 @@ const FREEZE_MS = 1250;
  * phone, and letterboxes rather than distorts on anything wider.
  */
 const STAGE_ASPECT = 0.6;
+/**
+ * The mound's crest as a fraction of stage height. Below the horizon (0.36) so
+ * it sits on the grass, and above the strike zone's top edge (0.485) with room
+ * for the hump's ground shadow.
+ */
+const MOUND_Y = 0.415;
 /** Flight continues past the plate so late swings still have something to hit. */
 const OVERRUN = 1.22;
 
@@ -366,7 +372,13 @@ export class AtBatView {
       zoneY: H * 0.585,
       zoneHW: W * 0.185,
       zoneHH: H * 0.1,
-      mound: { x: W / 2, y: H * 0.315 },
+      // Where the pitcher stands: the crest of the mound, on the grass below
+      // the horizon so the figure reads as planted on the field rather than
+      // hovering in front of the outfield wall.
+      mound: { x: W / 2, y: H * MOUND_Y },
+      // Where the ball leaves the throwing hand — up by the shoulder, on the
+      // arm side — so the pitch comes out of the release rather than the feet.
+      release: { x: W / 2 - W * 0.042 * 0.2 - H * 0.062 * 0.57, y: H * MOUND_Y - H * 0.062 * 1.06 },
       minR: Math.max(3, W * 0.015),
       // Sized for a fingertip, not for realism. Tap offsets are measured in ball
       // radii (see `core/swing.ts`), so a bigger ball is a bigger target in
@@ -412,8 +424,8 @@ export class AtBatView {
     const targetX = lerp(apparent.x, actual.x, breakIn);
     const targetY = lerp(apparent.y, actual.y, breakIn);
 
-    let x = lerp(L.mound.x, targetX, travel);
-    let y = lerp(L.mound.y, targetY, travel);
+    let x = lerp(L.release.x, targetX, travel);
+    let y = lerp(L.release.y, targetY, travel);
     let r = lerp(L.minR, L.maxR, grow);
 
     if (p > 1) {
@@ -550,7 +562,7 @@ export class AtBatView {
     ctx.fillStyle = '#8a5a35';
     ctx.beginPath();
     ctx.moveTo(left - fullW * 0.2, bottom);
-    ctx.quadraticCurveTo(L.cx, L.H * 0.52, right + fullW * 0.2, bottom);
+    ctx.quadraticCurveTo(L.cx, L.H * 0.5, right + fullW * 0.2, bottom);
     ctx.closePath();
     ctx.fill();
   }
@@ -606,12 +618,6 @@ export class AtBatView {
    * as a bat.
    */
   private drawPitcher(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
-    // Mound.
-    ctx.fillStyle = '#8a5a35';
-    ctx.beginPath();
-    ctx.ellipse(L.mound.x, L.mound.y + L.H * 0.02, L.W * 0.11, L.H * 0.022, 0, 0, Math.PI * 2);
-    ctx.fill();
-
     const windup = this.phase === 'windup' ? clamp(this.phaseElapsed / WINDUP_MS, 0, 1) : 1;
     const afterRelease = this.phase !== 'windup';
     // How far through the follow-through we are, once the ball is gone.
@@ -622,8 +628,9 @@ export class AtBatView {
     const bodyW = L.W * 0.042;
     const legLen = bodyH * 0.62;
     const armLen = bodyH * 0.58;
-    const shoulderY = -bodyH;
-    const hipY = -bodyH * 0.42;
+    // Where the planted back foot meets the dirt: the crest of the mound. The
+    // feet stay here through the delivery; the crouch drops the body onto them.
+    const footY = -bodyH * 0.42 + legLen;
 
     // Gather (0-0.35), stride (0.35-0.78), whip through release (0.78-1).
     const gather = clamp(windup / 0.35, 0, 1);
@@ -632,9 +639,64 @@ export class AtBatView {
 
     const lift = Math.sin(gather * Math.PI) * (1 - stride);
     const crouch = Math.sin(windup * Math.PI) * bodyH * 0.1;
+    const shoulderY = -bodyH + crouch;
+    const hipY = -bodyH * 0.42 + crouch;
+
+    // ---- Mound: a raised hump of dirt sitting on the grass, with the pitcher's
+    // feet on its crest. Drawn in mound space (not shifted by the crouch) so the
+    // ground stays put while the figure bobs through the delivery.
+    ctx.save();
+    ctx.translate(L.mound.x, L.mound.y);
+    {
+      const rx = L.W * 0.135;
+      const hump = L.H * 0.028;
+      const baseY = footY + hump * 0.75;
+
+      // Ground shadow the hump throws onto the grass, low and toward us.
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.beginPath();
+      ctx.ellipse(0, baseY + hump * 0.35, rx * 1.02, hump * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Flat dirt circle the hump rises out of.
+      ctx.fillStyle = '#7d4f2c';
+      ctx.beginPath();
+      ctx.ellipse(0, baseY, rx, hump * 0.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // The hump itself: lit from above, darkening toward the near edge.
+      const dome = ctx.createLinearGradient(0, footY - hump * 0.3, 0, baseY);
+      dome.addColorStop(0, '#b47a48');
+      dome.addColorStop(0.55, '#96633a');
+      dome.addColorStop(1, '#7d4f2c');
+      ctx.fillStyle = dome;
+      ctx.beginPath();
+      ctx.moveTo(-rx * 0.82, baseY);
+      ctx.quadraticCurveTo(-rx * 0.5, footY - hump * 0.3, 0, footY - hump * 0.3);
+      ctx.quadraticCurveTo(rx * 0.5, footY - hump * 0.3, rx * 0.82, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Front lip of the hump, so it reads as rounded rather than a flat wedge.
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+      ctx.beginPath();
+      ctx.ellipse(0, baseY - hump * 0.05, rx * 0.82, hump * 0.42, 0, 0, Math.PI);
+      ctx.fill();
+
+      // Pitching rubber on the crest, just behind the feet.
+      ctx.fillStyle = '#e9e6dd';
+      ctx.fillRect(-bodyW * 0.75, footY - hump * 0.18, bodyW * 1.5, Math.max(1.5, hump * 0.14));
+
+      // The pitcher's own shadow, pooled at the feet on the crest.
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(bodyW * 0.1, footY + hump * 0.08, bodyW * 1.05, hump * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
 
     ctx.save();
-    ctx.translate(L.mound.x, L.mound.y - crouch);
+    ctx.translate(L.mound.x, L.mound.y);
     ctx.lineCap = 'round';
 
     // ---- Legs. Back leg plants, front leg lifts then strides toward us.
@@ -643,11 +705,11 @@ export class AtBatView {
 
     ctx.beginPath();
     ctx.moveTo(0, hipY);
-    ctx.lineTo(-bodyW * 0.5, hipY + legLen);
+    ctx.lineTo(-bodyW * 0.5, footY);
     ctx.stroke();
 
     const frontKneeX = bodyW * (0.25 + stride * 0.75);
-    const frontFootY = hipY + legLen * (1 - lift * 0.55) + follow * legLen * 0.12;
+    const frontFootY = footY - legLen * lift * 0.55 + follow * legLen * 0.12;
     ctx.beginPath();
     ctx.moveTo(0, hipY);
     ctx.lineTo(frontKneeX, frontFootY);

@@ -15,7 +15,8 @@ import { drawGloom, drawRain, drawWindFlag } from './weatherFx';
  * Top-down view of a live play. Camera tracks the ball and whoever the player
  * is controlling, zooming out when they spread apart so both stay on screen.
  *
- * On defense you drag anywhere to steer your fielder and tap a base to throw.
+ * On defense you drag anywhere to steer your fielder, then tap a base to throw
+ * — or run the ball to the bag yourself.
  * On offense you decide whether to take the extra base.
  */
 
@@ -202,6 +203,7 @@ export class PlayView {
 
     if (act === 'advance') this.sim.advanceRunner();
     else if (act === 'hold') this.sim.holdRunner();
+    else if (act === 'back') this.sim.retreatRunner();
     else if (act?.startsWith('throw')) this.sim.throwTo(Number(act.slice(5)) as BaseId);
 
     this.renderControls();
@@ -222,8 +224,12 @@ export class PlayView {
     } else if (sim.setup.userSide === 'offense') {
       const go = sim.userGoTarget;
       const hold = sim.userHoldTarget;
-      signature = `off:${go}:${hold}`;
+      const back = sim.userBackTarget;
+      signature = `off:${go}:${hold}:${back}`;
       html =
+        (back !== null
+          ? `<button class="play-btn back" data-act="back">BACK TO ${BASE_LABELS[back]}</button>`
+          : '') +
         (hold !== null
           ? `<button class="play-btn hold" data-act="hold">HOLD AT ${BASE_LABELS[hold]}</button>`
           : '') +
@@ -256,14 +262,17 @@ export class PlayView {
       const runner = sim.userRunner;
       const target = sim.userRunnerTarget;
       if (runner && target !== null) {
-        if (sim.throwBeatingUserRunner) {
-          text = `THROW TO ${BASE_LABELS[(runner.at + 1) % 4]} — RUN!`;
+        const next = sim.userRunnerNextBase;
+        if (sim.throwBeatingUserRunner && next !== null) {
+          text = sim.userRunnerRetreating
+            ? `BALL TO ${BASE_LABELS[next]} — DIVE!`
+            : `BALL TO ${BASE_LABELS[next]} — RUN OR GO BACK!`;
           tone = 'danger';
         } else if (target > runner.at) {
           text = `RUNNING TO ${BASE_LABELS[target]}`;
           tone = 'going';
         } else if (runner.progress > 0) {
-          // Nowhere to go — the bag ahead is taken — so back to the last one.
+          // Heading back — by choice, or because the bag ahead is taken.
           text = `BACK TO ${BASE_LABELS[runner.at]}`;
           tone = 'holding';
         } else {
@@ -272,7 +281,7 @@ export class PlayView {
         }
       }
     } else if (sim.setup.userSide === 'defense' && sim.userHasBall) {
-      text = 'TAP A BASE TO THROW';
+      text = sim.forcePlayBases.length > 0 ? 'THROW TO A BASE — OR RUN IT THERE' : 'TAP A BASE TO THROW';
       tone = 'going';
     }
 
@@ -477,6 +486,7 @@ export class PlayView {
     this.drawFence(ctx);
     this.drawInfield(ctx);
     this.drawBases(ctx);
+    this.drawForceRings(ctx);
     this.drawDugouts(ctx, dt);
     this.drawLandingMarker(ctx);
     this.drawRunners(ctx, dt);
@@ -807,6 +817,29 @@ export class PlayView {
     ctx.fill();
   }
 
+  /**
+   * With the ball in the player's glove, ring every bag where a force is still
+   * on. Getting the ball there first — throw it, or run it in yourself — is
+   * the out. Without this the "step on the bag" play was invisible: nothing
+   * told the player that the base ten feet away was worth running to.
+   */
+  private drawForceRings(ctx: CanvasRenderingContext2D): void {
+    const bases = this.sim.forcePlayBases;
+    if (bases.length === 0) return;
+
+    const pulse = 0.5 + Math.sin(performance.now() / 220) * 0.18;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 209, 102, ${pulse})`;
+    ctx.lineWidth = 2.5;
+    for (const base of bases) {
+      const p = this.toScreen(BASES[base]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(11, 9 * this.scale), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   /** The circle a fly ball is coming down into — the whole point of the mode. */
   private drawLandingMarker(ctx: CanvasRenderingContext2D): void {
     const sim = this.sim;
@@ -881,12 +914,15 @@ export class PlayView {
    * you there. Without this the hold-or-go call is guesswork.
    */
   private drawIntentArrow(ctx: CanvasRenderingContext2D, p: Vec2, runner: RunnerState): void {
-    if (runner.at >= runner.intent) return;
+    // Stood on a bag: nothing to point at. Between bases it points wherever
+    // they're headed — ahead, or back to the one they left.
+    if (runner.progress <= 0 && runner.at >= runner.intent) return;
+    const next = this.sim.userRunnerNextBase;
+    if (next === null) return;
 
     const contested = this.sim.throwBeatingUserRunner;
     const colour = contested ? '255, 107, 107' : '255, 209, 102';
-    const nextBase = BASES[(runner.at + 1) % 4];
-    const target = this.toScreen(nextBase);
+    const target = this.toScreen(BASES[next]);
 
     ctx.save();
     ctx.strokeStyle = `rgba(${colour}, 0.85)`;

@@ -5,6 +5,7 @@ import type { Count } from '../core/pitching';
 import {
   LEVELS,
   advanceDay,
+  isRegularSeasonOver,
   isSeasonOver,
   nextGame,
   parkForGame,
@@ -14,6 +15,8 @@ import {
   teamKit,
   weatherForGame,
 } from '../core/league';
+import type { PlayoffGameOutcome } from '../core/playoffs';
+import { ROUND_LABEL, playerSeries, recordPlayoffGame, seriesLine, startPlayoffs } from '../core/playoffs';
 import { describeWeather, windLabel, windMph } from '../core/weather';
 import { uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
@@ -28,6 +31,8 @@ import { AtBatView } from '../game/atBatView';
 import { PlayView } from '../game/playView';
 import { showCoachTip, tipSeen } from '../game/coachTips';
 import { esc, q } from '../ui/dom';
+import type { FeedIcon } from '../ui/feedIcons';
+import { feedIconFor, feedIconSvg } from '../ui/feedIcons';
 import {
   isMuted,
   playSound,
@@ -61,7 +66,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   // Home team wears its home kit, the visitor its road kit.
   const myKit = uniformFor(teamKit(league, myTeam.id), scheduled.home);
   const theirKit = uniformFor(teamKit(league, opponent.id), !scheduled.home);
-  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng, weather);
+  // A postseason game plays until somebody wins.
+  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng, weather, !!scheduled.playoff);
+
+  // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night.
+  const series = scheduled.playoff ? playerSeries(league) : null;
+  const playoffTag = (() => {
+    if (!scheduled.playoff || !series) return '';
+    const line = seriesLine(league, series);
+    const tally =
+      line.us + line.them === 0 ? '' : ` · Series ${line.us}-${line.them}`;
+    return `${ROUND_LABEL[series.round]} · Game ${scheduled.playoff.gameNo}${tally}`;
+  })();
 
   let delay = NORMAL_DELAY;
   let timer = 0;
@@ -89,6 +105,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       <div class="idle-stage" id="idle">
         <div class="sub" id="idleSub">First pitch</div>
         <div class="big" id="idleBig">${esc(scheduled.home ? 'vs' : '@')} ${esc(opponent.name)}<br/>
+          ${playoffTag ? `<span class="playoff-tag">${esc(playoffTag)}</span><br/>` : ''}
           <span class="muted tiny">${esc(park.name)} · ${esc(sim.pitcher.name)} on the mound</span><br/>
           <span class="muted tiny">${esc(describeWeather(weather))}</span>
         </div>
@@ -137,10 +154,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     speedBtn.style.display = 'none';
   };
 
-  const addFeed = (text: string, tone: LogTone | 'inning'): void => {
+  const addFeed = (text: string, tone: LogTone | 'inning', icon?: FeedIcon): void => {
     const line = document.createElement('div');
     line.className = tone;
-    line.textContent = text;
+    // Inning breaks always get the diamond; everything else is read off the
+    // words unless the caller knows better.
+    const glyph = icon ?? (tone === 'inning' ? 'inning' : feedIconFor(text));
+    line.innerHTML = `<i class="feed-icon ${glyph}">${feedIconSvg(glyph)}</i><span></span>`;
+    line.lastElementChild!.textContent = text;
     feed.appendChild(line);
     while (feed.childElementCount > 40) feed.removeChild(feed.firstChild!);
     feed.scrollTop = feed.scrollHeight;
@@ -259,7 +280,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   function beginAtBat(event: Extract<SimEvent, { kind: 'atBat' }>): void {
     showPlay();
     count = { balls: 0, strikes: 0 };
-    addFeed(`${player.name} steps in against ${event.pitcher.name}.`, 'neutral');
+    addFeed(`${player.name} steps in against ${event.pitcher.name}.`, 'neutral', 'batter');
 
     // The park picks up when you come up with something going on. Runners on
     // gets the charge riff; otherwise an occasional ripple of clapping, so
@@ -293,7 +314,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         const applied = sim.submitAtBat(outcome);
         addFeed(`${player.name}: ${applied.text}`, applied.tone);
         if (applied.runs > 0) {
-          addFeed(`${applied.runs} run${applied.runs === 1 ? '' : 's'} score.`, 'good');
+          addFeed(`${applied.runs} run${applied.runs === 1 ? '' : 's'} score.`, 'good', 'run');
         }
         count = { balls: 0, strikes: 0 };
         setIdle(applied.text, sim.inningLabel);
@@ -330,7 +351,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   }
 
   function beginFielding(event: Extract<SimEvent, { kind: 'fielding' }>): void {
-    addFeed(`${event.hitter} hits one your way...`, 'neutral');
+    addFeed(`${event.hitter} hits one your way...`, 'neutral', 'alert');
     beginLivePlay(event.battedBall, 'defense');
   }
 
@@ -358,7 +379,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // it's the other way round.
       fieldingKit: side === 'offense' ? theirKit : myKit,
       battingKit: side === 'offense' ? myKit : theirKit,
-      crowd: level.crowd,
+      // October packs the place, whatever the level.
+      crowd: scheduled.playoff ? Math.min(1, level.crowd + 0.35) : level.crowd,
       // Home fills the first-base dugout: that's us when we're hosting and in
       // the field, or when we're visiting and at bat.
       homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',
@@ -372,13 +394,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       showCoachTip(
         host,
         'field',
-        'Drag anywhere to run. Get under the gold ring, then tap a base to throw.',
+        'Drag anywhere to run. Get under the gold ring, then tap a base to throw — or run it to the bag.',
       );
     } else {
       showCoachTip(
         host,
         'run',
-        'GO takes the next base, HOLD pulls up. A red line means a throw is beating you.',
+        'GO takes the next base, HOLD pulls up, BACK turns you round. Red line: the ball is beating you there.',
       );
     }
   }
@@ -390,13 +412,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     addFeed(`${prefix}${applied.text}`, applied.tone);
 
     if (result.runs > 0) {
-      addFeed(`${result.runs} run${result.runs === 1 ? '' : 's'} score.`, side === 'offense' ? 'good' : 'bad');
+      addFeed(`${result.runs} run${result.runs === 1 ? '' : 's'} score.`, side === 'offense' ? 'good' : 'bad', 'run');
     }
     if (result.userPutout && side === 'defense') {
-      addFeed('Putout credited to you.', 'good');
+      addFeed('Putout credited to you.', 'good', 'catch');
     }
     if (result.userError) {
-      addFeed('Charged with an error.', 'bad');
+      addFeed('Charged with an error.', 'bad', 'error');
     }
 
     setIdle(applied.text, sim.inningLabel);
@@ -439,14 +461,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     scheduled.playerTeamScore = sim.score.us;
     scheduled.opponentScore = sim.score.them;
 
-    if (sim.score.us > sim.score.them) {
-      myTeam.wins++;
-      opponent.losses++;
-    } else if (sim.score.us < sim.score.them) {
-      myTeam.losses++;
-      opponent.wins++;
+    // Only the regular season counts on the table. A playoff game lives on
+    // its series instead.
+    if (!scheduled.playoff) {
+      if (sim.score.us > sim.score.them) {
+        myTeam.wins++;
+        opponent.losses++;
+      } else if (sim.score.us < sim.score.them) {
+        myTeam.losses++;
+        opponent.wins++;
+      }
+      simulateOtherTeams(league, app.rng, [opponent.id]);
     }
-    simulateOtherTeams(league, app.rng, [opponent.id]);
 
     addStats(player.season, sim.gameStats);
     addStats(player.career, sim.gameStats);
@@ -473,6 +499,15 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     advanceDay(league);
     recoverOvernight(player);
 
+    // Move the postseason along: record a series game, or seed the bracket
+    // the moment the regular season is done.
+    let playoff: PlayoffGameOutcome | null = null;
+    if (scheduled.playoff) {
+      playoff = recordPlayoffGame(league, scheduled, sim.score.us > sim.score.them, app.rng);
+    } else if (isRegularSeasonOver(league)) {
+      startPlayoffs(league, app.rng);
+    }
+
     const summary: PostGameSummary = {
       win: sim.score.us > sim.score.them,
       tie: sim.score.us === sim.score.them,
@@ -487,6 +522,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       wornOut,
       levelsGained: report.levelsGained,
       pointsGained: report.pointsGained,
+      playoff: playoff ?? undefined,
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.
       seasonComplete: isSeasonOver(league),
@@ -526,6 +562,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   showIdle();
   update();
   syncSoundBtn();
+  if (playoffTag) addFeed(`Postseason baseball: ${playoffTag}.`, 'good');
   addFeed(`${myTeam.name} ${scheduled.home ? 'host' : 'visit'} the ${opponent.name}.`, 'neutral');
   startAmbience();
   schedule(tick, 1100);

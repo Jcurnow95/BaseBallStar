@@ -32,6 +32,11 @@ export type LogTone = 'neutral' | 'good' | 'bad' | 'big';
 const PLAYER_SLOT = 2;
 const LINEUP_SIZE = 9;
 const REGULATION_INNINGS = 9;
+/**
+ * Regular-season games are called after twelve. Postseason games are not:
+ * a series game has to have a winner, so it plays on until one side leads at
+ * the end of an inning.
+ */
 const MAX_INNINGS = 12;
 
 const TEAMMATE_NAMES = [
@@ -66,6 +71,8 @@ export class GameSim {
   readonly opponentName: string;
   readonly playerIsHome: boolean;
   readonly pitcher: PitcherAI;
+  /** True for a game that cannot end in a tie (the postseason). */
+  readonly mustDecide: boolean;
 
   inning = 1;
   half: 'top' | 'bottom' = 'top';
@@ -93,7 +100,9 @@ export class GameSim {
     home: boolean,
     rng: Rng,
     weather: Weather = CALM,
+    mustDecide = false,
   ) {
+    this.mustDecide = mustDecide;
     this.player = player;
     this.level = level;
     this.opponentName = opponentName;
@@ -463,7 +472,7 @@ export class GameSim {
   }
 
   private checkGameEnd(): boolean {
-    if (this.inning > MAX_INNINGS) return true;
+    if (this.inning > MAX_INNINGS && !this.mustDecide) return true;
     if (this.inning <= REGULATION_INNINGS) {
       // Home team doesn't bat in the ninth if already ahead.
       const homeScore = this.playerIsHome ? this.score.us : this.score.them;

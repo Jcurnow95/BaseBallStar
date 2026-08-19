@@ -15,7 +15,8 @@ import { drawGloom, drawRain, drawWindFlag } from './weatherFx';
  * Top-down view of a live play. Camera tracks the ball and whoever the player
  * is controlling, zooming out when they spread apart so both stay on screen.
  *
- * On defense you drag anywhere to steer your fielder and tap a base to throw.
+ * On defense you drag anywhere to steer your fielder, then tap a base to throw
+ * — or run the ball to the bag yourself.
  * On offense you decide whether to take the extra base.
  */
 
@@ -272,7 +273,7 @@ export class PlayView {
         }
       }
     } else if (sim.setup.userSide === 'defense' && sim.userHasBall) {
-      text = 'TAP A BASE TO THROW';
+      text = sim.forcePlayBases.length > 0 ? 'THROW TO A BASE — OR RUN IT THERE' : 'TAP A BASE TO THROW';
       tone = 'going';
     }
 
@@ -477,6 +478,7 @@ export class PlayView {
     this.drawFence(ctx);
     this.drawInfield(ctx);
     this.drawBases(ctx);
+    this.drawForceRings(ctx);
     this.drawDugouts(ctx, dt);
     this.drawLandingMarker(ctx);
     this.drawRunners(ctx, dt);
@@ -805,6 +807,29 @@ export class PlayView {
     ctx.lineTo(home.x - s / 2, home.y + s / 4);
     ctx.closePath();
     ctx.fill();
+  }
+
+  /**
+   * With the ball in the player's glove, ring every bag where a force is still
+   * on. Getting the ball there first — throw it, or run it in yourself — is
+   * the out. Without this the "step on the bag" play was invisible: nothing
+   * told the player that the base ten feet away was worth running to.
+   */
+  private drawForceRings(ctx: CanvasRenderingContext2D): void {
+    const bases = this.sim.forcePlayBases;
+    if (bases.length === 0) return;
+
+    const pulse = 0.5 + Math.sin(performance.now() / 220) * 0.18;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 209, 102, ${pulse})`;
+    ctx.lineWidth = 2.5;
+    for (const base of bases) {
+      const p = this.toScreen(BASES[base]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(11, 9 * this.scale), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /** The circle a fly ball is coming down into — the whole point of the mode. */

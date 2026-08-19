@@ -2,15 +2,26 @@ import type { App } from '../app';
 import {
   LEVELS,
   SEASON_GAMES,
+  isRegularSeasonOver,
   isSeasonOver,
   nextGame,
   parkForGame,
   playerTeam,
+  regularSeasonGames,
   standings,
   teamById,
   teamKit,
   weatherForGame,
 } from '../core/league';
+import {
+  PLAYOFF_TEAMS,
+  ROUND_LABEL,
+  playerSeries,
+  seriesLine,
+  seriesOpponent,
+  startPlayoffs,
+} from '../core/playoffs';
+import { bracketHtml } from '../ui/bracket';
 import { ballparkById } from '../core/ballpark';
 import { describeWeather } from '../core/weather';
 import {
@@ -34,13 +45,38 @@ import { devMenuEnabled } from './dev';
 import { howtoSeen, openHowto } from './howto';
 
 export function renderHub(app: App, mount: HTMLElement): void {
+  /**
+   * Has this club locked up a playoff spot? Every club plays a game on every
+   * one of your game days, so everyone has the same number left. Clinched when
+   * fewer than `PLAYOFF_TEAMS` others could still catch its win total.
+   */
+  const clinched = (t: { id: string; wins: number; losses: number }): boolean => {
+    const league = app.requireSave().league;
+    if (league.playoffs) return false;
+    const remaining = Math.max(0, SEASON_GAMES - (t.wins + t.losses));
+    const threats = league.teams.filter(
+      (o) => o.id !== t.id && o.wins + Math.max(0, SEASON_GAMES - (o.wins + o.losses)) >= t.wins,
+    ).length;
+    return remaining < SEASON_GAMES && threats < PLAYOFF_TEAMS;
+  };
+
   const save = app.requireSave();
   const { player, league } = save;
   const level = LEVELS[league.levelId];
   const team = playerTeam(league);
+
+  // A save that finished its regular season before there was a postseason
+  // gets its bracket seeded on the way in.
+  if (isRegularSeasonOver(league) && !league.playoffs) {
+    startPlayoffs(league, app.rng);
+    app.persist();
+  }
+
   const upcoming = nextGame(league);
   const seasonDone = isSeasonOver(league);
-  const gamesPlayed = league.schedule.filter((g) => g.played).length;
+  const gamesPlayed = regularSeasonGames(league).filter((g) => g.played).length;
+  const playoffs = league.playoffs;
+  const series = playerSeries(league);
   const ovr = overallRating(player.attributes);
   const homePark = ballparkById(team.parkId);
 
@@ -51,7 +87,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
         .map((day, index) => {
           const state =
             index < league.day ? 'past' : index === league.day ? 'now' : 'ahead';
-          const kind = day.gameIndex == null ? 'off' : 'game';
+          const kind =
+            day.gameIndex == null
+              ? 'off'
+              : league.schedule[day.gameIndex]?.playoff
+                ? 'game playoff'
+                : 'game';
           return `<i class="cal-day ${kind} ${state}" title="Day ${index + 1}"></i>`;
         })
         .join('')}
@@ -59,6 +100,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
     <div class="cal-key tiny muted">
       <span><i class="cal-day game ahead"></i> game</span>
       <span><i class="cal-day off ahead"></i> off day</span>
+      ${playoffs && playoffs.playerResult !== 'missed' ? '<span><i class="cal-day game playoff ahead"></i> playoff</span>' : ''}
       <span>Day ${Math.min(league.day + 1, league.calendar.length)} of ${league.calendar.length}</span>
     </div>`;
 
@@ -82,11 +124,27 @@ export function renderHub(app: App, mount: HTMLElement): void {
     </button>
     <button class="btn ghost tiny" id="howto" style="margin-top:8px">How to Play</button>`;
 
+  // What the postseason meant for you, once it's settled.
+  const wrapUp = ((): string => {
+    if (!playoffs) return 'The regular season is over.';
+    const champ = playoffs.championId ? teamById(league, playoffs.championId).name : 'Nobody';
+    switch (playoffs.playerResult) {
+      case 'champion':
+        return `Champions! The ${esc(team.name)} took the ${esc(level.name)} title.`;
+      case 'eliminated':
+        return `Your run ended in the ${ROUND_LABEL[playoffs.eliminatedIn ?? 'semifinal']}. The ${esc(champ)} took the title.`;
+      case 'missed':
+        return `You missed the playoffs. The ${esc(champ)} took the title.`;
+      default:
+        return 'The season is over.';
+    }
+  })();
+
   let matchupHtml: string;
   if (seasonDone) {
     matchupHtml = `
-      <div class="notice warn" style="margin-bottom:12px">
-        The regular season is over. Time to find out what the organization thinks of you.
+      <div class="notice ${playoffs?.playerResult === 'champion' ? '' : 'warn'}" style="margin-bottom:12px">
+        ${wrapUp} Time to find out what the organization thinks of you.
       </div>
       <button class="btn primary" id="finish">Season Review</button>
       ${devButton}
@@ -98,16 +156,21 @@ export function renderHub(app: App, mount: HTMLElement): void {
     const hadForecast = !!upcoming.weather;
     const weather = weatherForGame(upcoming, app.rng);
     if (!hadForecast) app.persist();
+    const line = series ? seriesLine(league, series) : null;
+    const gameLabel =
+      upcoming.playoff && series
+        ? `${ROUND_LABEL[series.round]} · Game ${upcoming.playoff.gameNo} of ${series.bestOf}`
+        : `Game ${gamesPlayed + 1} of ${SEASON_GAMES}`;
     matchupHtml = `
       <div class="matchup">
         <div>
-          <span class="vs">Game ${gamesPlayed + 1} of ${SEASON_GAMES}</span>
+          <span class="vs" ${upcoming.playoff ? 'style="color:var(--gold)"' : ''}>${gameLabel}</span>
           <strong>${upcoming.home ? 'vs' : '@'} ${esc(teamById(league, upcoming.opponentId).name)}</strong>
           <span class="tiny muted">${esc(park.name)} · ${esc(describeWeather(weather))}</span>
         </div>
         <div class="ovr">
-          <b>${team.wins}-${team.losses}</b>
-          <span>Record</span>
+          <b>${line ? `${line.us}-${line.them}` : `${team.wins}-${team.losses}`}</b>
+          <span>${line ? 'Series' : 'Record'}</span>
         </div>
       </div>
       ${calendarHtml}
@@ -115,12 +178,16 @@ export function renderHub(app: App, mount: HTMLElement): void {
       ${devButton}
       ${storeButton}`;
   } else {
+    const nextUp =
+      series && playoffs?.playerResult === 'alive'
+        ? `${ROUND_LABEL[series.round]} game ${series.highWins + series.lowWins + 1} vs the ${esc(seriesOpponent(league, series).name)} tomorrow.`
+        : 'Get to work, or get some rest.';
     matchupHtml = `
       <div class="matchup">
         <div>
-          <span class="vs">Off Day</span>
+          <span class="vs">${series ? 'Playoff Workout Day' : 'Off Day'}</span>
           <strong>No game today</strong>
-          <span class="tiny muted">Get to work, or get some rest.</span>
+          <span class="tiny muted">${nextUp}</span>
         </div>
         <div class="ovr">
           <b>${team.wins}-${team.losses}</b>
@@ -205,21 +272,36 @@ export function renderHub(app: App, mount: HTMLElement): void {
         }).join('')}
       </div>
 
+      ${
+        playoffs
+          ? `<div class="panel">
+               <h2>${esc(level.name)} playoffs</h2>
+               ${bracketHtml(league)}
+             </div>`
+          : ''
+      }
+
       <div class="panel">
         <h2>${esc(level.name)} standings</h2>
         <table class="standings">
           <tr><th>Team</th><th>W</th><th>L</th></tr>
           ${standings(league)
-            .map((t) => {
+            .map((t, i) => {
               const kit = teamKit(league, t.id);
+              const cut = i === PLAYOFF_TEAMS - 1 && !playoffs;
               return `
-            <tr class="${t.id === league.playerTeamId ? 'me' : ''}">
+            <tr class="${t.id === league.playerTeamId ? 'me' : ''} ${cut ? 'cut' : ''} ${clinched(t) ? 'clinched' : ''}">
               <td><i class="kit-chip" style="background:${kit.accent}" title="${esc(kit.name)}"></i>${esc(t.name)}</td>
               <td>${t.wins}</td><td>${t.losses}</td>
             </tr>`;
             })
             .join('')}
         </table>
+        ${
+          playoffs
+            ? ''
+            : `<div class="tiny muted" style="margin-top:8px">Top ${PLAYOFF_TEAMS} make the playoffs · x = clinched</div>`
+        }
       </div>
 
       <div class="panel">

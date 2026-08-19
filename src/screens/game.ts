@@ -5,6 +5,7 @@ import type { Count } from '../core/pitching';
 import {
   LEVELS,
   advanceDay,
+  isRegularSeasonOver,
   isSeasonOver,
   nextGame,
   parkForGame,
@@ -14,6 +15,8 @@ import {
   teamKit,
   weatherForGame,
 } from '../core/league';
+import type { PlayoffGameOutcome } from '../core/playoffs';
+import { ROUND_LABEL, playerSeries, recordPlayoffGame, seriesLine, startPlayoffs } from '../core/playoffs';
 import { describeWeather, windLabel, windMph } from '../core/weather';
 import { uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
@@ -63,7 +66,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   // Home team wears its home kit, the visitor its road kit.
   const myKit = uniformFor(teamKit(league, myTeam.id), scheduled.home);
   const theirKit = uniformFor(teamKit(league, opponent.id), !scheduled.home);
-  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng, weather);
+  // A postseason game plays until somebody wins.
+  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng, weather, !!scheduled.playoff);
+
+  // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night.
+  const series = scheduled.playoff ? playerSeries(league) : null;
+  const playoffTag = (() => {
+    if (!scheduled.playoff || !series) return '';
+    const line = seriesLine(league, series);
+    const tally =
+      line.us + line.them === 0 ? '' : ` · Series ${line.us}-${line.them}`;
+    return `${ROUND_LABEL[series.round]} · Game ${scheduled.playoff.gameNo}${tally}`;
+  })();
 
   let delay = NORMAL_DELAY;
   let timer = 0;
@@ -91,6 +105,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       <div class="idle-stage" id="idle">
         <div class="sub" id="idleSub">First pitch</div>
         <div class="big" id="idleBig">${esc(scheduled.home ? 'vs' : '@')} ${esc(opponent.name)}<br/>
+          ${playoffTag ? `<span class="playoff-tag">${esc(playoffTag)}</span><br/>` : ''}
           <span class="muted tiny">${esc(park.name)} · ${esc(sim.pitcher.name)} on the mound</span><br/>
           <span class="muted tiny">${esc(describeWeather(weather))}</span>
         </div>
@@ -364,7 +379,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // it's the other way round.
       fieldingKit: side === 'offense' ? theirKit : myKit,
       battingKit: side === 'offense' ? myKit : theirKit,
-      crowd: level.crowd,
+      // October packs the place, whatever the level.
+      crowd: scheduled.playoff ? Math.min(1, level.crowd + 0.35) : level.crowd,
       // Home fills the first-base dugout: that's us when we're hosting and in
       // the field, or when we're visiting and at bat.
       homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',
@@ -445,14 +461,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     scheduled.playerTeamScore = sim.score.us;
     scheduled.opponentScore = sim.score.them;
 
-    if (sim.score.us > sim.score.them) {
-      myTeam.wins++;
-      opponent.losses++;
-    } else if (sim.score.us < sim.score.them) {
-      myTeam.losses++;
-      opponent.wins++;
+    // Only the regular season counts on the table. A playoff game lives on
+    // its series instead.
+    if (!scheduled.playoff) {
+      if (sim.score.us > sim.score.them) {
+        myTeam.wins++;
+        opponent.losses++;
+      } else if (sim.score.us < sim.score.them) {
+        myTeam.losses++;
+        opponent.wins++;
+      }
+      simulateOtherTeams(league, app.rng, [opponent.id]);
     }
-    simulateOtherTeams(league, app.rng, [opponent.id]);
 
     addStats(player.season, sim.gameStats);
     addStats(player.career, sim.gameStats);
@@ -479,6 +499,15 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     advanceDay(league);
     recoverOvernight(player);
 
+    // Move the postseason along: record a series game, or seed the bracket
+    // the moment the regular season is done.
+    let playoff: PlayoffGameOutcome | null = null;
+    if (scheduled.playoff) {
+      playoff = recordPlayoffGame(league, scheduled, sim.score.us > sim.score.them, app.rng);
+    } else if (isRegularSeasonOver(league)) {
+      startPlayoffs(league, app.rng);
+    }
+
     const summary: PostGameSummary = {
       win: sim.score.us > sim.score.them,
       tie: sim.score.us === sim.score.them,
@@ -493,6 +522,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       wornOut,
       levelsGained: report.levelsGained,
       pointsGained: report.pointsGained,
+      playoff: playoff ?? undefined,
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.
       seasonComplete: isSeasonOver(league),
@@ -532,6 +562,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   showIdle();
   update();
   syncSoundBtn();
+  if (playoffTag) addFeed(`Postseason baseball: ${playoffTag}.`, 'good');
   addFeed(`${myTeam.name} ${scheduled.home ? 'host' : 'visit'} the ${opponent.name}.`, 'neutral');
   startAmbience();
   schedule(tick, 1100);

@@ -5,6 +5,7 @@ import type { TeamKit } from './uniforms';
 import { TEAM_KITS, kitFor } from './uniforms';
 import type { Weather } from './weather';
 import { rollWeather } from './weather';
+import type { Playoffs } from './playoffs';
 
 /**
  * Demo season length. A real season would be 140+ games at each level; 24
@@ -124,6 +125,8 @@ export interface ScheduledGame {
    * missing one is rolled the first time it's asked for.
    */
   weather?: Weather;
+  /** Set on postseason games: which series this is game `gameNo` of. */
+  playoff?: { seriesId: string; gameNo: number };
 }
 
 export interface LeagueState {
@@ -135,6 +138,14 @@ export interface LeagueState {
   calendar: CalendarDay[];
   /** Index of today in `calendar`. */
   day: number;
+  /**
+   * How many calendar days the regular season ran before playoff days were
+   * added on the end. Optional so pre-playoff saves still load: absent, the
+   * whole calendar is regular season.
+   */
+  regularDays?: number;
+  /** The postseason, once the regular season is done. See `core/playoffs.ts`. */
+  playoffs?: Playoffs;
 }
 
 export function pitcherName(rng: Rng): string {
@@ -208,16 +219,29 @@ export const today = (league: LeagueState): CalendarDay | null =>
 
 export const isGameDay = (league: LeagueState): boolean => today(league)?.gameIndex != null;
 
+/** The regular-season games, leaving out any postseason games tacked on. */
+export const regularSeasonGames = (league: LeagueState): ScheduledGame[] =>
+  league.schedule.filter((g) => !g.playoff);
+
 /**
- * The season is done when the calendar runs out, or when every scheduled game
- * has been played and only off days remain.
+ * The regular season is done when the calendar runs out, or when every
+ * scheduled game has been played and only off days remain.
  *
  * Note what this is NOT: "there is no game today". An off day in the middle of
  * the season has no game either, and treating that as the end of the year ends
  * seasons after a couple of games.
  */
+export const isRegularSeasonOver = (league: LeagueState): boolean =>
+  league.day >= (league.regularDays ?? league.calendar.length) ||
+  regularSeasonGames(league).every((g) => g.played);
+
+/**
+ * The whole year is done: the regular season is over and the postseason has
+ * crowned a champion. Between the two — a playoff still being played, or not
+ * yet seeded — the year is still on.
+ */
 export const isSeasonOver = (league: LeagueState): boolean =>
-  league.day >= league.calendar.length || league.schedule.every((g) => g.played);
+  isRegularSeasonOver(league) && league.playoffs?.complete === true;
 
 export function daysRemaining(league: LeagueState): number {
   return Math.max(0, league.calendar.length - league.day);
@@ -295,15 +319,25 @@ export function simulateOtherTeams(
 }
 
 /** Chance `a` beats `b`, damped so even the worst club wins its share. */
-function winChance(a: Team, b: Team): number {
+export function winChance(a: Team, b: Team): number {
   const edge = ((a.strength ?? 50) - (b.strength ?? 50)) / 100;
   return clamp(0.5 + edge * 0.62, 0.24, 0.76);
 }
 
+const winPct = (t: Team): number => (t.wins + t.losses === 0 ? 0 : t.wins / (t.wins + t.losses));
+
 export function standings(league: LeagueState): Team[] {
-  return [...league.teams].sort((a, b) => {
-    const pctA = a.wins + a.losses === 0 ? 0 : a.wins / (a.wins + a.losses);
-    const pctB = b.wins + b.losses === 0 ? 0 : b.wins / (b.wins + b.losses);
-    return pctB - pctA;
-  });
+  return [...league.teams].sort((a, b) => winPct(b) - winPct(a));
+}
+
+/**
+ * The table with ties broken, for seeding the bracket: winning percentage,
+ * then wins, then the stronger club. Deterministic, so a save reloaded
+ * mid-playoffs seeds the same way it did the first time.
+ */
+export function playoffSeedOrder(league: LeagueState): Team[] {
+  return [...league.teams].sort(
+    (a, b) =>
+      winPct(b) - winPct(a) || b.wins - a.wins || (b.strength ?? 50) - (a.strength ?? 50),
+  );
 }

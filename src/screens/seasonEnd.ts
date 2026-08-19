@@ -1,5 +1,8 @@
 import type { App } from '../app';
-import { LEVELS, createLeague, playerTeam, standings } from '../core/league';
+import { LEVELS, createLeague, playerTeam, standings, teamById } from '../core/league';
+import { ROUND_LABEL } from '../core/playoffs';
+import { bracketHtml } from '../ui/bracket';
+import { formatMoney } from '../core/gear';
 import {
   battingAverage,
   emptyBattingStats,
@@ -20,14 +23,48 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
   const finish = standings(league).findIndex((t) => t.id === league.playerTeamId) + 1;
   const suffix = finish === 1 ? 'st' : finish === 2 ? 'nd' : finish === 3 ? 'rd' : 'th';
 
+  // The postseason, in a line. A title is worth a ring bonus, paid once here.
+  const playoffs = league.playoffs;
+  const champion = playoffs?.playerResult === 'champion';
+  const RING_BONUS = 400 * (league.levelId + 1);
+  const postseasonLine = ((): string => {
+    if (!playoffs) return 'No postseason was played.';
+    const champ = playoffs.championId ? teamById(league, playoffs.championId).name : '—';
+    switch (playoffs.playerResult) {
+      case 'champion':
+        return `${level.name} champions.`;
+      case 'eliminated':
+        return `Out in the ${ROUND_LABEL[playoffs.eliminatedIn ?? 'semifinal']} · champions: ${champ}`;
+      case 'missed':
+        return `Missed the playoffs · champions: ${champ}`;
+      default:
+        return `Champions: ${champ}`;
+    }
+  })();
+
   mount.innerHTML = `
     <div class="scroll">
       <div class="panel result-hero">
-        <div class="verdict ${check.promoted ? 'win' : 'tie'}">
-          ${check.promoted ? 'CALLED UP' : 'SEASON OVER'}
+        <div class="verdict ${check.promoted ? 'win' : champion ? 'champ' : 'tie'}">
+          ${check.promoted ? 'CALLED UP' : champion ? 'CHAMPIONS' : 'SEASON OVER'}
         </div>
         <div class="score">Season ${save.seasonYear} · ${esc(level.name)}</div>
       </div>
+
+      ${
+        playoffs
+          ? `<div class="panel">
+               <h2>Postseason</h2>
+               <p class="tiny" style="margin:0 0 10px; line-height:1.55">${esc(postseasonLine)}</p>
+               ${bracketHtml(league)}
+               ${
+                 champion
+                   ? `<div class="reward" style="margin-top:10px"><span>Ring bonus</span><b>${formatMoney(RING_BONUS)}</b></div>`
+                   : ''
+               }
+             </div>`
+          : ''
+      }
 
       <div class="panel">
         <h2>Final line</h2>
@@ -50,6 +87,7 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
         <div class="reward"><span>Scout grade</span><b>${check.score}</b></div>
         <div class="reward"><span>Overall rating</span><b>${check.overall}</b></div>
         <div class="reward"><span>Team finish</span><b>${finish}${suffix} · ${team.wins}-${team.losses}</b></div>
+        <div class="reward"><span>Postseason</span><b>${esc(postseasonLine)}</b></div>
         <p class="tiny" style="margin:12px 0 0; line-height:1.55">${esc(check.reason)}</p>
       </div>
 
@@ -76,8 +114,9 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     player.season = emptyBattingStats();
     player.stamina = 100;
     player.energy = 100;
-    // An offseason of work is worth a couple of free points.
-    player.attributePoints += 2 + (check.promoted ? 2 : 0);
+    // An offseason of work is worth a couple of free points; a ring, a bit more.
+    player.attributePoints += 2 + (check.promoted ? 2 : 0) + (champion ? 1 : 0);
+    if (champion) player.money += RING_BONUS;
 
     app.lastGame = null;
     app.persist();

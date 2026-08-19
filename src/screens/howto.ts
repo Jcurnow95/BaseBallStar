@@ -116,6 +116,7 @@ const CARDS: Card[] = [
     body:
       'Once the ball is in your glove, four buttons come up: <b>HOME · 3RD · 2ND · 1ST</b>. Tap the base you want. ' +
       'Beat the runner there and he’s out. Nobody covering, or you sat on it too long? The throw gets away and everyone moves up. ' +
+      'Close to the bag? Just <b>run it there</b> — step on a ringed base before the runner and he’s out, no throw needed. ' +
       'Your Arm rating is how hard you throw.',
     art: `
       <svg viewBox="0 0 120 84" aria-hidden="true">

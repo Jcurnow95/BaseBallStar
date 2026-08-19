@@ -394,6 +394,16 @@ export class PlaySim {
     return this.phase === 'held' && (this.userFielder?.hasBall ?? false);
   }
 
+  /**
+   * Bags with a force play still on while the user holds the ball: get the
+   * ball there — by throw or on foot — before the runner does and he's out.
+   * Empty when nobody is forced anywhere.
+   */
+  get forcePlayBases(): BaseId[] {
+    if (!this.userHasBall || this.deadTimer > 0) return [];
+    return ([1, 2, 3, 0] as BaseId[]).filter((base) => this.forcedRunnerAt(base) !== null);
+  }
+
   runnerPosition(runner: RunnerState): Vec2 {
     if (runner.at >= 4) return BASES[0];
     const from = BASES[runner.at % 4];
@@ -591,7 +601,10 @@ export class PlaySim {
     if (this.phase === 'live') {
       this.checkFieldingContact();
       this.checkLooseBall(dt);
-    } else if (this.phase === 'held') this.considerCpuThrow(dt);
+    } else if (this.phase === 'held') {
+      this.checkUserStepOnBag();
+      this.considerCpuThrow(dt);
+    }
 
     this.updateRunnerIntent();
 
@@ -1100,6 +1113,28 @@ export class PlaySim {
     return 6 + (clamp(this.setup.attributes.fielding, 1, 99) / 100) * 7;
   }
 
+  /**
+   * The player can take the ball to the bag themselves instead of throwing.
+   *
+   * A fielder who gloves a grounder a few steps from a base has the easy play
+   * right there, and the CPU has always been allowed to make it (see
+   * `sendBallToBase`) — but the user's only way to record an out was a
+   * throw, and a throw to the bag you're stood next to needs somebody else
+   * there to catch it. Now carrying the ball onto a base with a forced runner
+   * still short is the out. Standing on an empty bag does nothing, so this
+   * neither spams "Safe!" nor resets the hold clock while they jog past one.
+   */
+  private checkUserStepOnBag(): void {
+    const carrier = this.userFielder;
+    if (!carrier?.hasBall || this.deadTimer > 0) return;
+    for (const base of [1, 2, 3, 0] as BaseId[]) {
+      if (distance(carrier, BASES[base]) > RECEIVE_RADIUS) continue;
+      if (!this.forcedRunnerAt(base)) continue;
+      this.resolveForceAt(base, carrier, true);
+      return;
+    }
+  }
+
   private considerCpuThrow(dt: number): void {
     const carrier = this.fielders.find((f) => f.hasBall);
     if (!carrier) return;
@@ -1177,7 +1212,7 @@ export class PlaySim {
    */
   private sendBallToBase(fielder: FielderState, base: BaseId): void {
     if (distance(fielder, BASES[base]) <= RECEIVE_RADIUS) {
-      this.resolveForceAt(base, fielder);
+      this.resolveForceAt(base, fielder, true);
       return;
     }
     this.releaseThrow(fielder, base);
@@ -1352,8 +1387,12 @@ export class PlaySim {
     this.resolveForceAt(base, receiver);
   }
 
-  /** A fielder has the ball at `base`. Anyone forced there and short is out. */
-  private resolveForceAt(base: BaseId, receiver: FielderState): void {
+  /**
+   * A fielder has the ball at `base`. Anyone forced there and short is out.
+   * `onFoot` marks the fielder having carried it to the bag rather than
+   * taken a throw, which only changes the call.
+   */
+  private resolveForceAt(base: BaseId, receiver: FielderState, onFoot = false): void {
     receiver.hasBall = true;
     this.ballCarrier = receiver.id;
     this.phase = 'held';
@@ -1366,33 +1405,49 @@ export class PlaySim {
     // that forced the lead runner also rang up the batter jogging up behind
     // him — two outs on one tag, and the hitter was one of them. It also
     // retired runners standing on a bag with nobody forcing them off it.
-    //
-    // `at + 1` is the bag a runner is forced into, wrapped so a man coming
-    // from third is forced at home rather than at a base that can never match.
+    const victim = this.forcedRunnerAt(base);
+
+    if (victim) {
+      victim.out = true;
+      this.outsRecorded += 1;
+      if (victim.id === 'batter') this.outMethod = 'thrown';
+      const credited = receiver.isUser || this.userPutoutPending;
+      if (credited) this.userPutout = true;
+      this.lastEvent = onFoot
+        ? receiver.isUser
+          ? 'You step on the bag — got him!'
+          : `${receiver.id} steps on the bag. Out!`
+        : credited
+          ? 'Got him!'
+          : 'Out on the play!';
+      this.deadTimer = 1.2;
+    } else {
+      this.lastEvent = 'Safe!';
+    }
+    this.userPutoutPending = false;
+  }
+
+  /**
+   * The runner a fielder holding the ball on `base` would retire: the one
+   * forced into that bag and closest to it, or nobody.
+   *
+   * A runner parked on a bag can't be forced off one he doesn't have to
+   * leave, and a man scrambling back to the base he came from isn't forced at
+   * the next one. `at + 1` is the bag a runner is forced into, wrapped so a
+   * man coming from third is forced at home rather than at a base that can
+   * never match.
+   */
+  private forcedRunnerAt(base: BaseId): RunnerState | null {
     let victim: RunnerState | null = null;
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
-      // Parked on a bag: you can only be forced off one you have to leave.
-      // Same for a runner scrambling back to the one he came from.
       if (runner.progress <= 0 && runner.done) continue;
       if (runner.intent <= runner.at) continue;
       if ((runner.at + 1) % 4 !== base) continue;
       // Whoever is closest to the bag is the one the force is against.
       if (!victim || runner.progress > victim.progress) victim = runner;
     }
-
-    if (victim) {
-      victim.out = true;
-      this.outsRecorded += 1;
-      if (victim.id === 'batter') this.outMethod = 'thrown';
-      if (receiver.isUser || this.userPutoutPending) this.userPutout = true;
-      this.lastEvent =
-        receiver.isUser || this.userPutoutPending ? 'Got him!' : 'Out on the play!';
-      this.deadTimer = 1.2;
-    } else {
-      this.lastEvent = 'Safe!';
-    }
-    this.userPutoutPending = false;
+    return victim;
   }
 
   /**

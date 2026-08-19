@@ -378,7 +378,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       showCoachTip(
         host,
         'field',
-        'Drag anywhere to run. Get under the gold ring, then tap a base to throw.',
+        'Drag anywhere to run. Get under the gold ring, then tap a base to throw — or run it to the bag.',
       );
     } else {
       showCoachTip(

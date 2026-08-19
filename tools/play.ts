@@ -37,6 +37,14 @@ interface Report {
   stretchCatches: number;
   stretchMade: number;
   errors: number;
+  /** Plays where two live runners stood within a few strides of each other. */
+  crowded: number;
+  /** Plays that ended with two runners credited with the same base. */
+  doubledUp: number;
+  /** Times the autopilot pressed BACK. */
+  backs: number;
+  /** Outs recorded on runners other than the batter. */
+  runnerOuts: number;
 }
 
 function runCohort(
@@ -61,6 +69,10 @@ function runCohort(
     stretchCatches: 0,
     stretchMade: 0,
     errors: 0,
+    crowded: 0,
+    doubledUp: 0,
+    backs: 0,
+    runnerOuts: 0,
   };
 
   for (let i = 0; i < plays; i++) {
@@ -78,6 +90,8 @@ function runCohort(
 
     let frames = 0;
     let snapshot = '';
+    let crowded = false;
+    let crowdedFrames = 0;
     while (sim.phase !== 'dead' && frames < MAX_FRAMES) {
       // Stand in for the player's stretch-catch minigame. A competent player
       // holds on to most of them, and less often the further they reached.
@@ -104,8 +118,28 @@ function runCohort(
         }
         if (sim.userHasBall) sim.throwTo(1);
       }
+      if (chase && side === 'offense') {
+        // Reckless autopilot: press GO the moment the ball is down and keep
+        // pressing, then scramble BACK as soon as a throw is beating you.
+        if (sim.throwBeatingUserRunner && !sim.userRunnerRetreating) {
+          if (sim.userBackTarget !== null) {
+            sim.retreatRunner();
+            report.backs++;
+          }
+        } else if (sim.ball.bounced && sim.userGoTarget !== null && frames % 20 === 0) {
+          sim.advanceRunner();
+        }
+      }
       sim.update(DT);
       frames++;
+
+      // Two runners within a few strides of each other for more than a
+      // moment are standing on top of each other on screen.
+      const live = sim.runners.filter((r) => !r.out && r.at < 4);
+      for (let k = 1; k < live.length; k++) {
+        const gap = live[k - 1].at + live[k - 1].progress - (live[k].at + live[k].progress);
+        if (gap < 0.12 && ++crowdedFrames > 30) crowded = true;
+      }
 
       // Snapshot mid-play so a stall can be seen while it is happening.
       if (frames === 8 * 60) {
@@ -151,6 +185,10 @@ function runCohort(
     report.runs += outcome.runs;
     report.outs += outcome.outs;
     if (outcome.reachedOnError) report.errors++;
+    report.runnerOuts += outcome.outs - (sim.outMethod === 'none' ? 0 : 1);
+    if (crowded) report.crowded++;
+    const bases = sim.runners.filter((r) => !r.out && r.at >= 1 && r.at <= 3).map((r) => r.at);
+    if (new Set(bases).size !== bases.length) report.doubledUp++;
     if (frames / 60 > 14) report.timeouts++;
   }
 
@@ -174,7 +212,12 @@ function runCohort(
       `${''.padEnd(38)} batter retired by: ${methods}\n` +
       `${''.padEnd(38)} stretch catches ${((report.stretchCatches / plays) * 100).toFixed(0)}%` +
       ` (held ${report.stretchCatches ? ((report.stretchMade / report.stretchCatches) * 100).toFixed(0) : '-'}%)` +
-      `  errors ${((report.errors / plays) * 100).toFixed(1)}%\n` +
+      `  errors ${((report.errors / plays) * 100).toFixed(1)}%` +
+      `  crowded ${((report.crowded / plays) * 100).toFixed(0)}%` +
+      `  doubled-up ${report.doubledUp}` +
+      `  runner outs ${report.runnerOuts}` +
+      (report.backs ? `  backs ${report.backs}` : '') +
+      `\n` +
       `${''.padEnd(38)} avg ${avgSeconds.toFixed(1)}s  max ${maxSeconds.toFixed(1)}s` +
       `  timeouts ${report.timeouts}` +
       `  runs/play ${(report.runs / plays).toFixed(2)}` +
@@ -188,6 +231,8 @@ console.log(`\n=== Live play resolution (${PLAYS} plays each) ===\n`);
 runCohort('offense, bases empty', 'offense', 'CF', false, [false, false, false], PLAYS);
 runCohort('offense, runner on first', 'offense', 'CF', false, [true, false, false], PLAYS);
 runCohort('offense, bases loaded', 'offense', 'CF', false, [true, true, true], PLAYS);
+runCohort('offense, bases empty, reckless GO/BACK', 'offense', 'CF', true, [false, false, false], PLAYS);
+runCohort('offense, runner on first, reckless GO/BACK', 'offense', 'CF', true, [true, false, false], PLAYS);
 runCohort('defense CF, player chases ball', 'defense', 'CF', true, [false, false, false], PLAYS);
 runCohort('defense CF, player stands still', 'defense', 'CF', false, [false, false, false], PLAYS);
 runCohort('defense SS, player chases ball', 'defense', 'SS', true, [false, false, false], PLAYS);

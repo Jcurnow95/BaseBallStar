@@ -52,8 +52,10 @@ const CARDS: Card[] = [
     title: 'Running the bases',
     body:
       'After contact your man runs on his own — he takes what’s clearly there and stops when it isn’t. ' +
-      '<b class="good">GO</b> sends him for the next base; <b class="gold">HOLD</b> pulls him up. ' +
-      'The dashed line shows the bag you’re headed for. It turns <b class="bad">red</b> when a throw is beating you there.',
+      '<b class="good">GO</b> sends him for the next base; <b class="gold">HOLD</b> pulls him up; ' +
+      '<b class="info">BACK</b> turns him round for the bag he left. ' +
+      'The dashed line shows the bag you’re headed for. It turns <b class="bad">red</b> when the ball is beating you there — ' +
+      'going back is a race too.',
     art: `
       <svg viewBox="0 0 120 84" aria-hidden="true">
         <rect x="0" y="0" width="120" height="84" rx="8" fill="#1f7a3f"/>

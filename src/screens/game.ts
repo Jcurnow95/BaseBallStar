@@ -384,7 +384,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       showCoachTip(
         host,
         'run',
-        'GO takes the next base, HOLD pulls up. A red line means a throw is beating you.',
+        'GO takes the next base, HOLD pulls up, BACK turns you round. Red line: the ball is beating you there.',
       );
     }
   }

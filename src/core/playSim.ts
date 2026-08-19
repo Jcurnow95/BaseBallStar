@@ -24,8 +24,9 @@ import { Rng, clamp } from './rng';
  * the infield and nobody is running. DOM-free: the view layer just renders
  * this and feeds it input.
  *
- * Deliberately simplified: every throw is treated as a force play, there are
- * no tag-ups, rundowns or relay men, and runners make one advancement decision
+ * Deliberately simplified: a throw to a base is a force play against anyone
+ * running into it and a tag against anyone scrambling back to it; there are no
+ * tag-ups, rundowns or relay men, and runners make one advancement decision
  * rather than reading the play continuously.
  */
 
@@ -111,6 +112,11 @@ const CATCH_REACH = 7.5;
 /** Inside this fraction of a fielder's range, the catch is routine. */
 const CLEAN_CATCH_RATIO = 0.55;
 const RECEIVE_RADIUS = 7;
+/**
+ * A fielder holding the ball on a bag tags a runner this close to it, as a
+ * fraction of a basepath — a stride or two out.
+ */
+const TAG_REACH = 0.12;
 const PLAY_TIMEOUT = 15;
 /** How long the user can stand there holding the ball before they just throw it. */
 const HOLD_LIMIT = 4.5;
@@ -132,18 +138,19 @@ const RUNNER_CAUTION = 0.35;
  */
 const STRETCH_DISTANCE = 250;
 /**
- * The most of a basepath a runner is credited with having already covered
- * when the read is made.
+ * How far up the basepath a runner goes on contact, before the ball is down and
+ * anybody has made a read: about halfway. He waits there — if it drops he's
+ * already got a jump on the next bag, if it's caught he scrambles back.
  *
- * Runners sit frozen on their bag until `planRunnerIntents` gives them an
- * intent, which doesn't happen until the ball is down — but the defense's
- * clock starts at that same instant, so the race was scored as if the runner
- * had spent the ball's entire flight standing still. A real runner is well
- * off the bag by then. Without this the man on second never took third on a
- * clean single, because he was made to run all 90 feet after the outfielder
- * had already caught up to the ball.
+ * Runners used to sit frozen on their bag until the ball landed, and were only
+ * *credited* with this much of a lead when the read was made. Two things went
+ * wrong with that. The read said the man on second would make third, but the
+ * throw was raced against where he actually stood, so he was thrown out on
+ * reads that were right. And the batter ran up to first while the man on
+ * first was still standing on it, so on every fly ball two runners stood on
+ * top of each other at the bag for the length of the flight.
  */
-const MAX_LEAD = 0.4;
+const BREAK_ON_CONTACT = 0.4;
 /** Fielders pull up this far short of the wall, so they stand in front of it. */
 const WALL_MARGIN = 3;
 /** Gap kept between runners, as a fraction of a basepath — about seven feet. */
@@ -468,17 +475,35 @@ export class PlaySim {
   }
 
   /**
-   * Where a HOLD would stop them. Once you've left the bag you're committed to
-   * reaching the next one — you can't stop in the dirt.
+   * Where a HOLD would stop them: the next bag if they're in the dirt, this
+   * one if they're stood on it. Nobody stops between bases — but see
+   * `backTargetFor` for turning round.
    */
   private holdTargetFor(runner: RunnerState): number {
     return runner.progress > 0 ? Math.min(4, runner.at + 1) : runner.at;
+  }
+
+  /**
+   * The bag a BACK would send them scrambling to: the one they left, if they
+   * have left one. The batter can't retreat to the plate.
+   */
+  private backTargetFor(runner: RunnerState): number | null {
+    return runner.progress > 0 && runner.at >= 1 ? runner.at : null;
+  }
+
+  /** Between bases and heading for the one behind, not the one ahead. */
+  private isRetreating(runner: RunnerState): boolean {
+    return runner.progress > 0 && runner.intent <= runner.at;
   }
 
   /** Base the GO button would send the user's runner to, or null if they can't. */
   get userGoTarget(): number | null {
     const runner = this.userRunner;
     if (!runner || runner.out || runner.at >= 4 || this.phase === 'dead') return null;
+    // Once the play is being called the defense has stopped throwing, so a
+    // GO now would be a free base — or, with the play waiting on runners in
+    // motion, a free lap.
+    if (this.deadTimer > 0) return null;
     const target = this.goTargetFor(runner);
     // Nothing to go for when the next bag is spoken for.
     return target > this.committedBase(runner) ? target : null;
@@ -493,6 +518,15 @@ export class PlaySim {
     return runner.intent > hold ? hold : null;
   }
 
+  /** Base the BACK button would send them scrambling to, or null if they can't. */
+  get userBackTarget(): number | null {
+    const runner = this.userRunner;
+    if (!runner || runner.out || runner.at >= 4 || this.phase === 'dead') return null;
+    // Nothing to do if they're already on their way back.
+    if (this.isRetreating(runner)) return null;
+    return this.backTargetFor(runner);
+  }
+
   /** The base the user's runner is currently committed to reaching. */
   get userRunnerTarget(): number | null {
     const runner = this.userRunner;
@@ -500,17 +534,42 @@ export class PlaySim {
     return runner.intent > runner.at ? runner.intent : runner.at;
   }
 
-  /** True when a throw is on its way to the base the user is running into. */
+  /** True when the user's runner has turned round and is heading back to a bag. */
+  get userRunnerRetreating(): boolean {
+    const runner = this.userRunner;
+    return !!runner && !runner.out && runner.at < 4 && this.isRetreating(runner);
+  }
+
+  /**
+   * The bag the user's runner is heading for right now — ahead of them when
+   * they're advancing, behind them when they're scrambling back.
+   */
+  get userRunnerNextBase(): BaseId | null {
+    const runner = this.userRunner;
+    if (!runner || runner.out || runner.at >= 4) return null;
+    if (this.isRetreating(runner)) return (runner.at % 4) as BaseId;
+    return ((runner.at + 1) % 4) as BaseId;
+  }
+
+  /**
+   * True when the ball is going to be waiting at the bag the user is running
+   * into: a throw on its way there, or a fielder already stood on it with the
+   * ball in his glove.
+   */
   get throwBeatingUserRunner(): boolean {
     const runner = this.userRunner;
-    if (!runner || this.throwTarget === null || runner.at >= 4) return false;
-    return this.throwTarget === (runner.at + 1) % 4 && runner.intent > runner.at;
+    if (!runner || runner.at >= 4 || this.phase === 'dead') return false;
+    if (!this.isRetreating(runner) && runner.intent <= runner.at) return false;
+    const base = this.userRunnerNextBase;
+    if (base === null) return false;
+    if (this.throwTarget === base) return true;
+    return this.fielders.some((f) => f.hasBall && distance(f, BASES[base]) <= RECEIVE_RADIUS);
   }
 
   /** Offense: try for the next base. */
   advanceRunner(): void {
     const runner = this.userRunner;
-    if (!runner || runner.out || runner.at >= 4) return;
+    if (!runner || runner.out || runner.at >= 4 || this.deadTimer > 0) return;
     const target = this.goTargetFor(runner);
     if (target <= this.committedBase(runner)) return;
     // Clear the path first: any runner ahead sitting on the bag we're taking is
@@ -547,6 +606,21 @@ export class PlaySim {
     this.userIntentSet = true;
   }
 
+  /**
+   * Offense: turn round and scramble back to the bag you left. The way out
+   * when you've pressed GO and the red line comes up — but the throw can beat
+   * you back there too, so it's a race, not a free undo.
+   */
+  retreatRunner(): void {
+    const runner = this.userRunner;
+    if (!runner || runner.out || runner.at >= 4) return;
+    const target = this.backTargetFor(runner);
+    if (target === null) return;
+    runner.intent = target;
+    runner.done = false;
+    this.userIntentSet = true;
+  }
+
   /** Defense: move the user's fielder. `dx`/`dy` is a unit-ish direction. */
   moveUserFielder(dx: number, dy: number, dt: number): void {
     const fielder = this.userFielder;
@@ -574,6 +648,10 @@ export class PlaySim {
     if (this.deadTimer > 0) {
       this.deadTimer -= dt;
       this.moveRunners(dt);
+      // Let anyone still between bases get where they're going before the
+      // play is called. Ending on the clock alone sent a man five feet short
+      // of third back to second — and on top of the runner already there.
+      if (this.deadTimer <= 0 && this.runnersInMotion()) this.deadTimer = dt;
       if (this.deadTimer <= 0) this.finish();
       return;
     }
@@ -693,6 +771,40 @@ export class PlaySim {
   }
 
   /**
+   * Where a runner is trying to get to, as a position along the basepaths
+   * (1.0 = first base, 2.4 = forty per cent of the way from second to third).
+   *
+   * Normally that's their intent. The exception is a runner who hasn't been
+   * given one yet because the ball is still in the air: he breaks off the bag
+   * on contact and goes about halfway, then waits on the read. Nobody stands
+   * on their bag watching a fly ball, and if they did the man behind would run
+   * straight up their back.
+   */
+  private goalFor(runner: RunnerState): number {
+    if (runner.intent !== runner.at) return runner.intent;
+    if (this.breakingOnContact(runner)) return Math.min(runner.at + BREAK_ON_CONTACT, 4);
+    return runner.at;
+  }
+
+  /** Off the bag on contact, waiting to see whether the ball drops. */
+  private breakingOnContact(runner: RunnerState): boolean {
+    // The batter is already running to first; he has nothing to break from.
+    if (runner.id === 'batter') return false;
+    if (runner.at !== runner.startBase) return false;
+    if (this.restPoint || this.caughtInAir || this.intentsFrozen) return false;
+    return !this.homeRun && !this.foul && this.battedBallLive;
+  }
+
+  /**
+   * Somebody is still between bases and going somewhere. The play isn't over
+   * while this is true, and it isn't called on the clock either.
+   */
+  private runnersInMotion(): boolean {
+    if (this.homeRun || this.foul || this.elapsed > PLAY_TIMEOUT) return false;
+    return this.runners.some((r) => !r.out && r.at < 4 && !r.done);
+  }
+
+  /**
    * Runners are stored lead-first, so each one is fenced in by the man ahead
    * of him.
    *
@@ -713,40 +825,36 @@ export class PlaySim {
       const room = this.roomAheadOf(runner);
       if (runner.intent > room) runner.intent = room;
 
-      if (runner.at >= runner.intent) {
-        if (runner.progress > 0) {
-          // Caught off the bag with nowhere to go: back to the one they left.
-          runner.done = false;
-          runner.progress -= (runner.speed * dt) / BASE_DISTANCE;
-          if (runner.progress <= 0) {
-            runner.progress = 0;
-            runner.done = true;
-          }
-        } else {
-          runner.done = true;
-        }
+      const goal = this.goalFor(runner);
+      let pos = runner.at + runner.progress;
+      const stride = (runner.speed * dt) / BASE_DISTANCE;
+
+      if (Math.abs(goal - pos) <= stride) {
+        // Arrived — on a bag, or at the spot they're waiting on the read from.
+        pos = goal;
+        runner.done = true;
       } else {
+        pos += goal > pos ? stride : -stride;
         runner.done = false;
-        runner.progress += (runner.speed * dt) / BASE_DISTANCE;
-        while (runner.progress >= 1) {
-          runner.progress -= 1;
-          runner.at += 1;
-          if (runner.at >= runner.intent || runner.at >= 4) {
-            runner.progress = 0;
-            runner.done = true;
-            break;
-          }
-        }
       }
+
+      // Back into base-and-fraction. `at` is the bag behind them whichever
+      // way they're facing, so a man scrambling back from second to first
+      // reads as at 1 with progress falling — the same shape as one caught off
+      // first with nowhere to go, which is what the throw logic understands.
+      runner.at = Math.min(4, Math.floor(pos + 1e-9));
+      runner.progress = Math.max(0, pos - runner.at);
+      if (runner.progress < 1e-9) runner.progress = 0;
 
       // Crossed the plate: off the field, so no longer in anybody's way.
       if (runner.at >= 4) {
+        runner.progress = 0;
+        runner.done = true;
         ahead = Infinity;
         continue;
       }
 
       const limit = ahead - RUNNER_GAP;
-      const pos = runner.at + runner.progress;
       if (pos > limit) {
         const held = Math.max(0, limit);
         runner.at = Math.floor(held);
@@ -853,10 +961,9 @@ export class PlaySim {
       // while every CPU hitter took the extra base for free.
       if (runner.isUser && this.userIntentSet) continue;
 
-      // Ground they'd have covered while the ball was in the air. The batter
-      // ran out of the box on contact; everyone else was off on the pitch.
-      const lead = Math.min((this.elapsed * runner.speed) / BASE_DISTANCE, MAX_LEAD);
-      const from = runner.at + runner.progress + lead;
+      // Where they actually are: the batter has been running since contact,
+      // and everyone else broke off their bag with him (`goalFor`).
+      const from = runner.at + runner.progress;
 
       // The base they owe, then every further one they can win the race to.
       // Only set intent here. `done` belongs to moveRunners — clearing it
@@ -1165,6 +1272,10 @@ export class PlaySim {
     // infielder, you don't fire it at the catcher.
     const preferred = clamp(lead + 1, 1, 3) as BaseId;
     for (const base of [preferred, 2, 1, 3] as BaseId[]) {
+      // Standing on it himself counts: the caller sees that and holds the
+      // ball there. Otherwise a fielder on second, with a runner coming at
+      // him, threw the ball across to first and let the runner walk in.
+      if (distance(carrier, BASES[base]) <= RECEIVE_RADIUS) return base;
       if (this.hasCover(base, carrier)) return base;
     }
     return null;
@@ -1190,15 +1301,21 @@ export class PlaySim {
    * and every runner take another base. Real ones look first, and the AI now
    * does too — the player can still throw wherever they like, which is what
    * makes covering the bag their job.
+   *
+   * Somebody assigned to the bag but still running to it only counts if he
+   * can be there by the time the throw is. Without that, a third baseman
+   * jogging back from where he'd fielded the ball was "cover", and the throw
+   * went to an empty bag anyway.
    */
   private hasCover(base: BaseId, thrower: FielderState): boolean {
-    return this.fielders.some(
-      (f) =>
-        f !== thrower &&
-        !f.hasBall &&
-        f.recovery <= 0 &&
-        (f.coverBase === base || distance(f, BASES[base]) <= RECEIVE_RADIUS),
-    );
+    // Flight only: by the time this is asked the transfer has already been paid.
+    const arrival = this.throwFlightTime(thrower, base, this.armSpeedFor(thrower));
+    return this.fielders.some((f) => {
+      if (f === thrower || f.hasBall || f.recovery > 0) return false;
+      const range = distance(f, BASES[base]);
+      if (range <= RECEIVE_RADIUS) return true;
+      return f.coverBase === base && (range - RECEIVE_RADIUS) / f.speed <= arrival;
+    });
   }
 
   /** Throw velocity in ft/s for whoever is holding it. */
@@ -1238,20 +1355,39 @@ export class PlaySim {
 
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
-      // A runner standing on a base can't be forced off it, and one heading
-      // back to the bag he left isn't forced at the next one.
+      // A runner standing on a base can't be forced off it.
       if (runner.progress <= 0 && runner.done) continue;
-      if (runner.intent <= runner.at) continue;
 
       // How far up the line they are, 1..4, where 4 is the plate. The bag id
       // wraps home round to 0, so the two are tracked apart — ranking on raw
       // base ids would make a play at the plate look like the least valuable
       // one available. Without this a runner who reached third could not be
       // retired at all, and simply jogged in.
-      const reach = runner.at + 1;
+      //
+      // A runner scrambling back is a play at the bag behind him instead —
+      // the ball just has to get there before he does.
+      const retreating = this.isRetreating(runner);
+      if (!retreating && runner.intent <= runner.at) continue;
+      const reach = retreating ? runner.at : runner.at + 1;
       const target = (reach % 4) as BaseId;
+      const toGo = retreating ? runner.progress : 1 - runner.progress;
+      const runnerTime = (toGo * BASE_DISTANCE) / runner.speed;
+
+      // Already standing on that bag with the ball: no throw to make, just
+      // wait for him and tag him as he arrives. He gets the length of the
+      // basepath to think better of it — and if he turns round, the throw
+      // behind him is the play. Without this a fielder on the bag didn't
+      // count as covering it, so a runner could jog straight into his glove
+      // and be called safe.
+      if (distance(carrier, BASES[target]) <= RECEIVE_RADIUS) {
+        if (toGo <= TAG_REACH && reach > bestLead) {
+          bestLead = reach;
+          best = target;
+        }
+        continue;
+      }
+
       if (!this.hasCover(target, carrier)) continue;
-      const runnerTime = ((1 - runner.progress) * BASE_DISTANCE) / runner.speed;
       const throwTime = TRANSFER_TIME + this.throwFlightTime(carrier, target, throwSpeed);
 
       if (throwTime < runnerTime && reach > bestLead) {
@@ -1289,6 +1425,25 @@ export class PlaySim {
     this.ball.y = fielder.y;
     this.ball.z = 5;
     this.ball.atRest = false;
+
+    if (!fielder.isUser) this.returnToBag(fielder);
+  }
+
+  /**
+   * A fielder who has just let a throw go gets back to his own bag if nobody
+   * else has it. When the third baseman fielded the ball, third stayed empty
+   * for the rest of the play — nobody was assigned it because he was busy —
+   * and every runner who fancied it strolled in.
+   */
+  private returnToBag(fielder: FielderState): void {
+    const own = ([1, 2, 3, 0] as BaseId[]).find(
+      (base) => coveringPosition(base, null) === fielder.id,
+    );
+    if (own === undefined) return;
+    if (this.fielders.some((f) => f !== fielder && f.coverBase === own)) return;
+    fielder.coverBase = own;
+    fielder.target = BASES[own];
+    fielder.role = 'cover';
   }
 
   private stepThrow(dt: number): void {
@@ -1373,7 +1528,6 @@ export class PlaySim {
     for (const runner of this.runners) {
       if (runner.out || runner.at >= 4) continue;
       // Parked on a bag: you can only be forced off one you have to leave.
-      // Same for a runner scrambling back to the one he came from.
       if (runner.progress <= 0 && runner.done) continue;
       if (runner.intent <= runner.at) continue;
       if ((runner.at + 1) % 4 !== base) continue;
@@ -1381,14 +1535,40 @@ export class PlaySim {
       if (!victim || runner.progress > victim.progress) victim = runner;
     }
 
+    // Nobody forced there: anyone scrambling back to it is tagged instead.
+    // This is what makes BACK a decision rather than a free undo — and what
+    // stops a runner who has strayed halfway to the next bag being untouchable
+    // just because he turned round.
+    let tagged = false;
+    if (!victim) {
+      for (const runner of this.runners) {
+        if (runner.out || runner.at >= 4) continue;
+        if (!this.isRetreating(runner) || runner.at % 4 !== base) continue;
+        if (!victim || runner.progress > victim.progress) victim = runner;
+      }
+      tagged = victim !== null;
+    }
+
     if (victim) {
       victim.out = true;
       this.outsRecorded += 1;
       if (victim.id === 'batter') this.outMethod = 'thrown';
       if (receiver.isUser || this.userPutoutPending) this.userPutout = true;
-      this.lastEvent =
-        receiver.isUser || this.userPutoutPending ? 'Got him!' : 'Out on the play!';
-      this.deadTimer = 1.2;
+      const mine = receiver.isUser || this.userPutoutPending;
+      this.lastEvent = tagged
+        ? mine
+          ? 'Tagged him!'
+          : 'Tagged out!'
+        : mine
+          ? 'Got him!'
+          : 'Out on the play!';
+      // The play only stops on the out if it's the third, or nobody else is
+      // still running. Freezing the defense for the moment while a runner was
+      // mid-basepath handed him the next bag for free — a batter rounding
+      // first as the lead man was forced at third strolled into a double.
+      if (this.setup.outs + this.outsRecorded >= 3 || !this.runnersInMotion()) {
+        this.deadTimer = 1.2;
+      }
     } else {
       this.lastEvent = 'Safe!';
     }

@@ -213,22 +213,31 @@ play, zooming out when the ball and your player spread apart.
 
 **Batting — run the bases.** Your runner takes off for first automatically, and reads the
 ball like any runner would: an extra base that's clearly there gets taken (the banner says
-**Waved on!**), a coin-flip doesn't — that one is yours to call. Two buttons, each labelled
-with the base it actually commits you to: **GO FOR SECOND** to push on, **HOLD AT FIRST**
-to pull up. They only appear when there's a real choice — no HOLD when you're already
-stopping there anyway, and no GO into a bag a team-mate is standing on. A runner who finds
-the bag ahead taken turns round and goes back (**BACK TO FIRST**).
+**Waved on!**), a coin-flip doesn't — that one is yours to call. Three buttons, each
+labelled with the base it actually commits you to: **GO FOR SECOND** to push on, **HOLD AT
+SECOND** to pull up there, **BACK TO FIRST** to turn round and scramble for the bag you
+left. They only appear when there's a real choice — no HOLD when you're already stopping
+there anyway, no BACK when you're stood on a bag, and GO into a bag a team-mate is standing
+on shoves him along ahead of you.
 
 The feedback is on screen while you decide:
 
-- A status line reads **RUNNING TO SECOND** or **HOLDING AT FIRST**, so what you're
-  committed to is never ambiguous.
-- A dashed line runs from you to the bag you're heading into, with a ring on it.
-- If a throw is beating you there, the line and ring turn red and pulse, and the status
-  line flashes **THROW TO SECOND — RUN!**
+- A status line reads **RUNNING TO SECOND**, **HOLDING AT FIRST** or **BACK TO FIRST**, so
+  what you're committed to is never ambiguous.
+- A dashed line runs from you to the bag you're heading for, with a ring on it — behind
+  you when you've turned round.
+- If the ball is beating you there — a throw in the air, or a fielder already stood on the
+  bag with it — the line and ring turn red and pulse, and the status line flashes **BALL TO
+  SECOND — RUN OR GO BACK!**
 
 Push it on a ball that gets through and you turn a single into a double; push it on a ball
-the right fielder is already under and you get thrown out.
+the right fielder is already under and you get thrown out. Going back isn't a free undo:
+the throw can beat you back to the bag as well, and a fielder waiting on it with the ball
+tags you as you arrive.
+
+Your team-mates run for themselves. Everyone on base breaks on contact and goes about
+halfway, then reads the ball where it lands: forced runners take the base they owe, nobody
+takes another one without beating the throw. On a catch they all scramble back.
 
 **Fielding — get to the ball.** Drag anywhere on screen for a virtual joystick and run
 your fielder down. On a fly ball a pulsing gold circle marks where it's coming down —
@@ -470,8 +479,12 @@ npx tsx tools/play.ts
 
 Runs live plays headlessly and reports outcome mix, how the batter was retired, play
 duration and any hangs. It also runs cohorts where the player stands still, which is how
-the "does the player's input actually matter" question gets answered. Plays should resolve
-in 4–6 seconds with zero timeouts.
+the "does the player's input actually matter" question gets answered, and two where the
+player hammers GO and BACK every frame, which is how "can the runner be exploited" gets
+answered — those should come out mostly outs. Plays should resolve in 4–6 seconds with
+zero timeouts. It also counts **crowded** plays (two runners within a few strides of each
+other for more than a moment) and **doubled-up** ones (two runners credited with the same
+base at the end); both should be zero.
 
 ```bash
 npx tsx tools/season.ts
@@ -540,11 +553,15 @@ A playable vertical slice, not a finished game. What's real:
 
 Deliberately simplified in the live play — worth knowing before you build on it:
 
-- Every throw is treated as a **force play**. No tags and no rundowns. Relay men
-  aren't drawn, but long throws are charged for one — a throw from the track goes
-  through a cut-off, which is why an outfield arm doesn't beat everybody home.
-- No tag-ups: on a caught fly, runners return rather than advancing.
-- Runners make one advancement decision when the ball lands, then commit.
+- A throw to a base is a **force play** against anyone running into it and a **tag**
+  against anyone scrambling back to it — there's no rundown in between, and a fielder
+  stood on the bag with the ball tags whoever arrives. Relay men aren't drawn, but long
+  throws are charged for one — a throw from the track goes through a cut-off, which is
+  why an outfield arm doesn't beat everybody home.
+- No tag-ups: on a caught fly, runners return rather than advancing, and nobody gets
+  doubled off.
+- CPU runners break halfway on contact, make one advancement decision when the ball
+  lands, then commit.
 - Runners can't pass each other, and aren't modelled as individual players.
 - You're only credited a run scored on your own home runs.
 

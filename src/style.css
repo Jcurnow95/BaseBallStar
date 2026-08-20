@@ -1280,9 +1280,9 @@ table.standings tr.clinched td:first-child::after {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 22px;
   background: radial-gradient(120% 80% at 50% 0%, #1c2a49 0%, #0d1526 70%);
-  padding: 18px;
+  padding: 12px 14px 48px;
   text-align: center;
 }
 
@@ -1309,6 +1309,281 @@ table.standings tr.clinched td:first-child::after {
   padding: 8px 12px;
   font-size: 13px;
   line-height: 1.55;
+}
+
+/* During simulated stretches the stage shows the live field state — diamond,
+   matchup, linescore — and the feed is a taller bottom sheet. Content on
+   both, dead space on neither. */
+.game-screen.simulating .feed {
+  height: 188px;
+  font-size: 14px;
+}
+
+/* --------------------------------------------------------- sim stage card */
+
+.sim-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
+
+.sim-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+/* The big live diamond: same language as the scorebar's mini one. */
+.sim-diamond {
+  width: 122px;
+  height: 122px;
+  position: relative;
+  transform: rotate(45deg);
+  margin: 12px 0;
+}
+
+.sim-diamond .sbase,
+.sim-diamond .shome {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border: 2px solid #44557a;
+  background: var(--panel-2);
+  border-radius: 9px;
+}
+
+#sb1 {
+  right: 0;
+  top: 0;
+}
+#sb2 {
+  left: 0;
+  top: 0;
+}
+#sb3 {
+  left: 0;
+  bottom: 0;
+}
+.sim-diamond .shome {
+  right: 0;
+  bottom: 0;
+  border-style: dashed;
+  opacity: 0.4;
+}
+
+.sim-diamond .sbase.on {
+  background: var(--gold);
+  border-color: #ffe3a1;
+  box-shadow: 0 0 12px rgba(255, 209, 102, 0.8);
+}
+
+/* A runner arriving pops, so the diamond visibly changes with the play. */
+.sim-diamond .sbase.arrive {
+  animation: base-arrive 0.35s ease;
+}
+
+@keyframes base-arrive {
+  0% {
+    transform: scale(1.6);
+    box-shadow: 0 0 24px rgba(255, 209, 102, 1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.sim-outs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sim-outs i {
+  width: 11px;
+  height: 11px;
+  border-radius: 99px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+.sim-outs i.on {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.sim-outs span {
+  margin-left: 4px;
+}
+
+.sim-matchup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.sim-matchup .side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 118px;
+}
+
+.sim-matchup .lbl {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sim-matchup b {
+  font-size: 15px;
+}
+
+.sim-matchup .stat {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-matchup .vs {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* Your own at-bats are the headline act. */
+.sim-matchup .side.you b {
+  color: var(--gold);
+}
+
+.sim-linescore {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.sim-linescore table {
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  margin: 0 auto;
+}
+
+.sim-linescore th {
+  text-align: left;
+  padding: 3px 8px 3px 0;
+  color: var(--text);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.sim-linescore td {
+  padding: 3px 5px;
+  text-align: center;
+  min-width: 15px;
+}
+
+.sim-linescore td.tot {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* The R column gets a divider so totals read apart from innings. */
+.sim-linescore td:nth-last-child(3) {
+  border-left: 1px solid var(--line);
+}
+
+.sim-linescore tr.us th {
+  color: var(--gold);
+}
+
+/* Skip controls: the sim exists to be fast-forwarded. Bottom-left, mirroring
+   the speed toggle on the right, so the whole control row reads together. */
+.sim-skips {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.skip-btn {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 99px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  width: auto;
+}
+
+/* Each result punches in rather than swapping silently. */
+.idle-stage .big.punch {
+  animation: punch-in 0.3s ease;
+}
+
+@keyframes punch-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  60% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* The whole card flashes with the event's colour: gold hits, red bad news,
+   green good news for your side. */
+.idle-stage.flash-gold {
+  animation: flash-gold 0.5s ease;
+}
+.idle-stage.flash-red {
+  animation: flash-red 0.5s ease;
+}
+.idle-stage.flash-good {
+  animation: flash-good 0.5s ease;
+}
+
+@keyframes flash-gold {
+  0% {
+    box-shadow: inset 0 0 70px rgba(255, 209, 102, 0.4);
+  }
+  100% {
+    box-shadow: inset 0 0 70px rgba(255, 209, 102, 0);
+  }
+}
+
+@keyframes flash-red {
+  0% {
+    box-shadow: inset 0 0 70px rgba(255, 107, 107, 0.38);
+  }
+  100% {
+    box-shadow: inset 0 0 70px rgba(255, 107, 107, 0);
+  }
+}
+
+@keyframes flash-good {
+  0% {
+    box-shadow: inset 0 0 70px rgba(80, 230, 140, 0.3);
+  }
+  100% {
+    box-shadow: inset 0 0 70px rgba(80, 230, 140, 0);
+  }
 }
 
 .feed div {

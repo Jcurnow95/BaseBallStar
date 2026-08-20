@@ -172,7 +172,7 @@ export function renderTraining(app: App, mount: HTMLElement): void {
           });
           if (!ok) return;
         }
-        advanceDay(save.league);
+        advanceDay(save.league, app.rng);
         recoverOvernight(player);
         app.persist();
         app.go('hub');

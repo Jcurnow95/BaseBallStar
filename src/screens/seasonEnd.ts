@@ -1,5 +1,5 @@
 import type { App } from '../app';
-import { LEVELS, createLeague, playerTeam, standings, teamById } from '../core/league';
+import { LEVELS, createLeague, playerTeam, rolloverSeason, standings, teamById } from '../core/league';
 import { ROUND_LABEL } from '../core/playoffs';
 import { bracketHtml } from '../ui/bracket';
 import { formatMoney } from '../core/gear';
@@ -108,9 +108,16 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
   `;
 
   q(mount, '#next').addEventListener('click', async () => {
-    // Roll the career forward: new league, fresh season stats, restored body.
+    // Roll the career forward: fresh season stats, restored body — and either
+    // a call-up to a whole new league, or another year in this one, where the
+    // clubs you know come back with a winter of change in their clubhouses.
     save.seasonYear++;
-    save.league = createLeague(check.nextLevelId, app.rng);
+    let clubhouseNews: string[] = [];
+    if (check.promoted) {
+      save.league = createLeague(check.nextLevelId, app.rng);
+    } else {
+      clubhouseNews = rolloverSeason(save.league, app.rng);
+    }
     player.season = emptyBattingStats();
     player.stamina = 100;
     player.energy = 100;
@@ -121,11 +128,15 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     app.lastGame = null;
     app.persist();
 
+    const newsText = clubhouseNews.length
+      ? `\n\nClubhouse news:\n${clubhouseNews.map((line) => `· ${line}`).join('\n')}`
+      : '';
     await showDialog({
       title: `Season ${save.seasonYear} — ${LEVELS[save.league.levelId].name}`,
       body:
         `You report to the ${playerTeam(save.league).name}.\n` +
-        `Overall ${overallRating(player.attributes)} · ${player.attributePoints} attribute points to spend.`,
+        `Overall ${overallRating(player.attributes)} · ${player.attributePoints} attribute points to spend.` +
+        newsText,
       confirmLabel: 'Report to camp',
     });
     app.go('hub');

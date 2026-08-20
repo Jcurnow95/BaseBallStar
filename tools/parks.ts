@@ -82,7 +82,8 @@ for (const park of BALLPARKS) {
 }
 
 console.log('\n=== Season calendar ===\n');
-const league = createLeague(0, new Rng(99));
+const parksRng = new Rng(99);
+const league = createLeague(0, parksRng);
 let gameDays = 0;
 let offDays = 0;
 let guard = 0;
@@ -98,7 +99,7 @@ while (!isSeasonOver(league) && guard++ < 500) {
     offDays++;
     shape.push('.');
   }
-  advanceDay(league);
+  advanceDay(league, parksRng);
 }
 
 console.log(`  calendar length   ${league.calendar.length} days`);

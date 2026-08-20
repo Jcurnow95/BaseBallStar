@@ -86,8 +86,29 @@ const TEAM_NICKS = [
   'Rail Kings', 'Pelicans', 'Bandits', 'Voyagers', 'Hammers', 'Comets',
 ];
 
-const PITCHER_FIRST = ['Dane', 'Marco', 'Eli', 'Cole', 'Rafa', 'Tomas', 'Jax', 'Owen', 'Kai', 'Bryce'];
-const PITCHER_LAST = ['Varga', 'Whitlock', 'Ferreira', 'Nakamura', 'Delgado', 'Boone', 'Okafor', 'Lindqvist', 'Moreau', 'Castellanos'];
+const FIRST_NAMES = [
+  'Dane', 'Marco', 'Eli', 'Cole', 'Rafa', 'Tomas', 'Jax', 'Owen', 'Kai', 'Bryce',
+  'Luis', 'Dario', 'Wes', 'Trey', 'Mateo', 'Hiro', 'Anders', 'Cruz', 'Silas', 'Deion',
+  'Rowan', 'Felix', 'Jonas', 'Miles', 'Trent', 'Ezra', 'Nico', 'Grady', 'Sho', 'Beau',
+];
+const LAST_NAMES = [
+  'Varga', 'Whitlock', 'Ferreira', 'Nakamura', 'Delgado', 'Boone', 'Okafor', 'Lindqvist', 'Moreau', 'Castellanos',
+  'Herrera', 'Kowalski', 'Tanaka', 'Aldridge', 'Beckham', 'Osei', 'Marchetti', 'Duval', 'Halloran', 'Reyes',
+  'Sandoval', 'Kirkland', 'Vann', 'Petrov', 'Aoki', 'Mbeki', 'Strand', 'Quintero', 'Ashworth', 'Calloway',
+];
+
+/**
+ * A named squad member on any club in the league. These are the people the
+ * play-by-play talks about: they live in the save, so the same names bat
+ * around you all season, develop over winters, and eventually retire.
+ */
+export interface RosterPlayer {
+  name: string;
+  age: number;
+  /** 0-100 skill. A light thumb on their simulated at-bats, and the number to watch grow. */
+  rating: number;
+  role: 'batter' | 'pitcher';
+}
 
 export interface Team {
   id: string;
@@ -104,6 +125,8 @@ export interface Team {
    * finishing within a game of .500. Optional so older saves still load.
    */
   strength?: number;
+  /** The club's named players. Optional so pre-roster saves still load. */
+  roster?: RosterPlayer[];
 }
 
 /** One dated day of the season: either a game, or an off day to train on. */
@@ -146,10 +169,57 @@ export interface LeagueState {
   regularDays?: number;
   /** The postseason, once the regular season is done. See `core/playoffs.ts`. */
   playoffs?: Playoffs;
+  /** Clubhouse news waiting to be shown on the hub, then cleared. */
+  news?: string[];
 }
 
-export function pitcherName(rng: Rng): string {
-  return `${rng.pick(PITCHER_FIRST)} ${rng.pick(PITCHER_LAST)}`;
+const BATTERS_PER_TEAM = 8;
+const PITCHERS_PER_TEAM = 2;
+
+export function randomName(rng: Rng): string {
+  return `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`;
+}
+
+function newRosterPlayer(
+  rng: Rng,
+  role: 'batter' | 'pitcher',
+  ratingCentre: number,
+  rookie = false,
+): RosterPlayer {
+  return {
+    name: randomName(rng),
+    age: rookie ? rng.int(20, 23) : rng.int(21, 34),
+    rating: Math.round(clamp(ratingCentre + rng.gaussian() * 8, 10, 99)),
+    role,
+  };
+}
+
+/** What a fresh arrival on this club should rate around, by role. */
+function ratingCentreFor(league: LeagueState, team: Team, role: 'batter' | 'pitcher'): number {
+  return role === 'pitcher' ? LEVELS[league.levelId].pitcherRating : (team.strength ?? 50);
+}
+
+function generateRoster(rng: Rng, strength: number, pitcherRating: number): RosterPlayer[] {
+  const roster: RosterPlayer[] = [];
+  for (let i = 0; i < BATTERS_PER_TEAM; i++) roster.push(newRosterPlayer(rng, 'batter', strength));
+  for (let i = 0; i < PITCHERS_PER_TEAM; i++) roster.push(newRosterPlayer(rng, 'pitcher', pitcherRating));
+  return roster;
+}
+
+export const teamBatters = (team: Team): RosterPlayer[] =>
+  (team.roster ?? []).filter((p) => p.role === 'batter');
+
+export const teamPitchers = (team: Team): RosterPlayer[] =>
+  (team.roster ?? []).filter((p) => p.role === 'pitcher');
+
+/** Give any roster-less club (a pre-roster save) its players. Idempotent. */
+export function ensureRosters(league: LeagueState, rng: Rng): void {
+  const level = LEVELS[league.levelId];
+  for (const team of league.teams) {
+    if (!team.roster || team.roster.length === 0) {
+      team.roster = generateRoster(rng, team.strength ?? 50, level.pitcherRating);
+    }
+  }
 }
 
 export function createLeague(levelId: number, rng: Rng): LeagueState {
@@ -164,6 +234,8 @@ export function createLeague(levelId: number, rng: Rng): LeagueState {
     const nick = nicks.splice(rng.int(0, nicks.length - 1), 1)[0];
     const park = parks.splice(rng.int(0, parks.length - 1), 1)[0] ?? BALLPARKS[0];
     const kit = kits.splice(rng.int(0, kits.length - 1), 1)[0] ?? TEAM_KITS[i];
+    // Spread the league out: a couple of good clubs, a couple of bad ones.
+    const strength = clamp(50 + rng.gaussian() * 14, 20, 80);
     teams.push({
       id: `t${i}`,
       name: `${city} ${nick}`,
@@ -171,12 +243,24 @@ export function createLeague(levelId: number, rng: Rng): LeagueState {
       losses: 0,
       parkId: park.id,
       kitId: kit.id,
-      // Spread the league out: a couple of good clubs, a couple of bad ones.
-      strength: clamp(50 + rng.gaussian() * 14, 20, 80),
+      strength,
+      roster: generateRoster(rng, strength, LEVELS[levelId].pitcherRating),
     });
   }
 
   const playerTeamId = teams[0].id;
+
+  return {
+    levelId,
+    playerTeamId,
+    teams,
+    schedule: buildSchedule(teams, playerTeamId, rng),
+    calendar: buildCalendar(rng),
+    day: 0,
+  };
+}
+
+function buildSchedule(teams: Team[], playerTeamId: string, rng: Rng): ScheduledGame[] {
   const opponents = teams.filter((t) => t.id !== playerTeamId);
   const schedule: ScheduledGame[] = [];
 
@@ -190,7 +274,82 @@ export function createLeague(levelId: number, rng: Rng): LeagueState {
     });
   }
 
-  return { levelId, playerTeamId, teams, schedule, calendar: buildCalendar(rng), day: 0 };
+  return schedule;
+}
+
+/**
+ * Carry the league into a new season at the same level: same clubs, records
+ * wiped, a fresh schedule — and an offseason in every clubhouse. Players age a
+ * year, the young ones come on, the old ones fade, and the oldest hang them
+ * up and are replaced by kids. Returns the news from the player's own
+ * clubhouse, for the season-opening report.
+ */
+export function rolloverSeason(league: LeagueState, rng: Rng): string[] {
+  const news: string[] = [];
+  ensureRosters(league, rng);
+
+  for (const team of league.teams) {
+    team.wins = 0;
+    team.losses = 0;
+    const roster = team.roster!;
+    const mine = team.id === league.playerTeamId;
+
+    for (let i = 0; i < roster.length; i++) {
+      const p = roster[i];
+      p.age++;
+
+      if (p.age >= 38 || (p.age >= 33 && rng.chance((p.age - 32) * 0.14))) {
+        const rookie = newRosterPlayer(rng, p.role, ratingCentreFor(league, team, p.role) - 4, true);
+        roster[i] = rookie;
+        if (mine) news.push(`${p.name} retired at ${p.age}. ${rookie.name}, ${rookie.age}, takes the spot.`);
+        continue;
+      }
+
+      // Young players trend up over a winter, veterans trend down.
+      const drift = Math.round((p.age < 27 ? 2.5 : p.age < 31 ? 0 : -2.5) + rng.gaussian() * 2.5);
+      p.rating = Math.round(clamp(p.rating + drift, 10, 99));
+      if (mine && drift >= 4) news.push(`${p.name} put in a big winter — up to a ${p.rating} rating.`);
+      if (mine && drift <= -4) {
+        news.push(
+          p.age >= 31
+            ? `${p.name} is slowing down at ${p.age} — down to a ${p.rating} rating.`
+            : `${p.name} had a rough winter — down to a ${p.rating} rating.`,
+        );
+      }
+    }
+
+    // The league table should follow the talent.
+    const batters = teamBatters(team);
+    team.strength = clamp(batters.reduce((s, p) => s + p.rating, 0) / Math.max(1, batters.length), 20, 80);
+  }
+
+  league.schedule = buildSchedule(league.teams, league.playerTeamId, rng);
+  league.calendar = buildCalendar(rng);
+  league.day = 0;
+  // Last year's postseason is history; the new year seeds its own.
+  league.playoffs = undefined;
+  league.regularDays = undefined;
+  return news;
+}
+
+/**
+ * A small chance each day that the front office shuffles the clubhouse: one
+ * teammate out, a call-up in. This is the only way names change mid-season.
+ * Returns the news line, or null on the (usual) quiet day.
+ */
+export function maybeRosterMove(league: LeagueState, rng: Rng): string | null {
+  if (!rng.chance(0.05)) return null;
+  const team = playerTeam(league);
+  const roster = team.roster;
+  if (!roster || roster.length === 0) return null;
+
+  const index = rng.int(0, roster.length - 1);
+  const departing = roster[index];
+  const arriving = newRosterPlayer(rng, departing.role, ratingCentreFor(league, team, departing.role) - 4, true);
+  roster[index] = arriving;
+
+  const how = rng.pick(['was traded away', 'was sent down', 'was released']);
+  return `Roster move: ${departing.name} ${how}. ${arriving.name} joins the clubhouse.`;
 }
 
 /**
@@ -247,9 +406,16 @@ export function daysRemaining(league: LeagueState): number {
   return Math.max(0, league.calendar.length - league.day);
 }
 
-/** Move to tomorrow. */
-export function advanceDay(league: LeagueState): void {
+/**
+ * Move to tomorrow — the day the front office might make a move on. Callers
+ * that don't care about roster churn (tools, playoff bookkeeping) may omit
+ * the rng and no move is rolled.
+ */
+export function advanceDay(league: LeagueState, rng?: Rng): void {
   league.day = Math.min(league.calendar.length, league.day + 1);
+  if (!rng) return;
+  const move = maybeRosterMove(league, rng);
+  if (move) (league.news ??= []).push(move);
 }
 
 /** A team's colour identity, resolved safely for older saves. */

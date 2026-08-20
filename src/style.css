@@ -154,6 +154,40 @@ body {
   cursor: default;
 }
 
+/* Glanceable state on a button: unspent points, gear about to fail. */
+.btn .btn-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--gold);
+  color: #241a02;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.btn .btn-badge.warn {
+  background: var(--red);
+  color: #fff;
+}
+
+/* A de-emphasized action: reads as a link, not a peer of the real buttons. */
+.link-btn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
 .btn-row {
   display: flex;
   gap: 10px;
@@ -314,6 +348,26 @@ select {
   color: var(--muted);
 }
 
+.hub-head .who .id-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.hub-head .who .id-chip {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
 .ovr {
   text-align: right;
 }
@@ -374,6 +428,27 @@ select {
   background: var(--blue);
 }
 
+/*
+ * Meter weights: stamina drives the play/train decision so it gets the fat
+ * bar; XP is a glance so it gets a sliver.
+ */
+.meter.big .bar {
+  height: 14px;
+}
+
+.meter.slim {
+  margin-top: 8px;
+}
+
+.meter.slim .bar {
+  height: 4px;
+}
+
+.meter.slim .meter-label {
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+
 .statline {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -391,6 +466,51 @@ select {
   color: var(--muted);
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+/* The stats the scout grade is actually built from. */
+.statline div.key b {
+  font-size: 21px;
+  color: var(--accent);
+}
+
+.scout-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #7a6122;
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.scout-strip .scout-grade {
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+.scout-strip .scout-grade b {
+  display: block;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--gold);
+}
+
+.scout-strip .scout-grade span {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.scout-strip .scout-req {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.scout-strip .scout-req b {
+  color: var(--gold);
 }
 
 .matchup {
@@ -415,11 +535,70 @@ select {
 
 /* ------------------------------------------------------------- calendar */
 
+.cal-title {
+  margin-top: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+
+.week-strip {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.week-day {
+  min-width: 0;
+  padding: 6px 2px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  text-align: center;
+}
+
+.week-day b {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.week-day span {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.week-day.game span {
+  color: var(--accent);
+}
+
+.week-day.playoff span {
+  color: var(--gold);
+}
+
+.week-day.off span,
+.week-day.end span {
+  color: var(--muted);
+}
+
+.week-day.now {
+  border-color: var(--gold);
+  background: rgba(255, 209, 102, 0.08);
+}
+
 .calendar {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
-  margin-top: 12px;
+  margin-top: 6px;
 }
 
 .cal-day {
@@ -628,6 +807,21 @@ table.standings th:not(:first-child) {
 table.standings tr.me td {
   color: var(--accent);
   font-weight: 700;
+  background: rgba(53, 194, 106, 0.09);
+}
+
+.you-tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #05210f;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
 }
 
 table.standings tr.cut td {
@@ -1728,8 +1922,17 @@ input[type='number'] {
   position: absolute;
   top: 0;
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #7ce8a6);
-  opacity: 0.85;
+  background: #7ce8a6;
+  box-shadow: 0 0 6px rgba(124, 232, 166, 0.7);
+}
+
+/* Where the next point starts costing more (60 and 80). */
+.attr-row .track .cap-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .attr-row .val {

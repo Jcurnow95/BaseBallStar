@@ -44,6 +44,7 @@ import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 import { devMenuEnabled } from './dev';
 import { howtoSeen, openHowto } from './howto';
+import { openTutorial } from './tutorial';
 
 export function renderHub(app: App, mount: HTMLElement): void {
   /**
@@ -151,7 +152,8 @@ export function renderHub(app: App, mount: HTMLElement): void {
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
     </button>
-    <button class="link-btn" id="howto">How to Play</button>`;
+    <button class="link-btn" id="howto">How to Play</button>
+    <button class="link-btn" id="tutorial">Practice Drills — Playable Tutorial</button>`;
 
   // What the postseason meant for you, once it's settled.
   const wrapUp = ((): string => {
@@ -402,6 +404,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   q(mount, '#train').addEventListener('click', () => app.go('training'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
+  q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));
 
   if (devEnabled) q(mount, '#devmenu').addEventListener('click', () => app.go('dev'));
 

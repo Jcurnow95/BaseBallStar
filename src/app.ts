@@ -16,6 +16,7 @@ export type Route =
   | 'seasonEnd'
   | 'store'
   | 'howto'
+  | 'tutorial'
   | 'dev';
 
 export interface PostGameSummary {

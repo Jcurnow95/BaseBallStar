@@ -296,6 +296,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       player: playerWithGear(player),
       pitcher: event.pitcher,
       pitcherKit: theirKit,
+      batterKit: myKit,
       weather,
       level,
       rng: app.rng,

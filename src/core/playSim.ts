@@ -576,6 +576,19 @@ export class PlaySim {
     return this.fielders.some((f) => f.hasBall && distance(f, BASES[base]) <= RECEIVE_RADIUS);
   }
 
+  /**
+   * The throw currently in the air, for the view to telegraph the race:
+   * which bag it's headed to and how far along it is (0 = just released,
+   * 1 = arriving). Null when no throw is in flight.
+   */
+  get throwInFlight(): { base: BaseId; progress: number } | null {
+    if (this.phase !== 'throw' || this.throwTarget === null) return null;
+    return {
+      base: this.throwTarget,
+      progress: clamp(this.throwElapsed / Math.max(this.throwDuration, 0.001), 0, 1),
+    };
+  }
+
   /** Offense: try for the next base. */
   advanceRunner(): void {
     const runner = this.userRunner;

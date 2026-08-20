@@ -51,6 +51,19 @@ export const PITCHES: Record<PitchType, PitchDefinition> = {
 
 const ALL_TYPES = Object.keys(PITCHES) as PitchType[];
 
+/**
+ * Radar-gun base speeds, mph, at a rating of zero. Purely cosmetic — the
+ * difficulty curve lives in `duration` — but the number on the history dot
+ * should read like the pitch it labels.
+ */
+const BASE_MPH: Record<PitchType, number> = {
+  fastball: 88,
+  sinker: 87,
+  slider: 81,
+  changeup: 78,
+  curveball: 72,
+};
+
 export interface PitcherAI {
   /** 0-100. Drives velocity, command, and how often they nibble. */
   rating: number;
@@ -141,6 +154,7 @@ export function throwPitch(pitcher: PitcherAI, count: Count, rng: Rng): Pitch {
     plateX,
     plateY,
     isStrike: Math.abs(plateX) <= 1 && Math.abs(plateY) <= 1,
+    mph: Math.round(BASE_MPH[type] + skill * 9 + rng.range(-1.5, 1.5)),
   };
 }
 

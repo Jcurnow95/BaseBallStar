@@ -1,4 +1,4 @@
-import type { AtBatOutcome, Pitch, PlayerProfile } from '../core/types';
+import type { AtBatOutcome, Pitch, PitchType, PlayerProfile } from '../core/types';
 import type { Count, PitcherAI } from '../core/pitching';
 import { readPitch, throwPitch } from '../core/pitching';
 import type { BattedBall } from '../core/types';
@@ -15,7 +15,7 @@ import type { Surface } from '../ui/canvas';
 import { playSound } from '../ui/audio';
 import type { AirConditions, Weather } from '../core/weather';
 import { CALM, airFor } from '../core/weather';
-import { drawGloom, drawRain, drawWindFlag } from './weatherFx';
+import { drawGloom, drawRain, drawRainSplashes, drawWindFlag } from './weatherFx';
 
 /**
  * The at-bat minigame.
@@ -32,6 +32,8 @@ export interface AtBatOptions {
   rng: Rng;
   /** Uniform the opposing pitcher is wearing. */
   pitcherKit: Uniform;
+  /** Uniform the batter (the player) is wearing. */
+  batterKit: Uniform;
   /** The day's weather. Drawn, and used to judge whether contact stays fair. */
   weather?: Weather;
   onCount(count: Count): void;
@@ -52,10 +54,18 @@ const FREEZE_MS = 1250;
 const STAGE_ASPECT = 0.6;
 /**
  * The mound's crest as a fraction of stage height. Below the horizon (0.36) so
- * it sits on the grass, and above the strike zone's top edge (0.485) with room
+ * it sits on the grass, and above the strike zone's top edge (0.475) with room
  * for the hump's ground shadow.
  */
 const MOUND_Y = 0.415;
+/**
+ * Pitcher figure scale, as fractions of stage height and width. Shared by the
+ * drawing and by `layout()`, which derives the release point from the same
+ * shoulder the arm whips over. Sized so the pitcher looms — the camera is
+ * meant to feel tight, not like watching from the upper deck.
+ */
+const PITCHER_H = 0.088;
+const PITCHER_W = 0.058;
 /** Flight continues past the plate so late swings still have something to hit. */
 const OVERRUN = 1.22;
 
@@ -67,6 +77,15 @@ export const CROWD_COLOURS = [
   '#8d9bb8', '#6f7d99', '#a8b3c9', '#5d6a85', '#9aa7c0',
   '#b0796a', '#7a8bb0', '#c2b090', '#6b7f96', '#94a0ba',
 ];
+
+/** History-dot colour per pitch type: hot colours for velocity, cool for spin. */
+const PITCH_DOT_COLOURS: Record<PitchType, string> = {
+  fastball: '#ff6b6b',
+  sinker: '#ff9a3d',
+  slider: '#5da9ff',
+  curveball: '#b07fff',
+  changeup: '#3ad6c2',
+};
 
 interface BallState {
   x: number;
@@ -104,6 +123,12 @@ export class AtBatView {
   private pitchLabel = '';
   private swung = false;
   private trail: BallState[] = [];
+  /**
+   * Every pitch of this plate appearance, oldest first — the history dots by
+   * the zone. Recorded only once a pitch resolves, so the dot never gives away
+   * what the ball still in the air really is.
+   */
+  private history: { type: PitchType; mph: number }[] = [];
 
   private tapPoint: { x: number; y: number } | null = null;
   private frozenBall: BallState | null = null;
@@ -173,6 +198,9 @@ export class AtBatView {
   }
 
   private freezeThen(text: string, tone: string, action: () => void): void {
+    // Every pitch resolution passes through here exactly once, which makes it
+    // the one place the pitch can join the history.
+    this.history.push({ type: this.pitch.def.type, mph: this.pitch.mph });
     this.banner.textContent = text;
     this.banner.className = `atbat-banner show ${tone}`;
     this.afterFreeze = action;
@@ -369,22 +397,28 @@ export class AtBatView {
       H,
       cx: W / 2,
       horizon: H * 0.36,
-      zoneY: H * 0.585,
-      zoneHW: W * 0.185,
-      zoneHH: H * 0.1,
+      // The zone fills the bottom third: big, and close to where a thumb
+      // already rests. Its top edge runs nearly to the mound's skirt, so the
+      // stretch of empty grass the old camera showed is gone.
+      zoneY: H * 0.6,
+      zoneHW: W * 0.24,
+      zoneHH: H * 0.125,
       // Where the pitcher stands: the crest of the mound, on the grass below
       // the horizon so the figure reads as planted on the field rather than
       // hovering in front of the outfield wall.
       mound: { x: W / 2, y: H * MOUND_Y },
       // Where the ball leaves the throwing hand — up by the shoulder, on the
       // arm side — so the pitch comes out of the release rather than the feet.
-      release: { x: W / 2 - W * 0.042 * 0.2 - H * 0.062 * 0.57, y: H * MOUND_Y - H * 0.062 * 1.06 },
+      release: {
+        x: W / 2 - W * PITCHER_W * 0.2 - H * PITCHER_H * 0.57,
+        y: H * MOUND_Y - H * PITCHER_H * 1.06,
+      },
       minR: Math.max(3, W * 0.015),
       // Sized for a fingertip, not for realism. Tap offsets are measured in ball
       // radii (see `core/swing.ts`), so a bigger ball is a bigger target in
       // pixels at exactly the same difficulty. The floor keeps it thumb-sized on
       // a short or narrow stage, where a purely proportional ball goes tiny.
-      maxR: Math.max(W * 0.14, 32),
+      maxR: Math.max(W * 0.16, 34),
     };
   }
 
@@ -491,7 +525,9 @@ export class AtBatView {
     this.drawField(ctx, L);
     this.drawPitcher(ctx, L);
     this.drawZone(ctx, L);
+    this.drawCountHud(ctx, L);
     this.drawPlate(ctx, L);
+    this.drawBatter(ctx, L);
 
     if (this.phase === 'flight') {
       const t = this.flightProgress();
@@ -510,6 +546,15 @@ export class AtBatView {
     // Weather sits over the whole canvas, not just the stage.
     drawGloom(ctx, L.canvasW, L.canvasH, this.weather);
     drawRain(ctx, L.canvasW, L.canvasH, this.weather, this.weatherClock);
+    // Splashes only where the rain actually lands: the dirt at the bottom.
+    drawRainSplashes(
+      ctx,
+      L.canvasW,
+      L.canvasH,
+      this.weather,
+      this.weatherClock,
+      L.oy + L.H * 0.58,
+    );
     // Under the pause button, clear of the readout across the top.
     drawWindFlag(ctx, 10, 52, this.weather);
   }
@@ -531,6 +576,11 @@ export class AtBatView {
     } else if (this.weather.sky === 'overcast') {
       sky.addColorStop(0, '#12161f');
       sky.addColorStop(1, '#2b3341');
+    } else if (this.weather.sky === 'storm') {
+      // Near-black, so a storm night reads as a storm before the first drop
+      // registers.
+      sky.addColorStop(0, '#06080d');
+      sky.addColorStop(1, '#1a202c');
     } else {
       sky.addColorStop(0, '#0d1017');
       sky.addColorStop(1, '#232a36');
@@ -624,8 +674,8 @@ export class AtBatView {
     const follow = afterRelease ? clamp(this.phaseElapsed / 420, 0, 1) : 0;
 
     const kit = this.opts.pitcherKit;
-    const bodyH = L.H * 0.062;
-    const bodyW = L.W * 0.042;
+    const bodyH = L.H * PITCHER_H;
+    const bodyW = L.W * PITCHER_W;
     const legLen = bodyH * 0.62;
     const armLen = bodyH * 0.58;
     // Where the planted back foot meets the dirt: the crest of the mound. The
@@ -648,8 +698,8 @@ export class AtBatView {
     ctx.save();
     ctx.translate(L.mound.x, L.mound.y);
     {
-      const rx = L.W * 0.135;
-      const hump = L.H * 0.028;
+      const rx = L.W * 0.175;
+      const hump = L.H * 0.034;
       const baseY = footY + hump * 0.75;
 
       // Ground shadow the hump throws onto the grass, low and toward us.
@@ -785,28 +835,267 @@ export class AtBatView {
 
   private drawZone(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
     // Vision keeps the strike-zone guide visible; low vision fades it out.
-    const visibility = clamp(0.18 + this.opts.player.attributes.vision / 220, 0.18, 0.62);
+    // The whole guide brightens the moment the ball is live, when it's needed.
+    const live = this.phase === 'flight' ? 1.5 : 1;
+    const visibility = Math.min(
+      0.9,
+      clamp(0.22 + this.opts.player.attributes.vision / 220, 0.22, 0.66) * live,
+    );
+    const x0 = L.cx - L.zoneHW;
+    const y0 = L.zoneY - L.zoneHH;
+    const zw = L.zoneHW * 2;
+    const zh = L.zoneHH * 2;
+
     ctx.save();
+    // A faint pane of glass, so the zone reads against dark grass instead of
+    // being four hairlines lost in it.
+    ctx.fillStyle = `rgba(255,255,255,${this.phase === 'flight' ? 0.08 : 0.055})`;
+    ctx.fillRect(x0, y0, zw, zh);
+
     ctx.strokeStyle = `rgba(255,255,255,${visibility})`;
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 6]);
-    ctx.strokeRect(L.cx - L.zoneHW, L.zoneY - L.zoneHH, L.zoneHW * 2, L.zoneHH * 2);
+    ctx.strokeRect(x0, y0, zw, zh);
 
     ctx.setLineDash([]);
     ctx.strokeStyle = `rgba(255,255,255,${visibility * 0.4})`;
     ctx.lineWidth = 1;
     for (let i = 1; i < 3; i++) {
-      const x = L.cx - L.zoneHW + (L.zoneHW * 2 * i) / 3;
+      const x = x0 + (zw * i) / 3;
       ctx.beginPath();
-      ctx.moveTo(x, L.zoneY - L.zoneHH);
-      ctx.lineTo(x, L.zoneY + L.zoneHH);
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y0 + zh);
       ctx.stroke();
-      const y = L.zoneY - L.zoneHH + (L.zoneHH * 2 * i) / 3;
+      const y = y0 + (zh * i) / 3;
       ctx.beginPath();
-      ctx.moveTo(L.cx - L.zoneHW, y);
-      ctx.lineTo(L.cx + L.zoneHW, y);
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x0 + zw, y);
       ctx.stroke();
     }
+
+    // Solid corner brackets, heavier than the dashed frame, so the zone keeps
+    // its shape even where the dashes happen to fall on the gaps.
+    const arm = Math.min(zw, zh) * 0.22;
+    ctx.strokeStyle = `rgba(255,255,255,${Math.min(1, visibility * 1.5)})`;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    for (const [cx2, cy2, sx, sy] of [
+      [x0, y0, 1, 1],
+      [x0 + zw, y0, -1, 1],
+      [x0, y0 + zh, 1, -1],
+      [x0 + zw, y0 + zh, -1, -1],
+    ] as const) {
+      ctx.beginPath();
+      ctx.moveTo(cx2 + sx * arm, cy2);
+      ctx.lineTo(cx2, cy2);
+      ctx.lineTo(cx2, cy2 + sy * arm);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** Screen side of the plate the batter occupies: -1 left, +1 right. A
+   * right-handed hitter stands to the catcher's left. */
+  private batterSide(): -1 | 1 {
+    return this.opts.player.bats === 'L' ? 1 : -1;
+  }
+
+  /**
+   * The count, living where the eyes already are — beside the zone — plus one
+   * dot per pitch already thrown this at-bat, coloured by what it was with the
+   * radar reading alongside. Drawn on the opposite side from the batter.
+   */
+  private drawCountHud(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
+    const side = -this.batterSide();
+    const pad = L.W * 0.03;
+    const x0 = side > 0 ? L.cx + L.zoneHW + pad : L.cx - L.zoneHW - pad;
+    const align: -1 | 1 = side > 0 ? 1 : -1;
+    const pipR = Math.max(3, L.W * 0.012);
+    const step = pipR * 2 + 4;
+
+    ctx.save();
+    ctx.font = `bold ${Math.max(10, L.W * 0.032)}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = align > 0 ? 'left' : 'right';
+
+    // B / S pip rows, same colours as the header so the language is one.
+    const rows: Array<[string, number, number, string]> = [
+      ['B', this.count.balls, 3, '#35c26a'],
+      ['S', this.count.strikes, 2, '#ff6b6b'],
+    ];
+    let y = L.zoneY - L.zoneHH + pipR + 2;
+    const letterW = Math.max(10, L.W * 0.032);
+    for (const [letter, have, total, colour] of rows) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillText(letter, x0, y + 0.5);
+      for (let i = 0; i < total; i++) {
+        const px = x0 + align * (letterW + i * step + pipR);
+        ctx.beginPath();
+        ctx.arc(px, y, pipR, 0, Math.PI * 2);
+        if (i < have) {
+          ctx.fillStyle = colour;
+          ctx.fill();
+        } else {
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+      y += step + 3;
+    }
+
+    // Pitch history, newest at the bottom, capped so a foul-ball marathon
+    // doesn't crawl down into the plate.
+    const shown = this.history.slice(-6);
+    y += 4;
+    ctx.font = `bold ${Math.max(9, L.W * 0.026)}px system-ui, sans-serif`;
+    for (const p of shown) {
+      ctx.fillStyle = PITCH_DOT_COLOURS[p.type];
+      ctx.beginPath();
+      ctx.arc(x0 + align * pipR, y, pipR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillText(String(p.mph), x0 + align * (pipR * 2 + 5), y + 0.5);
+      y += step + 1;
+    }
+    ctx.restore();
+  }
+
+  /**
+   * The batter — you — in the box beside the plate, drawn with the same
+   * round-capped limbs as the pitcher so the two read as the same game. Three
+   * real poses sell the moment: an easy stance, a coil as the pitcher strides,
+   * and the bat whipping through when the tap lands.
+   */
+  private drawBatter(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
+    const side = this.batterSide();
+    const h = L.H * 0.2;
+    const x = L.cx + side * L.W * 0.36;
+    const y = L.H * 0.905;
+    const kit = this.opts.batterKit;
+
+    // Pose: 0 = relaxed stance, 1 = fully loaded. The coil tracks the
+    // pitcher's stride; the swing only plays when a tap actually landed —
+    // a taken pitch just relaxes back into the stance.
+    let load: number;
+    let swingP = 0;
+    if (this.phase === 'freeze') {
+      if (this.tapPoint) {
+        load = 1;
+        swingP = clamp(this.phaseElapsed / 170, 0, 1);
+      } else {
+        load = 0;
+      }
+    } else if (this.phase === 'flight') {
+      load = 1;
+    } else {
+      load = clamp((this.phaseElapsed / WINDUP_MS - 0.3) / 0.55, 0, 1);
+    }
+    const bob = Math.sin(this.weatherClock * 2.6) * (1 - load) * h * 0.012;
+    // Ease the barrel through the hitting zone rather than sweeping linearly.
+    const swing = 1 - (1 - swingP) * (1 - swingP);
+
+    ctx.save();
+    ctx.translate(x, y);
+    // Local +x points at the plate, whichever box the batter is in.
+    ctx.scale(-side, 1);
+    ctx.lineCap = 'round';
+
+    // Ground shadow first, so the figure is planted rather than pasted on.
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(h * 0.02, h * 0.012, h * 0.32, h * 0.055, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Weight drifts back as the batter loads, then drives forward with the bat.
+    const shift = -load * (1 - swing) * h * 0.06 + swing * h * 0.1;
+    const hipX = shift;
+    const hipY = -h * 0.42 + bob;
+    const shX = shift * 1.35;
+    const shY = -h * 0.68 + bob + load * (1 - swing) * h * 0.015;
+
+    // ---- Legs. Front foot lifts a touch in the load, plants for the swing.
+    ctx.strokeStyle = kit.pants;
+    ctx.lineWidth = Math.max(3, h * 0.115);
+    ctx.beginPath();
+    ctx.moveTo(hipX, hipY);
+    ctx.lineTo(-h * 0.17, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(hipX, hipY);
+    ctx.lineTo(h * 0.17, -load * (1 - swing) * h * 0.05);
+    ctx.stroke();
+
+    // ---- Torso, curved like the pitcher's.
+    const shHalf = h * 0.165;
+    const hipHalf = h * 0.125;
+    ctx.fillStyle = kit.shirt;
+    ctx.beginPath();
+    ctx.moveTo(shX - shHalf, shY + h * 0.015);
+    ctx.quadraticCurveTo(shX, shY - h * 0.04, shX + shHalf, shY + h * 0.015);
+    ctx.quadraticCurveTo(shX + shHalf * 0.75, (shY + hipY) / 2, hipX + hipHalf, hipY);
+    ctx.quadraticCurveTo(hipX, hipY + h * 0.03, hipX - hipHalf, hipY);
+    ctx.quadraticCurveTo(shX - shHalf * 0.75, (shY + hipY) / 2, shX - shHalf, shY + h * 0.015);
+    ctx.closePath();
+    ctx.fill();
+
+    // ---- Hands and bat. Up by the back shoulder in the stance, wrapped
+    // deeper in the load, then whipped level through the zone.
+    const loadBack = load * (1 - swing);
+    const handX = shX - h * (0.09 + loadBack * 0.06) + swing * h * 0.24;
+    const handY = shY + h * (0.06 - loadBack * 0.03) + swing * h * 0.14;
+    const batAngle = lerp(-1.9 - load * 0.45, 0.9, swing);
+    const batLen = h * 0.48;
+    const tipX = handX + Math.cos(batAngle) * batLen;
+    const tipY = handY + Math.sin(batAngle) * batLen;
+
+    // Arms from both shoulders to the hands.
+    ctx.strokeStyle = kit.shirt;
+    ctx.lineWidth = Math.max(2.5, h * 0.075);
+    ctx.beginPath();
+    ctx.moveTo(shX - h * 0.07, shY + h * 0.05);
+    ctx.lineTo(handX, handY);
+    ctx.moveTo(shX + h * 0.07, shY + h * 0.03);
+    ctx.lineTo(handX, handY);
+    ctx.stroke();
+
+    // Bat: darker handle, brighter barrel, so the taper reads at a glance.
+    ctx.strokeStyle = '#8a6a45';
+    ctx.lineWidth = Math.max(2, h * 0.04);
+    ctx.beginPath();
+    ctx.moveTo(handX, handY);
+    ctx.lineTo(lerp(handX, tipX, 0.35), lerp(handY, tipY, 0.35));
+    ctx.stroke();
+    ctx.strokeStyle = '#d9a468';
+    ctx.lineWidth = Math.max(3, h * 0.06);
+    ctx.beginPath();
+    ctx.moveTo(lerp(handX, tipX, 0.3), lerp(handY, tipY, 0.3));
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    // Batting gloves on the hands.
+    ctx.fillStyle = kit.cap;
+    ctx.beginPath();
+    ctx.arc(handX, handY, h * 0.045, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ---- Head and helmet, eyes on the pitcher.
+    const headR = h * 0.095;
+    const headX = shX + h * 0.02;
+    const headY = shY - headR * 1.15;
+    ctx.fillStyle = '#c98d63';
+    ctx.beginPath();
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = kit.cap;
+    ctx.beginPath();
+    ctx.arc(headX, headY, headR * 1.06, Math.PI * 0.95, Math.PI * 2.1);
+    ctx.fill();
+    // Ear flap on the pitcher side.
+    ctx.beginPath();
+    ctx.ellipse(headX + headR * 0.55, headY + headR * 0.25, headR * 0.42, headR * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.restore();
   }
 

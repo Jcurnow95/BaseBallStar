@@ -985,8 +985,8 @@ table.standings tr.clinched td:first-child::after {
 }
 
 .diamond {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   position: relative;
   flex: 0 0 auto;
   transform: rotate(45deg);
@@ -994,16 +994,18 @@ table.standings tr.clinched td:first-child::after {
 
 .diamond i {
   position: absolute;
-  width: 11px;
-  height: 11px;
-  border: 1px solid var(--line);
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid #44557a;
   background: var(--panel-2);
-  border-radius: 2px;
+  border-radius: 3px;
 }
 
+/* Occupied bases burn gold so the situation reads at a glance. */
 .diamond i.on {
   background: var(--gold);
-  border-color: var(--gold);
+  border-color: #ffe3a1;
+  box-shadow: 0 0 7px rgba(255, 209, 102, 0.75);
 }
 
 .diamond i.b1 {
@@ -1350,6 +1352,10 @@ table.standings tr.clinched td:first-child::after {
 }
 .feed div.bad {
   color: #ff9d9d;
+}
+/* A base hit, either team's: gold, distinct from red bad news. */
+.feed div.hit {
+  color: var(--gold);
 }
 .feed div.big {
   color: var(--gold);

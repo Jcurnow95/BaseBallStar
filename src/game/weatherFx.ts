@@ -28,10 +28,11 @@ export function drawRain(
   const rain = weather.rain;
   if (rain <= 0 || W <= 0 || H <= 0) return;
 
-  // Crosswind slants the streaks. Capped: a gale still has to look like rain.
-  const slant = Math.max(-0.6, Math.min(0.6, weather.wind.x / 40));
+  // Crosswind slants the streaks — a stated 19 mph across should visibly
+  // lean the rain. Capped: a gale still has to look like rain.
+  const slant = Math.max(-0.75, Math.min(0.75, weather.wind.x / 30));
   const count = Math.round(RAIN_STREAKS * (0.4 + rain * 0.6));
-  const length = 10 + rain * 10;
+  const length = 13 + rain * 12;
   const drop = time * RAIN_SPEED;
 
   ctx.save();
@@ -54,11 +55,50 @@ export function drawRain(
 }
 
 /**
+ * Splashes where the rain lands: little rings that bloom and fade on the
+ * ground, drawn only below `groundY` so they read as hitting the dirt rather
+ * than floating on the sky. Same hash-and-clock scheme as the streaks.
+ */
+export function drawRainSplashes(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  weather: Weather,
+  time: number,
+  groundY: number,
+): void {
+  const rain = weather.rain;
+  const band = H - groundY;
+  if (rain <= 0 || W <= 0 || band <= 4) return;
+
+  const count = Math.round(26 * (0.4 + rain * 0.6));
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (let i = 0; i < count; i++) {
+    const h = hash(i + 4099);
+    // Each splash owns a spot and blooms on its own loop: a ring that widens
+    // and fades, then reappears somewhere else along its row.
+    const period = 0.5 + ((h >>> 4) & 0xff) / 340;
+    const phase = ((time + ((h >>> 12) & 0xff) / 32) % period) / period;
+    const gen = Math.floor((time + ((h >>> 12) & 0xff) / 32) / period);
+    const gh = hash(i * 31 + gen);
+    const x = ((gh & 0xffff) / 0xffff) * W;
+    const y = groundY + (((gh >>> 16) & 0xffff) / 0xffff) * band;
+    const r = 1 + phase * 3.5;
+    ctx.strokeStyle = `rgba(210, 228, 255, ${(1 - phase) * (0.14 + rain * 0.18)})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * 0.4, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
  * A grey wash over the scene on a wet day, so the field reads as soaked before
  * the first ball dies in the outfield.
  */
 export function drawGloom(ctx: CanvasRenderingContext2D, W: number, H: number, weather: Weather): void {
-  const gloom = weather.sky === 'storm' ? 0.28 : weather.sky === 'rain' ? 0.18 : weather.sky === 'overcast' ? 0.08 : 0;
+  const gloom = weather.sky === 'storm' ? 0.34 : weather.sky === 'rain' ? 0.2 : weather.sky === 'overcast' ? 0.08 : 0;
   if (gloom <= 0) return;
   ctx.save();
   ctx.fillStyle = `rgba(30, 40, 60, ${gloom})`;

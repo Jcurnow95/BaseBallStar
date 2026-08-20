@@ -27,7 +27,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
 
       <div class="panel">
         <label class="field-label" for="pname">Name</label>
-        <input id="pname" type="text" maxlength="22" placeholder="e.g. Jesse Curnow" autocomplete="off" />
+        <input id="pname" type="text" maxlength="22" placeholder="e.g. Jeff Smith" autocomplete="off" />
       </div>
 
       <div class="panel">
@@ -115,7 +115,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
   q(mount, '#back').addEventListener('click', () => app.go('title'));
 
   q(mount, '#start').addEventListener('click', async () => {
-    const name = nameInput.value.trim() || 'Rookie Jones';
+    const name = nameInput.value.trim() || 'Jeff Smith';
     const archetype = ARCHETYPES.find((a) => a.id === archetypeId) ?? ARCHETYPES[0];
     const player = createPlayer(name, position, bats, archetype, contract);
     const league = createLeague(0, app.rng);

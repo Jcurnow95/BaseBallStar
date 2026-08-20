@@ -94,7 +94,7 @@ for (const seed of [1, 7, 99, 2024, 555]) {
       offDays++;
     }
 
-    advanceDay(league);
+    advanceDay(league, rng);
   }
 
   const label = `seed ${seed}`;

@@ -2,6 +2,7 @@ import type { App } from '../app';
 import {
   LEVELS,
   SEASON_GAMES,
+  ensureRosters,
   isRegularSeasonOver,
   isSeasonOver,
   nextGame,
@@ -69,8 +70,14 @@ export function renderHub(app: App, mount: HTMLElement): void {
   // gets its bracket seeded on the way in.
   if (isRegularSeasonOver(league) && !league.playoffs) {
     startPlayoffs(league, app.rng);
-    app.persist();
   }
+
+  // Saves from before named rosters get theirs generated on the way in, and
+  // any front-office news is shown once, then cleared.
+  ensureRosters(league, app.rng);
+  const news = league.news ?? [];
+  league.news = undefined;
+  app.persist();
 
   const upcoming = nextGame(league);
   const seasonDone = isSeasonOver(league);
@@ -80,35 +87,57 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const ovr = overallRating(player.attributes);
   const homePark = ballparkById(team.parkId);
 
-  // A strip of the days ahead, so you can see when the next off day lands.
+  // What kind of day a calendar slot is, for the week strip and season strip.
+  const dayKind = (index: number): 'game' | 'off' | 'playoff' | 'end' => {
+    const day = league.calendar[index];
+    if (!day) return 'end';
+    if (day.gameIndex == null) return 'off';
+    return league.schedule[day.gameIndex]?.playoff ? 'playoff' : 'game';
+  };
+
+  // The week ahead in plain words, then the whole season as a dot strip for
+  // the shape of it, with every color the strip uses named in the key.
+  const weekHtml = Array.from({ length: 7 }, (_, i) => {
+    const index = league.day + i;
+    const kind = dayKind(index);
+    const label = kind === 'end' ? '—' : kind === 'off' ? 'Off' : kind === 'playoff' ? 'P.O.' : 'Game';
+    return `
+      <div class="week-day ${kind}${i === 0 ? ' now' : ''}">
+        <b>${i === 0 ? 'Today' : `Day ${index + 1}`}</b>
+        <span>${label}</span>
+      </div>`;
+  }).join('');
+
   const calendarHtml = `
+    <div class="cal-title tiny muted">Next 7 days</div>
+    <div class="week-strip">${weekHtml}</div>
+    <div class="cal-title tiny muted">Full season</div>
     <div class="calendar">
       ${league.calendar
-        .map((day, index) => {
+        .map((_, index) => {
           const state =
             index < league.day ? 'past' : index === league.day ? 'now' : 'ahead';
-          const kind =
-            day.gameIndex == null
-              ? 'off'
-              : league.schedule[day.gameIndex]?.playoff
-                ? 'game playoff'
-                : 'game';
+          const kind = dayKind(index) === 'playoff' ? 'game playoff' : dayKind(index);
           return `<i class="cal-day ${kind} ${state}" title="Day ${index + 1}"></i>`;
         })
         .join('')}
     </div>
     <div class="cal-key tiny muted">
+      <span><i class="cal-day game now"></i> today</span>
       <span><i class="cal-day game ahead"></i> game</span>
       <span><i class="cal-day off ahead"></i> off day</span>
       ${playoffs && playoffs.playerResult !== 'missed' ? '<span><i class="cal-day game playoff ahead"></i> playoff</span>' : ''}
+      <span><i class="cal-day game past"></i> done</span>
       <span>Day ${Math.min(league.day + 1, league.calendar.length)} of ${league.calendar.length}</span>
     </div>`;
 
   // Development is reachable every day — you should never be locked out of
   // spending points or reading your own numbers because of the schedule.
+  const ptsBadge =
+    player.attributePoints > 0 ? `<span class="btn-badge">${player.attributePoints} pts</span>` : '';
   const devButton = `
     <button class="btn ghost" id="train" style="margin-top:8px">
-      Player &amp; Development${player.attributePoints > 0 ? ` · ${player.attributePoints} pts` : ''}
+      Player &amp; Development${ptsBadge}
     </button>`;
 
   // Gear is a live resource, so the clubhouse says what is in the bank and
@@ -120,9 +149,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
   ).length;
   const storeButton = `
     <button class="btn ghost" id="store" style="margin-top:8px">
-      Gear Store · ${formatMoney(player.money)}${fraying > 0 ? ` · ${fraying} wearing out` : ''}
+      Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
     </button>
-    <button class="btn ghost tiny" id="howto" style="margin-top:8px">How to Play</button>`;
+    <button class="link-btn" id="howto">How to Play</button>`;
 
   // What the postseason meant for you, once it's settled.
   const wrapUp = ((): string => {
@@ -196,7 +225,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
       </div>
       ${calendarHtml}
       <button class="btn primary" id="train" style="margin-top:12px">
-        Train Today${player.attributePoints > 0 ? ` · ${player.attributePoints} pts` : ''}
+        Train Today${ptsBadge}
       </button>
       ${storeButton}`;
   }
@@ -218,19 +247,31 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div class="badge">${esc(player.position)}</div>
           <div class="who">
             <strong>${esc(player.name)}</strong>
-            <span>${esc(level.name)} · ${esc(team.name)} · Bats ${player.bats} · Lv ${player.level}</span>
-            <span class="tiny muted">Home: ${esc(homePark.name)}</span>
+            <div class="id-chips">
+              <span class="id-chip">${esc(level.name)}</span>
+              <span class="id-chip">${esc(team.name)}</span>
+              <span class="id-chip">Bats ${player.bats}</span>
+              <span class="id-chip">Lv ${player.level}</span>
+              <span class="id-chip">Home · ${esc(homePark.name)}</span>
+            </div>
           </div>
           <div class="ovr">
             <b>${ovr}${gearOvr > 0 ? `<i class="gear-up">+${gearOvr}</i>` : ''}</b>
             <span>OVR</span>
           </div>
         </div>
-        ${meterHtml('Stamina', player.stamina)}
+        ${meterHtml('Stamina', player.stamina, 100, '', 'big')}
         ${meterHtml('Energy', player.energy, 100, 'xp')}
-        ${meterHtml('XP to next level', player.xp, xpForLevel(player.level), 'xp')}
+        ${meterHtml('XP to next level', player.xp, xpForLevel(player.level), 'xp', 'slim')}
       </div>
 
+      ${
+        news.length
+          ? `<div class="panel">
+               <div class="notice warn">${news.map((line) => esc(line)).join('<br/>')}</div>
+             </div>`
+          : ''
+      }
       <div class="panel">
         ${matchupHtml}
       </div>
@@ -238,20 +279,29 @@ export function renderHub(app: App, mount: HTMLElement): void {
       <div class="panel">
         <h2>Season at the plate</h2>
         <div class="statline">
-          <div><b>${battingAverage(player.season)}</b><span>AVG</span></div>
+          <div class="key"><b>${battingAverage(player.season)}</b><span>AVG</span></div>
           <div><b>${player.season.homeRuns}</b><span>HR</span></div>
           <div><b>${player.season.rbi}</b><span>RBI</span></div>
           <div><b>${player.season.stolenBases}</b><span>SB</span></div>
         </div>
         <div class="statline" style="margin-top:12px">
-          <div><b>${onBasePct(player.season)}</b><span>OBP</span></div>
-          <div><b>${slugging(player.season)}</b><span>SLG</span></div>
+          <div class="key"><b>${onBasePct(player.season)}</b><span>OBP</span></div>
+          <div class="key"><b>${slugging(player.season)}</b><span>SLG</span></div>
           <div><b>${player.season.walks}</b><span>BB</span></div>
           <div><b>${player.season.strikeouts}</b><span>SO</span></div>
         </div>
-        <div class="tiny muted" style="margin-top:12px; text-align:center">
-          Scout grade <b style="color:var(--gold)">${seasonScore(player.season)}</b> ·
-          call-up needs ${level.promotionOverall} OVR and a ${level.promotionScore} grade
+        <div class="scout-strip">
+          <div class="scout-grade">
+            <b>${seasonScore(player.season)}</b>
+            <span>Scout grade</span>
+          </div>
+          <div class="scout-req">
+            ${
+              league.levelId >= LEVELS.length - 1
+                ? "You're in The Show. There's nowhere left to be called up to — stay here."
+                : `Call-up needs a <b>${level.promotionScore}</b> grade and <b>${level.promotionOverall}</b> OVR (you're at ${ovr}). Getting on base and slugging is what moves the grade.`
+            }
+          </div>
         </div>
       </div>
 
@@ -266,10 +316,15 @@ export function renderHub(app: App, mount: HTMLElement): void {
             <span class="track">
               <i style="width:${player.attributes[key]}%"></i>
               ${gain > 0 ? `<i class="gear" style="left:${player.attributes[key]}%;width:${total - player.attributes[key]}%"></i>` : ''}
+              <i class="cap-tick" style="left:60%"></i>
+              <i class="cap-tick" style="left:80%"></i>
             </span>
             <span class="val">${total}${gain > 0 ? `<i class="gear-up">+${gain}</i>` : ''}</span>
           </div>`;
         }).join('')}
+        <div class="tiny muted" style="margin-top:10px">
+          ${ATTRIBUTE_KEYS.some((key) => (bonuses[key] ?? 0) > 0) ? 'Bright segment = gear bonus · ' : ''}Ticks at 60 and 80 mark where upgrades start costing more points.
+        </div>
       </div>
 
       ${
@@ -291,17 +346,36 @@ export function renderHub(app: App, mount: HTMLElement): void {
               const cut = i === PLAYOFF_TEAMS - 1 && !playoffs;
               return `
             <tr class="${t.id === league.playerTeamId ? 'me' : ''} ${cut ? 'cut' : ''} ${clinched(t) ? 'clinched' : ''}">
-              <td><i class="kit-chip" style="background:${kit.accent}" title="${esc(kit.name)}"></i>${esc(t.name)}</td>
+              <td><i class="kit-chip" style="background:${kit.accent}" title="${esc(kit.name)}"></i>${esc(t.name)}${
+                t.id === league.playerTeamId ? '<span class="you-tag">You</span>' : ''
+              }</td>
               <td>${t.wins}</td><td>${t.losses}</td>
             </tr>`;
             })
             .join('')}
         </table>
-        ${
-          playoffs
-            ? ''
-            : `<div class="tiny muted" style="margin-top:8px">Top ${PLAYOFF_TEAMS} make the playoffs · x = clinched</div>`
-        }
+        <div class="tiny muted" style="margin-top:8px">
+          Squares are club colours${playoffs ? '' : ` · Top ${PLAYOFF_TEAMS} make the playoffs · x = clinched`}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Clubhouse</h2>
+        <table class="standings">
+          <tr><th>Player</th><th>Age</th><th>Rating</th></tr>
+          ${(team.roster ?? [])
+            .map(
+              (p) => `
+            <tr>
+              <td>${esc(p.name)}${p.role === 'pitcher' ? ' <span class="tiny muted">P</span>' : ''}</td>
+              <td>${p.age}</td><td>${p.rating}</td>
+            </tr>`,
+            )
+            .join('')}
+        </table>
+        <div class="tiny muted" style="margin-top:10px; text-align:center">
+          Your teammates, for as long as the front office keeps them together.
+        </div>
       </div>
 
       <div class="panel">

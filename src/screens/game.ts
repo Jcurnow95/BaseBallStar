@@ -5,6 +5,7 @@ import type { Count } from '../core/pitching';
 import {
   LEVELS,
   advanceDay,
+  ensureRosters,
   isRegularSeasonOver,
   isSeasonOver,
   nextGame,
@@ -58,6 +59,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   }
 
   const scheduled = upcoming;
+  // Saves from before named rosters get theirs generated on the way in.
+  ensureRosters(league, app.rng);
   const opponent = teamById(league, scheduled.opponentId);
   const myTeam = playerTeam(league);
   const park = parkForGame(league, scheduled);
@@ -67,7 +70,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const myKit = uniformFor(teamKit(league, myTeam.id), scheduled.home);
   const theirKit = uniformFor(teamKit(league, opponent.id), !scheduled.home);
   // A postseason game plays until somebody wins.
-  const sim = new GameSim(player, level, opponent.name, scheduled.home, app.rng, weather, !!scheduled.playoff);
+  const sim = new GameSim(player, level, myTeam, opponent, scheduled.home, app.rng, weather, !!scheduled.playoff);
 
   // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night.
   const series = scheduled.playoff ? playerSeries(league) : null;
@@ -496,7 +499,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
     // A game takes a real bite out of conditioning, then the day rolls over.
     player.stamina = clamp(player.stamina - (6 + Math.round(app.rng.next() * 4)), 0, 100);
-    advanceDay(league);
+    advanceDay(league, app.rng);
     recoverOvernight(player);
 
     // Move the postseason along: record a series game, or seed the bracket

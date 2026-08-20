@@ -1,6 +1,6 @@
 import type { AtBatOutcome, BattedBall, BattingStats, ContactQuality, PlayerProfile } from './types';
-import type { LeagueLevel } from './league';
-import { pitcherName } from './league';
+import type { LeagueLevel, RosterPlayer, Team } from './league';
+import { randomName, teamBatters, teamPitchers } from './league';
 import type { PitcherAI } from './pitching';
 import { Rng, clamp } from './rng';
 import { emptyBattingStats } from './player';
@@ -39,12 +39,13 @@ const REGULATION_INNINGS = 9;
  */
 const MAX_INNINGS = 12;
 
-const TEAMMATE_NAMES = [
-  'Ruiz', 'Halloran', 'Sato', 'Beckman', 'Vance', 'Ortiz', 'Nakagawa', 'Pryor',
-];
-const OPPONENT_NAMES = [
-  'Dunphy', 'Ibarra', 'Kowalski', 'Reyes', 'Achebe', 'Salas', 'Brandt', 'Muir',
-];
+
+/** Only reachable if a save has a team with no roster at all. */
+const FILL_IN: RosterPlayer = { name: 'the utility man', age: 27, rating: 50, role: 'batter' };
+
+function nextBatter(order: RosterPlayer[], index: number): RosterPlayer {
+  return order.length > 0 ? order[index % order.length] : FILL_IN;
+}
 
 /**
  * Play-by-play for a ball in play that was retired. The trajectory is already
@@ -93,10 +94,15 @@ export class GameSim {
   private pending: SimEvent | null = null;
   private inningAnnounced = false;
 
+  /** The named clubs, batting in a fixed order so the same men come up all game. */
+  private readonly teammates: RosterPlayer[];
+  private readonly opponentBatters: RosterPlayer[];
+
   constructor(
     player: PlayerProfile,
     level: LeagueLevel,
-    opponentName: string,
+    myTeam: Team,
+    opponent: Team,
     home: boolean,
     rng: Rng,
     weather: Weather = CALM,
@@ -105,13 +111,24 @@ export class GameSim {
     this.mustDecide = mustDecide;
     this.player = player;
     this.level = level;
-    this.opponentName = opponentName;
+    this.opponentName = opponent.name;
     this.playerIsHome = home;
     this.rng = rng;
     this.air = airFor(weather);
+    this.teammates = teamBatters(myTeam);
+    this.opponentBatters = teamBatters(opponent);
+
+    // Today's starter comes off the opponent's staff, pitching about as well
+    // as his rating says, give or take an outing.
+    const starter = teamPitchers(opponent);
+    const todays = starter.length > 0 ? rng.pick(starter) : null;
     this.pitcher = {
-      name: pitcherName(rng),
-      rating: clamp(level.pitcherRating + rng.gaussian() * 8, 10, 99),
+      name: todays?.name ?? randomName(rng),
+      rating: clamp(
+        todays ? todays.rating + rng.gaussian() * 3 : level.pitcherRating + rng.gaussian() * 8,
+        10,
+        99,
+      ),
     };
   }
 
@@ -156,9 +173,9 @@ export class GameSim {
       return event;
     }
 
-    const name = TEAMMATE_NAMES[this.lineupIndex % TEAMMATE_NAMES.length];
+    const batter = nextBatter(this.teammates, this.lineupIndex);
     this.lineupIndex++;
-    return this.simulateGenericPA(name, true);
+    return this.simulateGenericPA(batter, true);
   }
 
   /**
@@ -220,12 +237,15 @@ export class GameSim {
   private stepTheirHalf(): SimEvent {
     // Walk their order rather than picking at random, so nobody bats twice in
     // the same inning.
-    const name = OPPONENT_NAMES[this.opponentLineupIndex % OPPONENT_NAMES.length];
+    const batter = nextBatter(this.opponentBatters, this.opponentLineupIndex);
+    const name = batter.name;
     this.opponentLineupIndex++;
     const roll = this.rng.next();
     const quality = this.level.pitcherRating / 100;
+    // Their better hitters strike out a touch less and hit a touch more.
+    const skill = (batter.rating - 50) / 100;
 
-    if (roll < 0.2 + quality * 0.06) {
+    if (roll < 0.2 + quality * 0.06 - skill * 0.04) {
       this.recordOut();
       return this.log(`${name} strikes out swinging.`, 'good');
     }
@@ -234,7 +254,7 @@ export class GameSim {
       this.score.them += runs;
       return this.log(`${name} draws a walk.`, 'bad');
     }
-    if (roll < 0.48) {
+    if (roll < 0.48 + skill * 0.05) {
       const bases = this.rng.chance(0.78) ? 1 : this.rng.chance(0.75) ? 2 : 4;
       const runs = this.advanceOnHitOpponent(bases);
       this.score.them += runs;
@@ -359,9 +379,14 @@ export class GameSim {
 
   /* ----------------------------------------------------- generic sim PAs */
 
-  private simulateGenericPA(name: string, ours: boolean): SimEvent {
+  private simulateGenericPA(batter: RosterPlayer, ours: boolean): SimEvent {
+    const name = batter.name;
     const roll = this.rng.next();
-    if (roll < 0.22) {
+    // A light thumb on the scale from the batter's rating: rosters centre
+    // around 50, so the game as a whole plays exactly as it did — but the kid
+    // hitting 62 earns his headlines honestly.
+    const skill = (batter.rating - 50) / 100;
+    if (roll < 0.22 - skill * 0.05) {
       this.recordOut();
       return this.log(`${name} strikes out.`, ours ? 'bad' : 'good');
     }
@@ -370,7 +395,7 @@ export class GameSim {
       if (ours) this.score.us += runs;
       return this.log(`${name} walks.`, ours ? 'good' : 'bad');
     }
-    if (roll < 0.5) {
+    if (roll < 0.5 + skill * 0.06) {
       const bases = this.rng.chance(0.76) ? 1 : this.rng.chance(0.78) ? 2 : 4;
       const runs = ours ? this.advanceOnHit(bases) : this.advanceOnHitOpponent(bases);
       if (ours) this.score.us += runs;

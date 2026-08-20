@@ -106,11 +106,28 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
     <div class="stage" id="stage">
       <div class="idle-stage" id="idle">
-        <div class="sub" id="idleSub">First pitch</div>
-        <div class="big" id="idleBig">${esc(scheduled.home ? 'vs' : '@')} ${esc(opponent.name)}<br/>
-          ${playoffTag ? `<span class="playoff-tag">${esc(playoffTag)}</span><br/>` : ''}
-          <span class="muted tiny">${esc(park.name)} · ${esc(sim.pitcher.name)} on the mound</span><br/>
-          <span class="muted tiny">${esc(describeWeather(weather))}</span>
+        <div class="sim-head">
+          <div class="sub" id="idleSub">First pitch</div>
+          <div class="big" id="idleBig">${esc(scheduled.home ? 'vs' : '@')} ${esc(opponent.name)}<br/>
+            ${playoffTag ? `<span class="playoff-tag">${esc(playoffTag)}</span><br/>` : ''}
+            <span class="muted tiny">${esc(park.name)} · ${esc(sim.pitcher.name)} on the mound</span><br/>
+            <span class="muted tiny">${esc(describeWeather(weather))}</span>
+          </div>
+        </div>
+        <div class="sim-field">
+          <div class="sim-diamond">
+            <i class="sbase" id="sb2"></i>
+            <i class="sbase" id="sb3"></i>
+            <i class="sbase" id="sb1"></i>
+            <i class="shome"></i>
+          </div>
+          <div class="sim-outs" id="simOuts"></div>
+        </div>
+        <div class="sim-matchup" id="simMatchup"></div>
+        <div class="sim-linescore" id="simLinescore"></div>
+        <div class="sim-skips">
+          <button class="skip-btn" id="skipAtBat">MY AT-BAT »</button>
+          <button class="skip-btn" id="skipInning">END INNING »</button>
         </div>
       </div>
       <div id="host"></div>
@@ -137,24 +154,124 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   /* ------------------------------------------------------------ rendering */
 
-  const setIdle = (headline: string, sub: string): void => {
-    q(mount, '#idleBig').innerHTML = esc(headline);
+  /**
+   * Update the sim stage headline. Each event punches in rather than swapping
+   * silently, and the card flashes with the event's colour — gold for hits,
+   * red for outs against us — so a result lands as a moment, not a caption.
+   */
+  const setIdle = (headline: string, sub: string, tone?: LogTone | 'inning'): void => {
+    const big = q(mount, '#idleBig');
+    big.innerHTML = esc(headline);
     q(mount, '#idleSub').textContent = sub;
+    big.classList.remove('punch');
+    void big.offsetWidth;
+    big.classList.add('punch');
+
+    idle.classList.remove('flash-gold', 'flash-red', 'flash-good');
+    const flash =
+      tone === 'hit' || tone === 'big'
+        ? 'flash-gold'
+        : tone === 'bad'
+          ? 'flash-red'
+          : tone === 'good'
+            ? 'flash-good'
+            : null;
+    if (flash) {
+      void idle.offsetWidth;
+      idle.classList.add(flash);
+    }
+  };
+
+  /** Three-letter linescore tag, from the club's city name. */
+  const abbrev = (name: string): string => name.slice(0, 3).toUpperCase();
+
+  /** The player's live average: season so far plus today's game. */
+  const liveAvg = (): string => {
+    const ab = player.season.ab + sim.gameStats.ab;
+    const hits = player.season.hits + sim.gameStats.hits;
+    return ab > 0 ? (hits / ab).toFixed(3).replace(/^0/, '') : '.000';
+  };
+
+  /**
+   * The live field state on the sim stage: diamond, outs, who's due up
+   * against whom, and the inning-by-inning linescore.
+   */
+  let shownBases = [false, false, false];
+  const updateSimStage = (): void => {
+    // Occupied bases burn gold; a runner newly aboard pops so the eye
+    // catches the diamond changing.
+    (['#sb1', '#sb2', '#sb3'] as const).forEach((sel, i) => {
+      const el = q(mount, sel);
+      el.classList.toggle('on', sim.bases[i]);
+      if (sim.bases[i] && !shownBases[i]) {
+        el.classList.remove('arrive');
+        void el.offsetWidth;
+        el.classList.add('arrive');
+      }
+    });
+    shownBases = [...sim.bases];
+
+    q(mount, '#simOuts').innerHTML =
+      [0, 1, 2].map((i) => `<i class="${i < sim.outs ? 'on' : ''}"></i>`).join('') +
+      `<span>${sim.outs} out</span>`;
+
+    const due = sim.dueUp();
+    const arm = sim.facingPitcher();
+    q(mount, '#simMatchup').innerHTML = `
+      <div class="side ${due.isPlayer ? 'you' : ''}">
+        <span class="lbl">At bat</span>
+        <b>${due.isPlayer ? '★ ' : ''}${esc(due.name)}</b>
+        <span class="stat">${due.isPlayer ? liveAvg() : `OVR ${due.rating}`}</span>
+      </div>
+      <span class="vs">vs</span>
+      <div class="side">
+        <span class="lbl">Pitching</span>
+        <b>${esc(arm.name)}</b>
+        <span class="stat">OVR ${Math.round(arm.rating)}</span>
+      </div>`;
+
+    // Linescore. Away bats top, so their innings fill first; a half that
+    // hasn't started yet stays blank.
+    const innings = Math.max(9, sim.inning);
+    const started = (home: boolean, i: number): boolean =>
+      home ? i + 1 < sim.inning || (i + 1 === sim.inning && sim.half === 'bottom') : i + 1 <= sim.inning;
+    const row = (name: string, us: boolean, home: boolean): string => {
+      const runs = sim.lineScore[us ? 'us' : 'them'];
+      const cells = Array.from({ length: innings }, (_, i) =>
+        `<td>${started(home, i) ? (runs[i] ?? 0) : ''}</td>`).join('');
+      const hits = sim.teamHits[us ? 'us' : 'them'];
+      const errs = sim.teamErrors[us ? 'us' : 'them'];
+      return `<tr class="${us ? 'us' : ''}"><th>${esc(abbrev(name))}</th>${cells}
+        <td class="tot">${us ? sim.score.us : sim.score.them}</td>
+        <td class="tot">${hits}</td><td class="tot">${errs}</td></tr>`;
+    };
+    const awayIsUs = !sim.playerIsHome;
+    q(mount, '#simLinescore').innerHTML = `<table>
+      <tr><th></th>${Array.from({ length: innings }, (_, i) => `<td>${i + 1}</td>`).join('')}
+        <td class="tot">R</td><td class="tot">H</td><td class="tot">E</td></tr>
+      ${row(awayIsUs ? myTeam.name : opponent.name, awayIsUs, false)}
+      ${row(awayIsUs ? opponent.name : myTeam.name, !awayIsUs, true)}
+    </table>`;
   };
 
   // The speed toggle only governs the simulated stretches between your
   // moments. Left on screen during an at-bat it read as "the pitch is being
   // sped up", so it goes away whenever you're actually playing.
+  // `simulating` flips the layout: the stage shrinks to a headline card and
+  // the play-by-play feed takes over the screen, so watching the sim is
+  // reading the game rather than squinting at a three-line strip.
   const showIdle = (): void => {
     idle.style.display = '';
     host.style.display = 'none';
     speedBtn.style.display = '';
+    mount.classList.add('simulating');
   };
 
   const showPlay = (): void => {
     idle.style.display = 'none';
     host.style.display = '';
     speedBtn.style.display = 'none';
+    mount.classList.remove('simulating');
   };
 
   const addFeed = (text: string, tone: LogTone | 'inning', icon?: FeedIcon): void => {
@@ -187,6 +304,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     q(mount, '#pips').innerHTML =
       [0, 1, 2].map((i) => `<i class="${count.balls > i ? 'ball' : ''}"></i>`).join('') +
       [0, 1].map((i) => `<i class="${count.strikes > i ? 'strike' : ''}"></i>`).join('');
+
+    updateSimStage();
   };
 
   /* ------------------------------------------------------------ scheduling */
@@ -249,6 +368,11 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   /* ----------------------------------------------------------- game events */
 
+  /** The "N runs score." feed line that follows a scoring event. */
+  const addRunsFeed = (n: number, ours: boolean): void => {
+    addFeed(`${n} run${n === 1 ? '' : 's'} score.`, ours ? 'good' : 'bad', 'run');
+  };
+
   const tick = (): void => {
     if (disposed) return;
     const event = sim.step();
@@ -265,7 +389,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         break;
       case 'log':
         addFeed(event.text, event.tone);
-        setIdle(event.text, sim.inningLabel);
+        if (event.runs) addRunsFeed(event.runs.count, event.runs.ours);
+        setIdle(event.text, sim.inningLabel, event.tone);
         schedule(tick);
         break;
       case 'atBat':
@@ -278,6 +403,52 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         endGame();
         break;
     }
+  };
+
+  /**
+   * Fast-forward the sim to the next thing worth watching: your own at-bat
+   * (or a ball hit your way), or the end of the current half-inning. The feed
+   * still gets every line, so nothing is lost — just the waiting.
+   */
+  const skipTo = (target: 'atbat' | 'inning'): void => {
+    if (disposed || paused || view) return;
+    clearTimeout(timer);
+    pendingFn = null;
+
+    // Bounded hard: a full game is a few hundred events, so this only trips
+    // if something wedges — and then we fall back to the normal clock.
+    for (let guard = 0; guard < 500; guard++) {
+      const event = sim.step();
+      switch (event.kind) {
+        case 'inning':
+          addFeed(event.text, 'inning');
+          if (target === 'inning') {
+            update();
+            setIdle(event.text, sim.weAreBatting ? 'Your team is up' : 'In the field');
+            schedule(tick);
+            return;
+          }
+          break;
+        case 'log':
+          addFeed(event.text, event.tone);
+          if (event.runs) addRunsFeed(event.runs.count, event.runs.ours);
+          break;
+        case 'atBat':
+          update();
+          beginAtBat(event);
+          return;
+        case 'fielding':
+          update();
+          beginFielding(event);
+          return;
+        case 'gameOver':
+          update();
+          endGame();
+          return;
+      }
+    }
+    update();
+    schedule(tick);
   };
 
   function beginAtBat(event: Extract<SimEvent, { kind: 'atBat' }>): void {
@@ -321,7 +492,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
           addFeed(`${applied.runs} run${applied.runs === 1 ? '' : 's'} score.`, 'good', 'run');
         }
         count = { balls: 0, strikes: 0 };
-        setIdle(applied.text, sim.inningLabel);
+        setIdle(applied.text, sim.inningLabel, applied.tone);
         update();
         schedule(tick, delay + 350);
       },
@@ -425,7 +596,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       addFeed('Charged with an error.', 'bad', 'error');
     }
 
-    setIdle(applied.text, sim.inningLabel);
+    setIdle(applied.text, sim.inningLabel, applied.tone);
     update();
     schedule(tick, delay + 300);
   }
@@ -552,6 +723,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     delay = delay === NORMAL_DELAY ? FAST_DELAY : NORMAL_DELAY;
     speedBtn.textContent = delay === FAST_DELAY ? 'FAST ▸▸' : 'FAST ▸';
   });
+
+  q(mount, '#skipAtBat').addEventListener('click', () => skipTo('atbat'));
+  q(mount, '#skipInning').addEventListener('click', () => skipTo('inning'));
 
   const syncSoundBtn = (): void => {
     soundBtn.textContent = isMuted() ? '🔇' : '🔊';

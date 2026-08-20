@@ -20,7 +20,7 @@ import { CALM, airFor } from './weather';
  */
 
 export type SimEvent =
-  | { kind: 'log'; text: string; tone: LogTone }
+  | { kind: 'log'; text: string; tone: LogTone; runs?: { count: number; ours: boolean } }
   | { kind: 'inning'; text: string }
   | { kind: 'atBat'; pitcher: PitcherAI; outs: number; bases: boolean[] }
   | { kind: 'fielding'; hitter: string; battedBall: BattedBall }
@@ -93,6 +93,19 @@ export class GameSim {
   putouts = 0;
   errors = 0;
 
+  /** Runs per inning (index 0 = 1st), for the linescore grid. */
+  readonly lineScore = { us: [] as number[], them: [] as number[] };
+  /** Team hit totals — the H column. */
+  readonly teamHits: GameScore = { us: 0, them: 0 };
+  /**
+   * Team error totals — the E column. Only the errors the sim actually models:
+   * the player's own misplays, and misplays that put the player aboard.
+   */
+  readonly teamErrors: GameScore = { us: 0, them: 0 };
+
+  /** Our starter. Cosmetic — the sim of their half never consults him. */
+  readonly ourPitcher: PitcherAI;
+
   /** The day's air, so "is this ball mine?" is judged on the same flight the field plays. */
   private readonly air: AirConditions;
   private lineupIndex = 0;
@@ -136,6 +149,39 @@ export class GameSim {
         99,
       ),
     };
+
+    const ourStaff = teamPitchers(myTeam);
+    const oursToday = ourStaff.length > 0 ? rng.pick(ourStaff) : null;
+    this.ourPitcher = {
+      name: oursToday?.name ?? randomName(rng),
+      rating: clamp(oursToday ? oursToday.rating : 50, 10, 99),
+    };
+  }
+
+  /** Who's due up next, for the sim screen's matchup strip. */
+  dueUp(): { name: string; rating: number; isPlayer: boolean } {
+    if (this.weAreBatting) {
+      if (this.lineupIndex % LINEUP_SIZE === PLAYER_SLOT) {
+        return { name: this.player.name, rating: 0, isPlayer: true };
+      }
+      const batter = nextBatter(this.teammates, this.lineupIndex);
+      return { name: batter.name, rating: batter.rating, isPlayer: false };
+    }
+    const batter = nextBatter(this.opponentBatters, this.opponentLineupIndex);
+    return { name: batter.name, rating: batter.rating, isPlayer: false };
+  }
+
+  /** The arm the due-up batter is facing: theirs when we bat, ours when they do. */
+  facingPitcher(): PitcherAI {
+    return this.weAreBatting ? this.pitcher : this.ourPitcher;
+  }
+
+  /** Score runs and file them under the current inning for the linescore. */
+  private addRuns(side: 'us' | 'them', runs: number): void {
+    if (runs <= 0) return;
+    this.score[side] += runs;
+    const slot = this.inning - 1;
+    this.lineScore[side][slot] = (this.lineScore[side][slot] ?? 0) + runs;
   }
 
   get weAreBatting(): boolean {
@@ -215,6 +261,7 @@ export class GameSim {
       case 'homeRun': {
         stats.ab++;
         stats.hits++;
+        this.teamHits.us++;
         if (outcome.result === 'single') stats.singles++;
         if (outcome.result === 'double') stats.doubles++;
         if (outcome.result === 'triple') stats.triples++;
@@ -234,7 +281,7 @@ export class GameSim {
         break;
     }
 
-    this.score.us += runs;
+    this.addRuns('us', runs);
     return { text: outcome.description, tone, runs };
   }
 
@@ -257,16 +304,19 @@ export class GameSim {
     }
     if (roll < 0.28) {
       const runs = this.walkRunnersOpponent();
-      this.score.them += runs;
-      return this.log(`${name} draws a walk.`, runs > 0 ? 'bad' : 'neutral');
+      this.addRuns('them', runs);
+      // The walk itself is routine traffic; the run against is the bad news,
+      // and that gets its own red line in the feed.
+      return this.log(`${name} draws a walk.`, 'neutral', runs, false);
     }
     if (roll < 0.48 + skill * 0.05) {
       const bases = this.rng.chance(0.78) ? 1 : this.rng.chance(0.75) ? 2 : 4;
       const runs = this.advanceOnHitOpponent(bases);
-      this.score.them += runs;
+      this.addRuns('them', runs);
+      this.teamHits.them++;
       const label = bases === 1 ? 'lines a single' : bases === 2 ? 'doubles into the gap' : 'goes deep — home run';
-      // Their hit is a hit; only runs against actually hurt.
-      return this.log(`${name} ${label}.`, runs > 0 ? 'bad' : 'hit');
+      // A hit is gold whoever hit it; the runs line carries the sting.
+      return this.log(`${name} ${label}.`, 'hit', runs, false);
     }
 
     // Ball in play. If it's headed into the player's zone, hand it over and
@@ -342,7 +392,8 @@ export class GameSim {
       // Reaching on a misplay is an at-bat, but never a hit.
       if (result.reachedOnError) {
         this.bases = [...result.basesAfter];
-        this.score.us += runs;
+        this.addRuns('us', runs);
+        this.teamErrors.them++;
         stats.rbi += runs;
         const room = Math.max(0, 3 - this.outs);
         for (let i = 0; i < Math.min(result.outs, room); i++) this.recordOut();
@@ -362,12 +413,17 @@ export class GameSim {
         stats.hits++;
         stats.singles++;
       }
+      if (result.kind !== 'out') this.teamHits.us++;
       stats.rbi += runs;
-      this.score.us += runs;
+      this.addRuns('us', runs);
     } else {
-      this.score.them += runs;
+      this.addRuns('them', runs);
+      if (result.kind !== 'out') this.teamHits.them++;
       if (result.userPutout) this.putouts++;
-      if (result.userError) this.errors++;
+      if (result.userError) {
+        this.errors++;
+        this.teamErrors.us++;
+      }
     }
 
     this.bases = [...result.basesAfter];
@@ -378,8 +434,8 @@ export class GameSim {
     for (let i = 0; i < Math.min(result.outs, room); i++) this.recordOut();
 
     // Ours: gold for hits, big gold for the homer, red for the out. Theirs:
-    // green when we got them out; their hit is gold like any hit unless it
-    // actually scored on us, which is real bad news.
+    // green when we got them out; their hit is gold like any hit — the runs
+    // line that follows it in the feed carries the bad news.
     const tone: LogTone =
       batting === 'us'
         ? result.kind === 'homeRun'
@@ -389,9 +445,7 @@ export class GameSim {
             : 'hit'
         : result.kind === 'out'
           ? 'good'
-          : runs > 0
-            ? 'bad'
-            : 'hit';
+          : 'hit';
 
     return { text: result.description, tone };
   }
@@ -411,15 +465,16 @@ export class GameSim {
     }
     if (roll < 0.3) {
       const runs = ours ? this.walkRunners() : this.walkRunnersOpponent();
-      if (ours) this.score.us += runs;
-      return this.log(`${name} walks.`, ours ? 'good' : 'neutral');
+      this.addRuns(ours ? 'us' : 'them', runs);
+      return this.log(`${name} walks.`, ours ? 'good' : 'neutral', runs, ours);
     }
     if (roll < 0.5 + skill * 0.06) {
       const bases = this.rng.chance(0.76) ? 1 : this.rng.chance(0.78) ? 2 : 4;
       const runs = ours ? this.advanceOnHit(bases) : this.advanceOnHitOpponent(bases);
-      if (ours) this.score.us += runs;
+      this.addRuns(ours ? 'us' : 'them', runs);
+      this.teamHits[ours ? 'us' : 'them']++;
       const label = bases === 1 ? 'singles' : bases === 2 ? 'doubles' : 'homers';
-      return this.log(`${name} ${label}.`, 'hit');
+      return this.log(`${name} ${label}.`, 'hit', runs, ours);
     }
     this.recordOut();
     // No batted ball behind a simulated PA, so vary the line directly — half of
@@ -438,8 +493,10 @@ export class GameSim {
 
   /* ------------------------------------------------------------- helpers */
 
-  private log(text: string, tone: LogTone): SimEvent {
-    return { kind: 'log', text, tone };
+  private log(text: string, tone: LogTone, runs = 0, ours = false): SimEvent {
+    return runs > 0
+      ? { kind: 'log', text, tone, runs: { count: runs, ours } }
+      : { kind: 'log', text, tone };
   }
 
   private recordOut(): void {

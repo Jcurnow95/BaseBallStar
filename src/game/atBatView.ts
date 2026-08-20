@@ -6,6 +6,7 @@ import { IDEAL_UNDER, resolveSwing, sweetSpotRadius } from '../core/swing';
 import { foulChanceFor } from '../core/outcome';
 import { hasPerfectZone } from '../core/progression';
 import { launchBall, predictLanding } from '../core/ballFlight';
+import { drawBaseball } from './baseball';
 import { isFair } from '../core/fieldGeometry';
 import type { Uniform } from '../core/uniforms';
 import { Rng, clamp, lerp } from '../core/rng';
@@ -91,6 +92,8 @@ interface BallState {
   x: number;
   y: number;
   r: number;
+  /** Seam rotation in radians — the ball visibly spins as it comes in. */
+  rot: number;
 }
 
 export class AtBatView {
@@ -469,7 +472,12 @@ export class AtBatView {
       r *= 1 + over * 0.7;
     }
 
-    return { x, y, r };
+    // A couple of visible turns over the flight, spinning toward the break
+    // side. Far fewer than real backspin — full speed would just strobe.
+    const spinDir = this.pitch.plateX - this.pitch.releaseX >= 0 ? 1 : -1;
+    const rot = spinDir * p * Math.PI * 2 * 1.4;
+
+    return { x, y, r, rot };
   }
 
   /* --------------------------------------------------------------- render */
@@ -1125,28 +1133,7 @@ export class AtBatView {
   }
 
   private drawBall(ctx: CanvasRenderingContext2D, ball: BallState): void {
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.45)';
-    ctx.shadowBlur = ball.r * 0.6;
-    ctx.shadowOffsetY = ball.r * 0.25;
-
-    ctx.fillStyle = '#fdfdfb';
-    ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Seams, so spin and size read clearly as it comes in.
-    if (ball.r > 6) {
-      ctx.strokeStyle = '#c8352f';
-      ctx.lineWidth = Math.max(1, ball.r * 0.1);
-      ctx.beginPath();
-      ctx.arc(ball.x - ball.r * 0.35, ball.y, ball.r * 0.95, -0.9, 0.9);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(ball.x + ball.r * 0.35, ball.y, ball.r * 0.95, Math.PI - 0.9, Math.PI + 0.9);
-      ctx.stroke();
-    }
+    drawBaseball(ctx, ball.x, ball.y, ball.r, ball.rot);
   }
 
   /**
@@ -1190,9 +1177,10 @@ export class AtBatView {
   }
 
   /**
-   * Post-swing teaching frame: shows exactly where the tap landed relative to
-   * the ball and to the ideal contact point. This is how the player learns the
-   * mechanic instead of guessing at it.
+   * Post-swing teaching frame: shows where the tap landed on the ball. The
+   * green sweet-spot ring is part of the perfect-zone aid — until that's
+   * unlocked (see `hasPerfectZone`), you only see your own mark and have to
+   * find the spot yourself.
    */
   private drawFreeze(ctx: CanvasRenderingContext2D): void {
     const ball = this.frozenBall;
@@ -1200,20 +1188,22 @@ export class AtBatView {
 
     this.drawBall(ctx, ball);
 
-    const sweet = sweetSpotRadius(
-      this.opts.player.attributes.contact,
-      this.opts.player.stamina,
-    );
-    const idealY = ball.y + IDEAL_UNDER * ball.r;
+    if (this.perfectZoneUnlocked) {
+      const sweet = sweetSpotRadius(
+        this.opts.player.attributes.contact,
+        this.opts.player.stamina,
+      );
+      const idealY = ball.y + IDEAL_UNDER * ball.r;
 
-    ctx.save();
-    ctx.strokeStyle = 'rgba(80, 230, 140, 0.85)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.arc(ball.x, idealY, sweet * ball.r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = 'rgba(80, 230, 140, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(ball.x, idealY, sweet * ball.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     if (this.tapPoint) {
       ctx.save();

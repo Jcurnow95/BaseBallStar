@@ -1,4 +1,5 @@
 import { Rng, clamp, lerp } from '../core/rng';
+import { drawBaseball } from './baseball';
 import { createSurface, pointerPos, vibrate } from '../ui/canvas';
 import type { Surface } from '../ui/canvas';
 import { playSound } from '../ui/audio';
@@ -48,7 +49,7 @@ export class CatchOverlay {
   private readonly duration: number;
   private readonly fromAngle: number;
   private tap: { x: number; y: number } | null = null;
-  private frozen: { x: number; y: number; r: number } | null = null;
+  private frozen: { x: number; y: number; r: number; rot: number } | null = null;
 
   constructor(root: HTMLElement, opts: CatchOverlayOptions) {
     this.root = root;
@@ -132,15 +133,20 @@ export class CatchOverlay {
       Math.pow(Math.min(p, 1), 1.6),
     );
 
+    // Spins away from the side it came in from, same visible rate as a pitch.
+    const spinDir = Math.cos(this.fromAngle) >= 0 ? -1 : 1;
+    const rot = spinDir * p * Math.PI * 2 * 1.4;
+
     if (p > 1) {
       const over = p - 1;
       return {
         x: x + Math.cos(this.fromAngle) * -travel * over * 0.5,
         y: y + Math.sin(this.fromAngle) * -travel * over * 0.5,
         r: r * (1 + over * 0.4),
+        rot,
       };
     }
-    return { x, y, r };
+    return { x, y, r, rot };
   }
 
   private onPointerDown = (e: PointerEvent): void => {
@@ -218,22 +224,7 @@ export class CatchOverlay {
       }
     }
 
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = ball.r * 0.7;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    if (ball.r > 6) {
-      ctx.strokeStyle = '#c8352f';
-      ctx.lineWidth = Math.max(1, ball.r * 0.1);
-      ctx.beginPath();
-      ctx.arc(ball.x - ball.r * 0.35, ball.y, ball.r * 0.95, -0.9, 0.9);
-      ctx.stroke();
-    }
+    drawBaseball(ctx, ball.x, ball.y, ball.r, ball.rot);
 
     if (this.phase === 'freeze' && this.frozen) {
       ctx.save();

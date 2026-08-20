@@ -11,6 +11,7 @@ import { renderPostGame } from './screens/postgame';
 import { renderSeasonEnd } from './screens/seasonEnd';
 import { renderStore } from './screens/store';
 import { renderHowto } from './screens/howto';
+import { renderTutorial } from './screens/tutorial';
 import { devMenuEnabled, renderDev } from './screens/dev';
 
 const root = document.getElementById('app');
@@ -26,6 +27,7 @@ app.register('postgame', renderPostGame);
 app.register('seasonEnd', renderSeasonEnd);
 app.register('store', renderStore);
 app.register('howto', renderHowto);
+app.register('tutorial', renderTutorial);
 if (devMenuEnabled()) app.register('dev', renderDev);
 app.start();
 

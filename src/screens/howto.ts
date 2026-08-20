@@ -14,6 +14,11 @@ export function howtoSeen(): boolean {
   return readKey(SEEN_KEY) === '1';
 }
 
+/** Playing the tutorial teaches everything the cards do, so it counts too. */
+export function markHowtoSeen(): void {
+  writeKey(SEEN_KEY, '1');
+}
+
 /** Where "Play Ball" / "Done" on the last card goes. */
 let returnTo: Route = 'hub';
 
@@ -40,9 +45,21 @@ const CARDS: Card[] = [
       <svg viewBox="0 0 120 84" aria-hidden="true">
         <rect x="0" y="0" width="120" height="84" rx="8" fill="#0f1a30"/>
         <rect x="26" y="14" width="68" height="46" fill="none" stroke="rgba(255,255,255,0.28)" stroke-dasharray="4 3" stroke-width="1.5"/>
-        <circle cx="60" cy="40" r="20" fill="#fdfdfb"/>
-        <path d="M50 24 q-8 16 0 32" fill="none" stroke="#c8352f" stroke-width="2"/>
-        <path d="M70 24 q8 16 0 32" fill="none" stroke="#c8352f" stroke-width="2"/>
+        <defs>
+          <radialGradient id="howto-bb1" cx="0.5" cy="0.5" r="0.5" fx="0.325" fy="0.3">
+            <stop offset="0" stop-color="#ffffff"/><stop offset="0.55" stop-color="#f5f3ed"/>
+            <stop offset="0.85" stop-color="#ded9cd"/><stop offset="1" stop-color="#b6afa1"/>
+          </radialGradient>
+        </defs>
+        <circle cx="60" cy="40" r="20" fill="url(#howto-bb1)"/>
+        <g fill="none" stroke="#c04a3e" stroke-width="1" stroke-linecap="round">
+          <path d="M64.81 25.12 A 19 19 0 0 1 64.81 54.88"/>
+          <path d="M55.19 54.88 A 19 19 0 0 1 55.19 25.12"/>
+        </g>
+        <g stroke="#a83228" stroke-width="0.7" stroke-linecap="round">
+          <path d="M65.28 27.61 L69.28 27.33 M68.86 32.74 L72.7 33.88 M70.41 38.79 L73.59 41.21 M69.72 45 L71.84 48.38 M66.88 50.57 L67.68 54.49"/>
+          <path d="M54.72 52.39 L50.72 52.67 M51.14 47.26 L47.3 46.12 M49.59 41.21 L46.41 38.79 M50.28 35 L48.16 31.62 M53.12 29.43 L52.32 25.51"/>
+        </g>
         <circle cx="60" cy="47" r="7.5" fill="none" stroke="#5ce6a0" stroke-width="2" stroke-dasharray="3 2"/>
         <path d="M56 47 h8 M60 43 v8" stroke="#5ce6a0" stroke-width="1.5"/>
         <text x="60" y="76" text-anchor="middle" font-size="7" font-weight="800" fill="#5ce6a0" letter-spacing="1">TAP UNDER CENTRE</text>
@@ -86,7 +103,13 @@ const CARDS: Card[] = [
         <circle cx="78" cy="40" r="10" fill="none" stroke="#ffe178" stroke-width="2" stroke-dasharray="4 3"/>
         <circle cx="78" cy="40" r="1.8" fill="#ffe178"/>
         <ellipse cx="72" cy="30" rx="3" ry="1.5" fill="rgba(0,0,0,0.3)"/>
-        <circle cx="72" cy="20" r="3.5" fill="#fff"/>
+        <defs>
+          <radialGradient id="howto-bb3" cx="0.5" cy="0.5" r="0.5" fx="0.325" fy="0.3">
+            <stop offset="0" stop-color="#ffffff"/><stop offset="0.55" stop-color="#f5f3ed"/>
+            <stop offset="1" stop-color="#b6afa1"/>
+          </radialGradient>
+        </defs>
+        <circle cx="72" cy="20" r="3.5" fill="url(#howto-bb3)"/>
         <circle cx="46" cy="44" r="4.5" fill="#5aa9ff" stroke="#fff" stroke-width="1.5"/>
         <path d="M52 44 L68 41" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" stroke-dasharray="2 2"/>
         <circle cx="26" cy="60" r="12" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/>
@@ -107,8 +130,21 @@ const CARDS: Card[] = [
         <circle cx="30" cy="30" r="3" fill="rgba(255,255,255,0.15)"/>
         <circle cx="41" cy="37" r="5" fill="rgba(255,255,255,0.22)"/>
         <circle cx="52" cy="44" r="8" fill="rgba(255,255,255,0.3)"/>
-        <circle cx="66" cy="52" r="15" fill="#fff"/>
-        <path d="M59 40 q-6 12 0 24" fill="none" stroke="#c8352f" stroke-width="1.6"/>
+        <defs>
+          <radialGradient id="howto-bb4" cx="0.5" cy="0.5" r="0.5" fx="0.325" fy="0.3">
+            <stop offset="0" stop-color="#ffffff"/><stop offset="0.55" stop-color="#f5f3ed"/>
+            <stop offset="0.85" stop-color="#ded9cd"/><stop offset="1" stop-color="#b6afa1"/>
+          </radialGradient>
+        </defs>
+        <circle cx="66" cy="52" r="15" fill="url(#howto-bb4)"/>
+        <g fill="none" stroke="#c04a3e" stroke-width="0.9" stroke-linecap="round">
+          <path d="M69.61 40.84 A 14.25 14.25 0 0 1 69.61 63.16"/>
+          <path d="M62.39 63.16 A 14.25 14.25 0 0 1 62.39 40.84"/>
+        </g>
+        <g stroke="#a83228" stroke-width="0.6" stroke-linecap="round">
+          <path d="M69.96 42.7 L72.96 42.5 M72.65 46.55 L75.53 47.41 M73.81 51.09 L76.19 52.91 M73.29 55.75 L74.89 58.29 M71.16 59.93 L71.76 62.87"/>
+          <path d="M62.04 61.3 L59.04 61.5 M59.35 57.45 L56.47 56.59 M58.19 52.91 L55.81 51.09 M58.71 48.25 L57.11 45.71 M60.84 44.07 L60.24 41.13"/>
+        </g>
         <circle cx="66" cy="52" r="20" fill="none" stroke="rgba(80,230,140,0.9)" stroke-width="2" stroke-dasharray="4 3"/>
         <path d="M60 46 l12 12 M72 46 l-12 12" stroke="#ffd166" stroke-width="3" stroke-linecap="round"/>
       </svg>`,
@@ -163,7 +199,7 @@ export function renderHowto(app: App, mount: HTMLElement): void {
   const next = q<HTMLButtonElement>(mount, '#next');
 
   const finish = (): void => {
-    writeKey(SEEN_KEY, '1');
+    markHowtoSeen();
     app.go(then);
   };
 

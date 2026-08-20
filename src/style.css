@@ -1950,6 +1950,106 @@ table.standings tr.clinched td:first-child::after {
   margin-top: 10px;
 }
 
+/* ---------------------------------------------------------------- tutorial */
+
+.tut-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Header buttons size to their labels; .btn's full width is for stacked menus. */
+.tut-bar .btn {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 8px 14px;
+}
+
+.tut-bar .tut-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  letter-spacing: 0.16em;
+}
+
+/* The live goal, pinned over the play surface where the eyes already are. */
+.tut-goal {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: 86%;
+  text-align: center;
+  background: rgba(10, 16, 28, 0.85);
+  border: 1px solid var(--line);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* Transient coaching line between attempts, under the goal pill. */
+.tut-note {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: 86%;
+  text-align: center;
+  background: rgba(10, 16, 28, 0.85);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 7px 12px;
+  border-radius: 10px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.tut-note.show {
+  opacity: 1;
+}
+
+/* Instruction and result cards, laid over the stage between drills. */
+.tut-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(7, 11, 20, 0.88);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tut-overlay.show {
+  display: flex;
+}
+
+.tut-goal-line {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 209, 102, 0.12);
+  border: 1px solid rgba(255, 209, 102, 0.4);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
 /* ----------------------------------------------------------------- modal */
 
 .modal-backdrop {

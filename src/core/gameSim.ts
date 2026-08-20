@@ -26,7 +26,13 @@ export type SimEvent =
   | { kind: 'fielding'; hitter: string; battedBall: BattedBall }
   | { kind: 'gameOver'; win: boolean; tie: boolean };
 
-export type LogTone = 'neutral' | 'good' | 'bad' | 'big';
+/**
+ * Feed colour. Colour codes the *event*, not the allegiance: red is reserved
+ * for outs and genuine bad news, hits are gold whoever hit them, and routine
+ * traffic (a batter stepping in, the opponent working a walk) stays grey.
+ * Painting the opponent's whole half red made the log read like a siren.
+ */
+export type LogTone = 'neutral' | 'good' | 'bad' | 'hit' | 'big';
 
 /** Where the player hits in the order. */
 const PLAYER_SLOT = 2;
@@ -216,7 +222,7 @@ export class GameSim {
         runs = this.advanceOnHit(outcome.basesAdvanced);
         stats.rbi += runs;
         if (outcome.result === 'homeRun') stats.runs++;
-        tone = outcome.result === 'homeRun' ? 'big' : 'good';
+        tone = outcome.result === 'homeRun' ? 'big' : 'hit';
         break;
       }
       default:
@@ -252,14 +258,15 @@ export class GameSim {
     if (roll < 0.28) {
       const runs = this.walkRunnersOpponent();
       this.score.them += runs;
-      return this.log(`${name} draws a walk.`, 'bad');
+      return this.log(`${name} draws a walk.`, runs > 0 ? 'bad' : 'neutral');
     }
     if (roll < 0.48 + skill * 0.05) {
       const bases = this.rng.chance(0.78) ? 1 : this.rng.chance(0.75) ? 2 : 4;
       const runs = this.advanceOnHitOpponent(bases);
       this.score.them += runs;
       const label = bases === 1 ? 'lines a single' : bases === 2 ? 'doubles into the gap' : 'goes deep — home run';
-      return this.log(`${name} ${label}.`, 'bad');
+      // Their hit is a hit; only runs against actually hurt.
+      return this.log(`${name} ${label}.`, runs > 0 ? 'bad' : 'hit');
     }
 
     // Ball in play. If it's headed into the player's zone, hand it over and
@@ -370,9 +377,21 @@ export class GameSim {
     const room = Math.max(0, 3 - this.outs);
     for (let i = 0; i < Math.min(result.outs, room); i++) this.recordOut();
 
-    const good = batting === 'us' ? result.kind !== 'out' : result.kind === 'out';
+    // Ours: gold for hits, big gold for the homer, red for the out. Theirs:
+    // green when we got them out; their hit is gold like any hit unless it
+    // actually scored on us, which is real bad news.
     const tone: LogTone =
-      result.kind === 'homeRun' && batting === 'us' ? 'big' : good ? 'good' : 'bad';
+      batting === 'us'
+        ? result.kind === 'homeRun'
+          ? 'big'
+          : result.kind === 'out'
+            ? 'bad'
+            : 'hit'
+        : result.kind === 'out'
+          ? 'good'
+          : runs > 0
+            ? 'bad'
+            : 'hit';
 
     return { text: result.description, tone };
   }
@@ -393,14 +412,14 @@ export class GameSim {
     if (roll < 0.3) {
       const runs = ours ? this.walkRunners() : this.walkRunnersOpponent();
       if (ours) this.score.us += runs;
-      return this.log(`${name} walks.`, ours ? 'good' : 'bad');
+      return this.log(`${name} walks.`, ours ? 'good' : 'neutral');
     }
     if (roll < 0.5 + skill * 0.06) {
       const bases = this.rng.chance(0.76) ? 1 : this.rng.chance(0.78) ? 2 : 4;
       const runs = ours ? this.advanceOnHit(bases) : this.advanceOnHitOpponent(bases);
       if (ours) this.score.us += runs;
       const label = bases === 1 ? 'singles' : bases === 2 ? 'doubles' : 'homers';
-      return this.log(`${name} ${label}.`, ours ? 'good' : 'bad');
+      return this.log(`${name} ${label}.`, 'hit');
     }
     this.recordOut();
     // No batted ball behind a simulated PA, so vary the line directly — half of

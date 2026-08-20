@@ -96,6 +96,8 @@ export interface Pitch {
   plateX: number;
   plateY: number;
   isStrike: boolean;
+  /** Radar-gun speed, mph. Cosmetic — flight time is `def.duration`. */
+  mph: number;
 }
 
 /* ----------------------------------------------------------------- contact */

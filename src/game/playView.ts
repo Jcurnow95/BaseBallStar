@@ -51,8 +51,10 @@ const SEAT_COUNT = 1500;
  * and its footprint. Eight players stand at the rail in each — the rest of the
  * side that isn't on the field or the bases.
  */
-const DUGOUT_ALONG = 74;
-const DUGOUT_OFFSET = 34;
+const DUGOUT_ALONG = 76;
+// Far enough off the line that the bench reads as scenery beyond the playing
+// field, not furniture parked in live foul ground.
+const DUGOUT_OFFSET = 46;
 const DUGOUT_LENGTH = 62;
 const DUGOUT_DEPTH = 13;
 const DUGOUT_BENCH = 8;
@@ -96,6 +98,9 @@ export class PlayView {
   private weatherClock = 0;
   /** Animation state per fielder/runner, so run cycles persist across frames. */
   private anims = new Map<string, SpriteAnim>();
+  /** Recent ball positions in world space — the comet tail that makes a
+   * 4px ball trackable at a glance. */
+  private ballTrail: { x: number; y: number; z: number }[] = [];
   /** Outfield seats in world space, built once — the bowl never moves. */
   private readonly seats: (Vec2 & { colour: string })[];
 
@@ -489,8 +494,10 @@ export class PlayView {
     this.drawForceRings(ctx);
     this.drawDugouts(ctx, dt);
     this.drawLandingMarker(ctx);
+    this.drawThrowTelegraph(ctx);
     this.drawRunners(ctx, dt);
     this.drawFielders(ctx, dt);
+    this.updateBallTrail();
     this.drawBall(ctx);
     if (this.joystick.active) this.drawJoystick(ctx);
 
@@ -505,18 +512,40 @@ export class PlayView {
     ctx.fillStyle = GRASS_DARK;
     ctx.fillRect(0, 0, W, H);
 
-    // Mown bands run across the field in world space, so they scroll with the
-    // camera the way the stripes do in a real park.
+    // Mown stripes live in world space so they scroll and zoom with the
+    // camera — and they run parallel to the first-base line, so the pattern
+    // reads as cut for this diamond rather than for the screen. `d` runs
+    // along a stripe, `n` across them; a stripe is the slab of field where
+    // the n-coordinate falls in its band.
     const band = 26;
-    const startBand = Math.floor((this.camera.y - H / 2 / this.scale) / band) - 1;
-    const endBand = Math.ceil((this.camera.y + H / 2 / this.scale) / band) + 1;
+    const d = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+    const n = { x: -Math.SQRT1_2, y: Math.SQRT1_2 };
+    const centreU = n.x * this.camera.x + n.y * this.camera.y;
+    const centreV = d.x * this.camera.x + d.y * this.camera.y;
+    // Generous half-span so the diagonal slabs cover the corners at any zoom.
+    const halfSpan = (W + H) / this.scale / 2 + band * 2;
+    const startBand = Math.floor((centreU - halfSpan) / band);
+    const endBand = Math.ceil((centreU + halfSpan) / band);
+
     ctx.fillStyle = GRASS_LIGHT;
+    ctx.beginPath();
     for (let i = startBand; i <= endBand; i++) {
       if (i % 2 !== 0) continue;
-      const top = this.toScreen({ x: 0, y: (i + 1) * band }).y;
-      const bottom = this.toScreen({ x: 0, y: i * band }).y;
-      ctx.fillRect(0, top, W, bottom - top);
+      const u0 = i * band;
+      const u1 = (i + 1) * band;
+      const corner = (u: number, v: number): Vec2 =>
+        this.toScreen({ x: n.x * u + d.x * v, y: n.y * u + d.y * v });
+      const c0 = corner(u0, centreV - halfSpan);
+      const c1 = corner(u1, centreV - halfSpan);
+      const c2 = corner(u1, centreV + halfSpan);
+      const c3 = corner(u0, centreV + halfSpan);
+      ctx.moveTo(c0.x, c0.y);
+      ctx.lineTo(c1.x, c1.y);
+      ctx.lineTo(c2.x, c2.y);
+      ctx.lineTo(c3.x, c3.y);
+      ctx.closePath();
     }
+    ctx.fill();
   }
 
   /** Warning track, wall, and the dead ground beyond it — shaped by the park. */
@@ -732,6 +761,11 @@ export class PlayView {
       ctx.closePath();
     };
 
+    // The whole dugout, bench included, is drawn a touch faded — it's
+    // scenery, and at full strength it competed with the play for the eye.
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+
     ctx.save();
 
     // Dirt apron in front, so the bench doesn't sit straight on the grass.
@@ -794,6 +828,8 @@ export class PlayView {
       anim.facing = Math.atan2(plate.y - p.y, plate.x - p.x);
       drawPlayer(ctx, p.x, p.y, { height, colors: kit, anim });
     }
+
+    ctx.restore();
   }
 
   private drawBases(ctx: CanvasRenderingContext2D): void {
@@ -946,6 +982,65 @@ export class PlayView {
     ctx.restore();
   }
 
+  /**
+   * The race, made visible: while a throw is in the air, a ring shrinks onto
+   * the target bag — closing exactly when the ball arrives — with a guide
+   * line from the ball to the bag. Red when that's the bag the user's runner
+   * is heading for, so GO/HOLD/BACK is a read instead of a coin flip.
+   */
+  private drawThrowTelegraph(ctx: CanvasRenderingContext2D): void {
+    const flight = this.sim.throwInFlight;
+    if (!flight) return;
+
+    const sim = this.sim;
+    const target = this.toScreen(BASES[flight.base]);
+    const ball = this.toScreen({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
+    const contested =
+      sim.setup.userSide === 'offense' && sim.userRunnerNextBase === flight.base;
+    const colour = contested ? '255, 107, 107' : '255, 209, 102';
+
+    ctx.save();
+    // Where the throw is going, off the ball itself.
+    ctx.strokeStyle = `rgba(${colour}, 0.45)`;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.moveTo(ball.x, ball.y);
+    ctx.lineTo(target.x, target.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // The countdown: wide when the throw is released, snapping shut on the
+    // bag as it lands.
+    const bagR = Math.max(11, 9 * this.scale);
+    const r = bagR + (1 - flight.progress) * Math.max(26, 22 * this.scale);
+    ctx.strokeStyle = `rgba(${colour}, ${0.5 + flight.progress * 0.45})`;
+    ctx.lineWidth = 2 + flight.progress * 2;
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Feed the comet tail. Points are kept in world space so the trail marks
+   * where the ball actually flew, panning and zooming with the camera.
+   */
+  private updateBallTrail(): void {
+    const sim = this.sim;
+    if (sim.ballCarrier || sim.ball.atRest || this._paused) {
+      // Held or settled: let the tail burn down rather than vanish.
+      if (this.ballTrail.length > 0) this.ballTrail.shift();
+      return;
+    }
+    const last = this.ballTrail[this.ballTrail.length - 1];
+    const p = { x: sim.ball.x, y: sim.ball.y, z: sim.ball.z };
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y, p.z - last.z) > 0.9) {
+      this.ballTrail.push(p);
+      if (this.ballTrail.length > 9) this.ballTrail.shift();
+    }
+  }
+
   private drawBall(ctx: CanvasRenderingContext2D): void {
     const sim = this.sim;
     if (sim.ballCarrier) return;
@@ -965,6 +1060,22 @@ export class PlayView {
     // as airborne. A canvas-scaled version was tried and read as far too big
     // against the fielders and the diamond.
     const radius = clamp(3.2 + sim.ball.z / 34, 3, 7.5);
+
+    // Comet tail: the last few world positions, fading and shrinking toward
+    // the oldest, so the eye finds a moving 4px dot instantly.
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < this.ballTrail.length; i++) {
+      const t = this.ballTrail[i];
+      const p = this.toScreen({ x: t.x, y: t.y }, t.z);
+      const frac = (i + 1) / (this.ballTrail.length + 1);
+      ctx.globalAlpha = frac * frac * 0.45;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius * (0.25 + frac * 0.65), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.4)';
     ctx.shadowBlur = 5;

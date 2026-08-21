@@ -77,6 +77,8 @@ export interface TrainingOption {
   energyCost: number;
   staminaDelta: number;
   xp: number;
+  /** Playable drill attached to this option; scoring it well pays bonus XP. */
+  minigame?: 'bp' | 'fungo';
 }
 
 export const TRAINING_OPTIONS: TrainingOption[] = [
@@ -87,6 +89,7 @@ export const TRAINING_OPTIONS: TrainingOption[] = [
     energyCost: 35,
     staminaDelta: -7,
     xp: 55,
+    minigame: 'bp',
   },
   {
     id: 'film',
@@ -103,6 +106,7 @@ export const TRAINING_OPTIONS: TrainingOption[] = [
     energyCost: 30,
     staminaDelta: -5,
     xp: 42,
+    minigame: 'fungo',
   },
   {
     id: 'conditioning',
@@ -128,11 +132,26 @@ export const TRAINING_OPTIONS: TrainingOption[] = [
  * which meant `bp, bp, film, rest` looped forever on a single off day for
  * unbounded XP and levels.
  */
-export function applyTraining(player: PlayerProfile, option: TrainingOption): LevelUpReport | null {
+/**
+ * Ceiling on what playing a drill can add, as a share of the option's base
+ * XP. Half keeps the drill worth playing without making skipping it feel
+ * like leaving the day on the table.
+ */
+export const TRAINING_BONUS_MAX = 0.5;
+
+/** Bonus XP for a drill run, from its 0-1 score. */
+export const trainingBonusXp = (option: TrainingOption, ratio: number): number =>
+  Math.round(option.xp * TRAINING_BONUS_MAX * clamp(ratio, 0, 1));
+
+export function applyTraining(
+  player: PlayerProfile,
+  option: TrainingOption,
+  bonusXp = 0,
+): LevelUpReport | null {
   if (player.energy < option.energyCost) return null;
   player.energy = clamp(player.energy - option.energyCost, 0, 100);
   player.stamina = clamp(player.stamina + option.staminaDelta, 0, 100);
-  return grantXp(player, option.xp);
+  return grantXp(player, option.xp + bonusXp);
 }
 
 /**

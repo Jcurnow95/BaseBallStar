@@ -38,7 +38,8 @@ const CARDS: Card[] = [
   {
     title: 'Hitting',
     body:
-      'The ball leaves the pitcher’s hand small and grows as it comes. <b>Tap it as it reaches the plate.</b> ' +
+      'The ball leaves the pitcher’s hand small and grows as it comes. <b>Tap it as it reaches the plate</b> — ' +
+      'when the ring closes on it and the ball <b class="gold">glows gold</b>, that’s your moment. ' +
       'Land a hair <b class="good">under centre</b> for a barrel — that’s your power. Over centre chops it into the dirt. ' +
       'Off the plate? Let it go and take the walk.',
     art: `

@@ -24,6 +24,10 @@ import { drawGloom, drawRain, drawRainSplashes, drawWindFlag } from './weatherFx
  * Catcher POV. The ball leaves the pitcher's hand small and far, grows as it
  * comes, and breaks late toward its real location. Tap it. Where inside the
  * ball you land decides the whole result — see `core/swing.ts`.
+ *
+ * A timing ring converges on the ball through the flight and locks gold —
+ * with a gold glow behind the ball — while it's over the plate, marking the
+ * best moment to tap. See the PRIME_* constants.
  */
 
 export interface AtBatOptions {
@@ -69,6 +73,17 @@ const PITCHER_H = 0.088;
 const PITCHER_W = 0.058;
 /** Flight continues past the plate so late swings still have something to hit. */
 const OVERRUN = 1.22;
+/**
+ * The prime tap window, in flight progress. `PRIME_AT` is the ball dead over
+ * the plate — full-size, and the timing the spray model treats as square (see
+ * `core/swing.ts`). The window opens as the ball arrives and closes once it's
+ * dropping past the zone: inside it the ball glows gold and the timing ring
+ * locks on, which is the whole "swing NOW" signal. Display only — nothing
+ * about how a swing resolves reads these.
+ */
+const PRIME_AT = 0.98;
+const PRIME_START = 0.88;
+const PRIME_END = 1.12;
 
 /**
  * Crowd pixels. Muted and slightly varied — a stand of identical dots reads as
@@ -543,7 +558,9 @@ export class AtBatView {
       this.trail.push(ball);
       if (this.trail.length > 9) this.trail.shift();
       this.drawTrail(ctx);
+      this.drawPrimeGlow(ctx, ball, t);
       this.drawBall(ctx, ball);
+      this.drawTimingRing(ctx, ball, t, L);
       this.drawPerfectZone(ctx, ball);
     } else if (this.phase === 'freeze') {
       this.drawFreeze(ctx);
@@ -1134,6 +1151,73 @@ export class AtBatView {
 
   private drawBall(ctx: CanvasRenderingContext2D, ball: BallState): void {
     drawBaseball(ctx, ball.x, ball.y, ball.r, ball.rot);
+  }
+
+  /** 0 outside the prime tap window, 1 through its heart, eased at both edges. */
+  private primePresence(t: number): number {
+    return Math.min(
+      clamp((t - PRIME_START) / 0.05, 0, 1),
+      clamp((PRIME_END - t) / 0.07, 0, 1),
+    );
+  }
+
+  /**
+   * Gold halo behind the ball while it's over the plate — the "swing now"
+   * signal. Under the ball, so the seams stay crisp on top of the light.
+   */
+  private drawPrimeGlow(ctx: CanvasRenderingContext2D, ball: BallState, t: number): void {
+    const p = this.primePresence(t);
+    if (p <= 0) return;
+    // A quick breathe — alive at a glance without strobing.
+    const pulse = 1 + Math.sin(this.phaseElapsed / 46) * 0.05;
+    const R = ball.r * 1.8 * pulse;
+    const glow = ctx.createRadialGradient(ball.x, ball.y, ball.r * 0.55, ball.x, ball.y, R);
+    glow.addColorStop(0, `rgba(255,209,102,${0.45 * p})`);
+    glow.addColorStop(1, 'rgba(255,209,102,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, R, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /**
+   * Timing ring: converges on the ball through the flight and locks onto its
+   * rim, gold, exactly while the ball is over the plate — "tap when the ring
+   * meets the ball", without a word of instruction. The same gold as the
+   * fielding landing ring, so one colour means "act here" everywhere. Once the
+   * window has passed the ring is simply gone: the chance went with it.
+   */
+  private drawTimingRing(
+    ctx: CanvasRenderingContext2D,
+    ball: BallState,
+    t: number,
+    L: ReturnType<AtBatView['layout']>,
+  ): void {
+    if (t >= PRIME_END) return;
+    // Held back until the pitch has shown itself (the readout lands at 0.22),
+    // so the early read stays about the ball, not the aid.
+    const fadeIn = clamp((t - 0.3) / 0.18, 0, 1);
+    if (fadeIn <= 0) return;
+
+    const conv = clamp(t / PRIME_AT, 0, 1);
+    // Wide early and closing faster late, roughly matching the pitch's own
+    // perspective curve, so ring and ball arrive at the plate together.
+    const gap = Math.pow(1 - conv, 1.35) * L.W * 0.34;
+    const r = ball.r * 1.16 + gap;
+    const locked = this.primePresence(t);
+
+    ctx.save();
+    if (locked > 0) {
+      ctx.strokeStyle = `rgba(255,209,102,${0.5 + locked * 0.45})`;
+      ctx.lineWidth = Math.max(2, ball.r * 0.09);
+    } else {
+      ctx.strokeStyle = `rgba(255,255,255,${0.35 * fadeIn})`;
+      ctx.lineWidth = Math.max(1.5, ball.r * 0.07);
+    }
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /**

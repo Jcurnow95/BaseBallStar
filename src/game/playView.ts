@@ -46,10 +46,23 @@ const STAND_DEPTH = 70;
 const SEAT_COUNT = 1500;
 
 /**
+ * Grandstands also run down each foul line behind the dugouts — where the
+ * fans sit for the infield. Measured like the dugout: feet down the line
+ * where the deck starts and ends (stopping short of the outfield bowl),
+ * feet off the line to its front wall, how deep it is, and how many seats
+ * each side holds.
+ */
+const SIDE_STAND_ALONG0 = 20;
+const SIDE_STAND_ALONG1 = 225;
+const SIDE_STAND_OFFSET = 64;
+const SIDE_STAND_DEPTH = 32;
+const SIDE_SEAT_COUNT = 320;
+
+/**
  * Dugouts sit in foul territory, parallel to the lines. Measured in feet:
  * how far down the line the bench is centred, how far off the line it sits,
- * and its footprint. Eight players stand at the rail in each — the rest of the
- * side that isn't on the field or the bases.
+ * and its footprint. Eight players fill each one — the rest of the side that
+ * isn't on the field or the bases — split between the rail and the bench.
  */
 const DUGOUT_ALONG = 76;
 // Far enough off the line that the bench reads as scenery beyond the playing
@@ -58,6 +71,8 @@ const DUGOUT_OFFSET = 46;
 const DUGOUT_LENGTH = 62;
 const DUGOUT_DEPTH = 13;
 const DUGOUT_BENCH = 8;
+/** How many of the eight stand at the rail; the rest sit the bench. */
+const DUGOUT_RAIL = 5;
 
 const GRASS_DARK = '#1f7a3f';
 const GRASS_LIGHT = '#26924b';
@@ -101,7 +116,8 @@ export class PlayView {
   /** Recent ball positions in world space — the comet tail that makes a
    * 4px ball trackable at a glance. */
   private ballTrail: { x: number; y: number; z: number }[] = [];
-  /** Outfield seats in world space, built once — the bowl never moves. */
+  /** Every seat in the park in world space, built once — outfield bowl and
+   * both side grandstands. The stands never move. */
   private readonly seats: (Vec2 & { colour: string })[];
 
   private joystick: Joystick = {
@@ -601,6 +617,7 @@ export class PlayView {
     ctx.fill();
     ctx.restore();
 
+    this.drawSideStands(ctx);
     this.drawCrowd(ctx);
     ctx.save();
 
@@ -619,7 +636,7 @@ export class PlayView {
   }
 
   /**
-   * The crowd in the outfield stand.
+   * The crowd — in the outfield bowl and the side grandstands alike.
    *
    * Seats are generated in *world* space from an index hash, so they scroll
    * and zoom with the camera instead of swimming across it, and stay put frame
@@ -646,25 +663,96 @@ export class PlayView {
   }
 
   /**
-   * Lay the bowl out once. Seat order is hashed rather than sequential, so
-   * taking the first N of them for a given crowd size scatters people through
-   * the whole stand instead of packing them in from one foul pole round.
+   * Lay every stand out once. Seat order is shuffled by hash rather than
+   * sequential, so taking the first N of them for a given crowd size scatters
+   * people through the bowl and both side stands instead of packing them in
+   * from one foul pole round.
    */
   private buildSeats(): (Vec2 & { colour: string })[] {
     const park = this.sim.park;
-    const seats: (Vec2 & { colour: string })[] = [];
+    const seats: (Vec2 & { colour: string; order: number })[] = [];
+    const add = (x: number, y: number, h: number) =>
+      seats.push({
+        x,
+        y,
+        colour: CROWD_COLOURS[h % CROWD_COLOURS.length],
+        order: Math.imul(h ^ 0x9e3779b9, 2246822519) >>> 0,
+      });
+
+    // The outfield bowl.
     for (let i = 0; i < SEAT_COUNT; i++) {
       const h = (i * 2654435761) >>> 0;
       const angle = -Math.PI / 4 + ((h % SEAT_COUNT) / SEAT_COUNT) * (Math.PI / 2);
       const dir = { x: Math.sin(angle), y: Math.cos(angle) };
       const radius = fenceAt(park, dir) + 6 + ((h >>> 9) % (STAND_DEPTH - 12));
-      seats.push({
-        x: dir.x * radius,
-        y: dir.y * radius,
-        colour: CROWD_COLOURS[h % CROWD_COLOURS.length],
-      });
+      add(dir.x * radius, dir.y * radius, h);
     }
+
+    // The grandstands down each line. Seats live in the dugout's local frame
+    // — feet along the foul line and out from it — mapped to world space.
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < SIDE_SEAT_COUNT; i++) {
+        const h = Math.imul(i + (side > 0 ? 70001 : 40009), 2654435761) >>> 0;
+        const a = SIDE_STAND_ALONG0 + 4 + (h % (SIDE_STAND_ALONG1 - SIDE_STAND_ALONG0 - 8));
+        const o = SIDE_STAND_OFFSET + 4 + ((h >>> 9) % (SIDE_STAND_DEPTH - 8));
+        add((side * (a + o)) / Math.SQRT2, (a - o) / Math.SQRT2, h);
+      }
+    }
+
+    seats.sort((p, q) => p.order - q.order);
     return seats;
+  }
+
+  /**
+   * The grandstands flanking the infield — a concrete deck down each foul
+   * line behind the dugouts, with a low wall on the field side. The fans in
+   * them come from the shared seat list, so the same crowd fraction fills
+   * the bowl and the sides alike.
+   */
+  private drawSideStands(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    for (const side of [-1, 1]) {
+      const at = (a: number, o: number): Vec2 =>
+        this.toScreen({ x: (side * (a + o)) / Math.SQRT2, y: (a - o) / Math.SQRT2 });
+
+      const a0 = SIDE_STAND_ALONG0;
+      const a1 = SIDE_STAND_ALONG1;
+      const o0 = SIDE_STAND_OFFSET;
+      const o1 = SIDE_STAND_OFFSET + SIDE_STAND_DEPTH;
+
+      // The deck, in the same concrete as the outfield stand.
+      ctx.fillStyle = '#141c30';
+      ctx.beginPath();
+      [at(a0, o0), at(a1, o0), at(a1, o1), at(a0, o1)].forEach((p, i) =>
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y),
+      );
+      ctx.closePath();
+      ctx.fill();
+
+      // Faint breaks so the deck reads as tiers of seating.
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = Math.max(1, 0.5 * this.scale);
+      for (let k = 1; k < 4; k++) {
+        const o = o0 + (SIDE_STAND_DEPTH * k) / 4;
+        const r0 = at(a0, o);
+        const r1 = at(a1, o);
+        ctx.beginPath();
+        ctx.moveTo(r0.x, r0.y);
+        ctx.lineTo(r1.x, r1.y);
+        ctx.stroke();
+      }
+
+      // Low wall between the front row and foul ground.
+      ctx.strokeStyle = '#2c3a5c';
+      ctx.lineWidth = Math.max(2, 1.4 * this.scale);
+      const w0 = at(a0, o0);
+      const w1 = at(a1, o0);
+      ctx.beginPath();
+      ctx.moveTo(w0.x, w0.y);
+      ctx.lineTo(w1.x, w1.y);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   private drawInfield(ctx: CanvasRenderingContext2D): void {
@@ -768,44 +856,92 @@ export class PlayView {
 
     ctx.save();
 
-    // Dirt apron in front, so the bench doesn't sit straight on the grass.
+    // Dirt apron in front, so the dugout doesn't sit straight on the grass.
     ctx.fillStyle = DIRT;
     poly([at(a0 - 3, o0 - 5), at(a1 + 3, o0 - 5), at(a1 + 3, o0 + 1), at(a0 - 3, o0 + 1)]);
     ctx.fill();
 
-    // The sunken floor, then the roof shading the back half.
+    // Concrete walls wrap the pit on three sides; their tops show as a
+    // lighter band round the sunken floor. The field side stays open.
+    ctx.fillStyle = '#6a7490';
+    poly([at(a0 - 2, o0), at(a1 + 2, o0), at(a1 + 2, o1 + 2), at(a0 - 2, o1 + 2)]);
+    ctx.fill();
+
+    // The sunken floor.
     ctx.fillStyle = '#4a5468';
     poly(corners);
     ctx.fill();
-    ctx.fillStyle = '#2b3243';
-    poly([
-      at(a0, o0 + DUGOUT_DEPTH * 0.55),
-      at(a1, o0 + DUGOUT_DEPTH * 0.55),
-      at(a1, o1),
-      at(a0, o1),
-    ]);
-    ctx.fill();
 
-    // Bench along the back wall, in the team's colour.
-    ctx.strokeStyle = kit.shirt;
-    ctx.lineWidth = Math.max(2, 2.2 * this.scale);
-    ctx.lineCap = 'butt';
-    const b0 = at(a0 + 2, o1 - 2.5);
-    const b1 = at(a1 - 2, o1 - 2.5);
-    ctx.beginPath();
-    ctx.moveTo(b0.x, b0.y);
-    ctx.lineTo(b1.x, b1.y);
+    // Steps down into the pit at each end, where the rail leaves a gap.
+    const stepShades = ['#707a96', '#5f6984', '#525c76'];
+    for (const [s0, s1] of [
+      [a0 + 0.5, a0 + 6],
+      [a1 - 6, a1 - 0.5],
+    ]) {
+      stepShades.forEach((shade, k) => {
+        ctx.fillStyle = shade;
+        poly([
+          at(s0, o0 + k * 1.3),
+          at(s1, o0 + k * 1.3),
+          at(s1, o0 + (k + 1) * 1.3),
+          at(s0, o0 + (k + 1) * 1.3),
+        ]);
+        ctx.fill();
+      });
+    }
+
+    // The bench itself — a slab along the back wall in the team's colour,
+    // not just a painted line.
+    const benchPoly = [
+      at(a0 + 3, o1 - 4.4),
+      at(a1 - 3, o1 - 4.4),
+      at(a1 - 3, o1 - 1.8),
+      at(a0 + 3, o1 - 1.8),
+    ];
+    ctx.fillStyle = kit.shirt;
+    poly(benchPoly);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = Math.max(1, 0.6 * this.scale);
+    poly(benchPoly);
     ctx.stroke();
 
-    // Outline of the pit, and the rail on the field side.
+    // The sitters, drawn before the canopy so it shades them. Fed a fixed
+    // point rather than the screen position, so a camera pan doesn't set
+    // their legs churning — they only idle.
+    const plate = this.toScreen(BASES[0]);
+    const seatedHeight = this.spriteHeight() * 0.66;
+    for (let i = DUGOUT_RAIL; i < DUGOUT_BENCH; i++) {
+      const p = at(DUGOUT_ALONG + (i - DUGOUT_RAIL - 1) * 10, o1 - 3.4);
+      const anim = this.animFor(`d:${side}:${i}`, { x: 0, y: 0 }, dt);
+      anim.facing = Math.atan2(plate.y - p.y, plate.x - p.x);
+      drawPlayer(ctx, p.x, p.y, { height: seatedHeight, colors: kit, anim });
+    }
+
+    // Roof canopy over the back of the pit, semi-transparent so the bench
+    // ghosts through beneath it, with a pale leading edge.
+    ctx.fillStyle = 'rgba(20, 25, 42, 0.55)';
+    poly([at(a0 - 2, o1 - 5.2), at(a1 + 2, o1 - 5.2), at(a1 + 2, o1 + 2), at(a0 - 2, o1 + 2)]);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(215, 219, 230, 0.55)';
+    ctx.lineWidth = Math.max(1, 0.8 * this.scale);
+    const e0 = at(a0 - 2, o1 - 5.2);
+    const e1 = at(a1 + 2, o1 - 5.2);
+    ctx.beginPath();
+    ctx.moveTo(e0.x, e0.y);
+    ctx.lineTo(e1.x, e1.y);
+    ctx.stroke();
+
+    // Outline of the whole structure, and the rail on the field side —
+    // broken at the ends where the steps come down.
     ctx.strokeStyle = 'rgba(0,0,0,0.45)';
     ctx.lineWidth = Math.max(1, 0.8 * this.scale);
-    poly(corners);
+    poly([at(a0 - 2, o0), at(a1 + 2, o0), at(a1 + 2, o1 + 2), at(a0 - 2, o1 + 2)]);
     ctx.stroke();
     ctx.strokeStyle = '#d7dbe6';
     ctx.lineWidth = Math.max(1.5, 1.1 * this.scale);
-    const r0 = at(a0, o0);
-    const r1 = at(a1, o0);
+    const r0 = at(a0 + 7, o0);
+    const r1 = at(a1 - 7, o0);
     ctx.beginPath();
     ctx.moveTo(r0.x, r0.y);
     ctx.lineTo(r1.x, r1.y);
@@ -813,17 +949,14 @@ export class PlayView {
 
     ctx.restore();
 
-    // The bench, spread along the rail, all watching the plate. A touch
-    // smaller than the nine in play so the dugout reads as background.
+    // The rest stand at the rail, all watching the plate. A touch smaller
+    // than the nine in play so the dugout reads as background.
     const height = this.spriteHeight() * 0.8;
-    const stride = (DUGOUT_LENGTH - 10) / (DUGOUT_BENCH - 1);
-    const plate = this.toScreen(BASES[0]);
-    for (let i = 0; i < DUGOUT_BENCH; i++) {
+    const stride = (DUGOUT_LENGTH - 18) / (DUGOUT_RAIL - 1);
+    for (let i = 0; i < DUGOUT_RAIL; i++) {
       // A little stagger so they don't stand in a parade line.
       const stagger = ((i * 7 + (side > 0 ? 3 : 0)) % 5) * 0.6;
-      const p = at(a0 + 5 + i * stride, o0 + 3.5 + stagger);
-      // Fed a fixed point rather than the screen position, so a camera pan
-      // doesn't set their legs churning — they only idle.
+      const p = at(a0 + 9 + i * stride, o0 + 3.5 + stagger);
       const anim = this.animFor(`d:${side}:${i}`, { x: 0, y: 0 }, dt);
       anim.facing = Math.atan2(plate.y - p.y, plate.x - p.x);
       drawPlayer(ctx, p.x, p.y, { height, colors: kit, anim });

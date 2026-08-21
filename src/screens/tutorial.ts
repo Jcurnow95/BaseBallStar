@@ -128,7 +128,8 @@ const DRILLS: Drill[] = [
     title: 'Work the count',
     body:
       'Not every pitch deserves a swing. The dashed box is the strike zone — if the ball is landing ' +
-      '<b class="info">outside it, let it go</b>. Four balls is a walk and a free base. ' +
+      '<b class="info">outside it, let it go</b>. A pitch off the plate never flashes gold: the ring just fades out — ' +
+      '<b class="info">no gold, no swing</b>. Four balls is a walk and a free base. ' +
       'The pitch name appears out of the hand (that’s your Vision at work), and the count lives beside the zone.',
     goal: 'Draw a walk',
     praise: 'Ball four — take your base. Walks are free offense, and laying off junk is what gets you good pitches to hit.',

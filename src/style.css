@@ -768,6 +768,29 @@ select {
   color: var(--gold);
 }
 
+/* Playable drill cards: the buttons decide, so the card itself isn't a tap target. */
+.train-card.playable {
+  flex-wrap: wrap;
+  cursor: default;
+}
+
+.train-card .drill-btns {
+  flex-basis: 100%;
+  display: flex;
+  gap: 8px;
+}
+
+.train-card .drill-btns .btn {
+  flex: 1;
+  width: auto;
+  padding: 9px 10px;
+}
+
+/* Fungo drill backdrop: dusk sky over an outfield to stand in. */
+.stage.fungo-field {
+  background: linear-gradient(180deg, #16324a 0%, #1b4c36 22%, #1f6b3f 40%, #26924b 100%);
+}
+
 table.standings {
   width: 100%;
   border-collapse: collapse;

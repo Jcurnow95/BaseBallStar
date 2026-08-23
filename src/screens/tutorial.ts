@@ -15,11 +15,12 @@ import { playSound, startAmbience, stopAmbience } from '../ui/audio';
 import { q } from '../ui/dom';
 
 /**
- * The playable tutorial: six short drills that teach every mechanic by making
+ * The playable tutorial: seven short drills that teach every mechanic by making
  * you do it, using the real at-bat and field views. Three swings in the cage
- * (contact, the barrel, the eye), then three live plays (baserunning, the fly
- * ball, the grounder-and-throw). Each drill is an instruction card, then the
- * drill itself, looping until the goal is met — no career state is touched.
+ * (contact, the barrel, the eye), then four live plays (baserunning, the fly
+ * ball, the stretch catch, the grounder-and-throw). Each drill is an
+ * instruction card, then the drill itself, looping until the goal is met — no
+ * career state is touched.
  */
 
 /** Where Exit and the final Done button go. */
@@ -30,7 +31,7 @@ export function openTutorial(app: App, then: Route): void {
   app.go('tutorial');
 }
 
-type DrillId = 'contact' | 'barrel' | 'eye' | 'run' | 'fly' | 'throw';
+type DrillId = 'contact' | 'barrel' | 'eye' | 'run' | 'fly' | 'stretch' | 'throw';
 
 interface Drill {
   id: DrillId;
@@ -128,7 +129,8 @@ const DRILLS: Drill[] = [
     title: 'Work the count',
     body:
       'Not every pitch deserves a swing. The dashed box is the strike zone — if the ball is landing ' +
-      '<b class="info">outside it, let it go</b>. Four balls is a walk and a free base. ' +
+      '<b class="info">outside it, let it go</b>. A pitch off the plate never flashes gold: the ring just fades out — ' +
+      '<b class="info">no gold, no swing</b>. Four balls is a walk and a free base. ' +
       'The pitch name appears out of the hand (that’s your Vision at work), and the count lives beside the zone.',
     goal: 'Draw a walk',
     praise: 'Ball four — take your base. Walks are free offense, and laying off junk is what gets you good pitches to hit.',
@@ -209,8 +211,7 @@ const DRILLS: Drill[] = [
     body:
       'You’re in centre field and one is coming your way. <b>Drag anywhere on the screen to run</b> — ' +
       'it’s a joystick wherever your thumb lands. The <b class="gold">gold ring</b> marks where the ball is coming down: ' +
-      'get under it and the catch is yours. Reach it only at the edge of your range and the game asks you to ' +
-      '<b class="gold">tap the ball as it arrives</b> — the stretch catch.',
+      '<b class="good">plant yourself inside it before the ball lands</b> and the catch is automatic.',
     goal: 'Catch the fly ball',
     praise: 'Out! Your Fielding rating is how big your glove is out there. Putouts pay XP and cash, so want the ball.',
     art: `
@@ -236,6 +237,40 @@ const DRILLS: Drill[] = [
         <text x="24" y="81" text-anchor="middle" font-size="5.5" font-weight="800" fill="rgba(255,255,255,0.75)">YOUR THUMB</text>
         <text x="80" y="60" text-anchor="middle" font-size="5.5" font-weight="800" fill="#ffe178">LANDING RING</text>
         <text x="60" y="10" text-anchor="middle" font-size="7" font-weight="800" fill="#fff" letter-spacing="1">DRAG ANYWHERE TO RUN</text>
+      </svg>`,
+  },
+  {
+    id: 'stretch',
+    title: 'Earn one at full stretch',
+    body:
+      'Sometimes you can’t get all the way under it — you reach the ball at the very edge of your range. ' +
+      'The play holds and the ball rushes at your glove: <b class="gold">tap the ball just as it reaches you</b> ' +
+      'to hang on. Tap too early, or off the ball, and it clanks out. ' +
+      'This one is dropping at your limit — chase it down and earn it.',
+    goal: 'Make the stretch catch',
+    praise:
+      'Held on! Every ball you reach at full stretch comes down to that one tap. Fielding grows your glove — the bigger it is, the more of those become routine.',
+    art: `
+      <svg viewBox="0 0 120 84" aria-hidden="true">
+        <rect x="0" y="0" width="120" height="84" rx="8" fill="#0a1424"/>
+        <defs>
+          <radialGradient id="tut-bb7" cx="0.5" cy="0.5" r="0.5" fx="0.325" fy="0.3">
+            <stop offset="0" stop-color="#ffffff"/><stop offset="0.55" stop-color="#f5f3ed"/>
+            <stop offset="0.85" stop-color="#ded9cd"/><stop offset="1" stop-color="#b6afa1"/>
+          </radialGradient>
+        </defs>
+        <text x="60" y="14" text-anchor="middle" font-size="8" font-weight="800" fill="#ffd166" letter-spacing="1">REACH FOR IT!</text>
+        <circle cx="20" cy="24" r="2" fill="rgba(255,255,255,0.25)"/>
+        <circle cx="30" cy="30" r="3.5" fill="rgba(255,255,255,0.4)"/>
+        <circle cx="42" cy="37" r="5.5" fill="rgba(255,255,255,0.55)"/>
+        <circle cx="60" cy="47" r="13" fill="url(#tut-bb7)"/>
+        <g fill="none" stroke="#c04a3e" stroke-width="1" stroke-linecap="round">
+          <path d="M63.12 37.33 A 12.35 12.35 0 0 1 63.12 56.67"/>
+          <path d="M56.88 56.67 A 12.35 12.35 0 0 1 56.88 37.33"/>
+        </g>
+        <circle cx="60" cy="47" r="19" fill="none" stroke="#5ce6a0" stroke-width="1.8" stroke-dasharray="4 3"/>
+        <path d="M56 43 l8 8 M64 43 l-8 8" stroke="#ffd166" stroke-width="2.8" stroke-linecap="round"/>
+        <text x="60" y="78" text-anchor="middle" font-size="7" font-weight="800" fill="#5ce6a0" letter-spacing="1">TAP IT AS IT REACHES YOU</text>
       </svg>`,
   },
   {
@@ -326,6 +361,7 @@ const teachingGrounder = (rng: Rng): BattedBall => ({
 /** Which fielding spot each live drill plays from, whatever your position. */
 const DRILL_POSITION: Partial<Record<DrillId, PositionId>> = {
   fly: 'CF',
+  stretch: 'CF',
   throw: 'SS',
 };
 
@@ -538,7 +574,7 @@ export function renderTutorial(app: App, mount: HTMLElement): () => void {
     if (disposed) return;
     progress = 0;
     const d = DRILLS[step];
-    if (d.id === 'run' || d.id === 'fly' || d.id === 'throw') startPlayDrill();
+    if (d.id === 'run' || d.id === 'fly' || d.id === 'stretch' || d.id === 'throw') startPlayDrill();
     else startBatDrill();
   };
 
@@ -631,12 +667,18 @@ export function renderTutorial(app: App, mount: HTMLElement): () => void {
         ? 'Take what’s there — GO for two'
         : d.id === 'fly'
           ? 'Get under the gold ring'
-          : 'Glove it, then tap 1ST',
+          : d.id === 'stretch'
+            ? 'Reach it — then tap the ball as it arrives'
+            : 'Glove it, then tap 1ST',
     );
 
     const sim = new PlaySim({
       battedBall:
-        d.id === 'run' ? gapDouble(app.rng) : d.id === 'fly' ? teachingFly(app.rng) : teachingGrounder(app.rng),
+        d.id === 'run'
+          ? gapDouble(app.rng)
+          : d.id === 'fly' || d.id === 'stretch'
+            ? teachingFly(app.rng)
+            : teachingGrounder(app.rng),
       bats: practice.bats,
       attributes: practice.attributes,
       userPosition: DRILL_POSITION[d.id] ?? 'CF',
@@ -645,6 +687,9 @@ export function renderTutorial(app: App, mount: HTMLElement): () => void {
       outs: 0,
       // Practice-squad opposition: slow enough to learn against.
       opponentRating: 25,
+      // The lesson is the minigame itself, so it fires even if they camp the
+      // ring — positioning was last drill's lesson.
+      forceStretchCatch: d.id === 'stretch',
       rng: app.rng,
     });
 
@@ -684,6 +729,14 @@ export function renderTutorial(app: App, mount: HTMLElement): () => void {
           );
         }
         return;
+      case 'stretch':
+        if (out.userPutout) passDrill();
+        else {
+          failDrill(
+            'It fell. Chase the gold ring so the ball is in reach — then, when it rushes at your glove, tap right on the ball just as it gets to you. Too early, or off the ball, and it pops out.',
+          );
+        }
+        return;
       default:
         if (out.outs > 0) passDrill();
         else {
@@ -716,7 +769,7 @@ export function renderTutorial(app: App, mount: HTMLElement): () => void {
     kicker: 'WELCOME TO THE CAGES',
     title: 'Learn it by doing it',
     body:
-      'Six short drills cover everything: hitting, plate discipline, baserunning, and fielding. ' +
+      'Seven short drills cover everything: hitting, plate discipline, baserunning, and fielding. ' +
       'Nothing here touches your career — swing free. You can skip any drill, or leave any time.',
     cta: 'First Drill',
     onCta: () => {

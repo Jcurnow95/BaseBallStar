@@ -13,20 +13,26 @@ import {
   hasPerfectZone,
   perfectZoneProgress,
   recoverOvernight,
+  trainingBonusXp,
   upgradeAttribute,
   upgradeCost,
   xpForLevel,
 } from '../core/progression';
+import type { LevelUpReport, TrainingOption } from '../core/progression';
 import { advanceDay, isGameDay, isSeasonOver } from '../core/league';
 import { esc, meterHtml, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
+import { runBpChallenge, runFungoFrenzy } from './trainingGames';
+import type { DrillOutcome } from './trainingGames';
 
-export function renderTraining(app: App, mount: HTMLElement): void {
+export function renderTraining(app: App, mount: HTMLElement): () => void {
   const save = app.requireSave();
   const { player } = save;
   // Spending points and reading your numbers works any day. Only the drills
   // themselves, which burn the day, are limited to off days.
   const offDay = !isGameDay(save.league) && !isSeasonOver(save.league);
+  /** Teardown for a drill in progress, when the route changes under it. */
+  let activeDrill: (() => void) | null = null;
 
   const draw = (): void => {
     mount.innerHTML = `
@@ -93,14 +99,20 @@ export function renderTraining(app: App, mount: HTMLElement): void {
           <h2>Work the day</h2>
           ${TRAINING_OPTIONS.map((opt) => {
             const off = player.energy < opt.energyCost;
+            const playable = !!opt.minigame;
             const stamina =
               opt.staminaDelta === 0
                 ? ''
                 : opt.staminaDelta > 0
                   ? `<span class="st-up">+${opt.staminaDelta} STA</span><br/>`
                   : `<span class="st-dn">${opt.staminaDelta} STA</span><br/>`;
+            const xpLine = playable
+              ? `<span class="xp">+${opt.xp}–${opt.xp + trainingBonusXp(opt, 1)} XP</span>`
+              : opt.xp > 0
+                ? `<span class="xp">+${opt.xp} XP</span>`
+                : '';
             return `
-              <div class="train-card" data-train="${opt.id}" data-off="${off ? 1 : 0}">
+              <div class="train-card${playable ? ' playable' : ''}" data-train="${opt.id}" data-off="${off ? 1 : 0}">
                 <div class="info">
                   <strong>${esc(opt.name)}</strong>
                   <span>${esc(opt.detail)}</span>
@@ -108,8 +120,16 @@ export function renderTraining(app: App, mount: HTMLElement): void {
                 <div class="cost">
                   ${opt.energyCost > 0 ? `<span class="en">-${opt.energyCost} EN</span><br/>` : ''}
                   ${stamina}
-                  ${opt.xp > 0 ? `<span class="xp">+${opt.xp} XP</span>` : ''}
+                  ${xpLine}
                 </div>
+                ${
+                  playable
+                    ? `<div class="drill-btns">
+                        <button class="btn primary tiny" data-play="${opt.id}" ${off ? 'disabled' : ''}>▶ Play the Drill</button>
+                        <button class="btn ghost tiny" data-quick="${opt.id}" ${off ? 'disabled' : ''}>Quick Train</button>
+                      </div>`
+                    : ''
+                }
               </div>`;
           }).join('')}
         </div>`
@@ -179,34 +199,92 @@ export function renderTraining(app: App, mount: HTMLElement): void {
       });
     }
 
-    for (const card of qa(mount, '.train-card')) {
-      card.addEventListener('click', async () => {
-        const option = TRAINING_OPTIONS.find((o) => o.id === card.dataset.train);
-        if (!option) return;
-        const report = applyTraining(player, option);
-        if (!report) {
-          await showDialog({
-            title: 'Out of energy',
-            body: 'You have nothing left in the tank today. Take a rest day to reset.',
-          });
+    const outOfEnergy = (): Promise<boolean> =>
+      showDialog({
+        title: 'Out of energy',
+        body: 'You have nothing left in the tank today. Take a rest day to reset.',
+      });
+
+    const maybeLevelDialog = async (report: LevelUpReport): Promise<void> => {
+      if (report.levelsGained === 0) return;
+      await showDialog({
+        title: 'Level up!',
+        body: `You're now level ${player.level} and earned ${report.pointsGained} attribute point${
+          report.pointsGained === 1 ? '' : 's'
+        }.`,
+        confirmLabel: 'Spend them',
+      });
+    };
+
+    const quickTrain = async (option: TrainingOption): Promise<void> => {
+      const report = applyTraining(player, option);
+      if (!report) {
+        await outOfEnergy();
+        return;
+      }
+      app.persist();
+      draw();
+      await maybeLevelDialog(report);
+    };
+
+    const finishDrill = async (option: TrainingOption, outcome: DrillOutcome): Promise<void> => {
+      const bonus = trainingBonusXp(option, outcome.ratio);
+      const report = applyTraining(player, option, bonus);
+      app.persist();
+      draw();
+      await showDialog({
+        title: `${option.name} — session over`,
+        body:
+          `${outcome.headline}.\n\n` +
+          (bonus > 0
+            ? `+${option.xp} XP for the session, +${bonus} bonus XP for the work.`
+            : `+${option.xp} XP for the session. No bonus this time — the reps still count.`),
+        confirmLabel: 'Nice',
+      });
+      if (report) await maybeLevelDialog(report);
+    };
+
+    const playDrill = async (option: TrainingOption): Promise<void> => {
+      if (!option.minigame) return;
+      if (player.energy < option.energyCost) {
+        await outOfEnergy();
+        return;
+      }
+      const run = option.minigame === 'bp' ? runBpChallenge : runFungoFrenzy;
+      activeDrill = run(app, mount, (outcome) => {
+        activeDrill = null;
+        // Backed out before the first rep: the day is untouched.
+        if (!outcome) {
+          draw();
           return;
         }
-        app.persist();
-        draw();
-        if (report.levelsGained > 0) {
-          await showDialog({
-            title: 'Level up!',
-            body: `You're now level ${player.level} and earned ${report.pointsGained} attribute point${
-              report.pointsGained === 1 ? '' : 's'
-            }.`,
-            confirmLabel: 'Spend them',
-          });
-        }
+        void finishDrill(option, outcome);
       });
+    };
+
+    for (const card of qa(mount, '.train-card')) {
+      const option = TRAINING_OPTIONS.find((o) => o.id === card.dataset.train);
+      if (!option) continue;
+      if (option.minigame) {
+        // Playable drills choose via their buttons; a card tap does nothing.
+        q<HTMLButtonElement>(card, '[data-play]').addEventListener('click', () =>
+          playDrill(option),
+        );
+        q<HTMLButtonElement>(card, '[data-quick]').addEventListener('click', () =>
+          quickTrain(option),
+        );
+      } else {
+        card.addEventListener('click', () => quickTrain(option));
+      }
     }
 
     q(mount, '#done').addEventListener('click', () => app.go('hub'));
   };
 
   draw();
+
+  return () => {
+    activeDrill?.();
+    activeDrill = null;
+  };
 }

@@ -49,7 +49,8 @@ const DRILLS: Drill[] = [
     title: 'Step in the cage',
     body:
       'The ball leaves the pitcher’s hand small and grows as it comes. <b>Tap it as it reaches the plate</b> — ' +
-      'the whole ball is a target, so anywhere on it puts the bat on the ball. ' +
+      'the ring closes on the ball and it <b class="gold">flashes gold</b> right when it’s there. ' +
+      'The whole ball is a target, so anywhere on it puts the bat on the ball. ' +
       'Miss it entirely and that’s a swinging strike.',
     goal: 'Put 2 balls in play',
     praise: 'That’s the swing. Everything else at the plate builds on that tap.',

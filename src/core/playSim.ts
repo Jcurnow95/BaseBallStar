@@ -104,6 +104,13 @@ export interface PlaySetup {
   park?: Ballpark;
   /** The day's weather. Defaults to a calm, dry one. */
   weather?: Weather;
+  /**
+   * Every ball the user reaches fires the stretch-catch minigame, even one
+   * they're camped under. Tutorial-only: the minigame normally triggers on
+   * range, so a player who positions well can go a long time without ever
+   * seeing it — this guarantees the lesson happens.
+   */
+  forceStretchCatch?: boolean;
   rng: Rng;
 }
 
@@ -1115,7 +1122,7 @@ export class PlaySim {
     const clean = ratio <= cleanLimit;
 
     if (fielder.isUser) {
-      if (clean) {
+      if (clean && !this.setup.forceStretchCatch) {
         this.completeCatch(fielder, wasFly);
         return;
       }

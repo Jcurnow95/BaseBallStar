@@ -41,7 +41,8 @@ const CARDS: Card[] = [
       'The ball leaves the pitcher’s hand small and grows as it comes. <b>Tap it as it reaches the plate</b> — ' +
       'when the ring closes on it and the ball <b class="gold">glows gold</b>, that’s your moment. ' +
       'Land a hair <b class="good">under centre</b> for a barrel — that’s your power. Over centre chops it into the dirt. ' +
-      'Off the plate? The gold never comes and the ring fades away — <b class="info">no gold, no swing</b>. Let it go and take the walk.',
+      'Off the plate? Read the dashed zone and let it go — take the walk. ' +
+      'Once your Vision hits 65 the game reads it for you: the gold never comes on a ball and the ring fades away — <b class="info">no gold, no swing</b>.',
     art: `
       <svg viewBox="0 0 120 84" aria-hidden="true">
         <rect x="0" y="0" width="120" height="84" rx="8" fill="#0f1a30"/>

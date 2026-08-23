@@ -30,7 +30,7 @@ export const ATTRIBUTE_LABELS: Record<AttributeKey, string> = {
 export const ATTRIBUTE_BLURBS: Record<AttributeKey, string> = {
   power: 'Exit velocity ceiling. Turns good contact into extra bases.',
   contact: 'Widens the sweet spot on the ball. The most forgiving stat.',
-  vision: 'Reads pitch type out of the hand and holds the strike-zone view longer.',
+  vision: 'Reads pitch type out of the hand and holds the strike-zone view longer. At 65, tells you ball from strike.',
   speed: 'Beats out grounders, stretches gaps, steals bases.',
   fielding: 'Widens your glove window on catch events.',
   arm: 'Throw strength on fielding plays. Keeps runners honest.',

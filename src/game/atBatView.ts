@@ -25,9 +25,11 @@ import { drawGloom, drawRain, drawRainSplashes, drawWindFlag } from './weatherFx
  * comes, and breaks late toward its real location. Tap it. Where inside the
  * ball you land decides the whole result — see `core/swing.ts`.
  *
- * A timing ring converges on the ball through the flight and locks gold —
- * with a gold glow behind the ball — while it's over the plate, marking the
- * best moment to tap. See the PRIME_* constants.
+ * A timing ring converges on the ball through the flight. On a strike it
+ * locks gold — with a gold glow behind the ball — while it's over the plate,
+ * marking the best moment to tap. On a ball off the plate it dissolves as it
+ * arrives and no glow ever comes: gold means swing, no gold means lay off.
+ * See the PRIME_* constants.
  */
 
 export interface AtBatOptions {
@@ -77,9 +79,11 @@ const OVERRUN = 1.22;
  * The prime tap window, in flight progress. `PRIME_AT` is the ball dead over
  * the plate — full-size, and the timing the spray model treats as square (see
  * `core/swing.ts`). The window opens as the ball arrives and closes once it's
- * dropping past the zone: inside it the ball glows gold and the timing ring
- * locks on, which is the whole "swing NOW" signal. Display only — nothing
- * about how a swing resolves reads these.
+ * dropping past the zone: inside it a strike glows gold and the timing ring
+ * locks on, which is the whole "swing NOW" signal. A ball gets neither —
+ * the ring washes out instead, so a pitch worth taking never wears the
+ * swing colour. Display only — nothing about how a swing resolves reads
+ * these.
  */
 const PRIME_AT = 0.98;
 const PRIME_START = 0.88;
@@ -1164,8 +1168,11 @@ export class AtBatView {
   /**
    * Gold halo behind the ball while it's over the plate — the "swing now"
    * signal. Under the ball, so the seams stay crisp on top of the light.
+   * Strikes only: a ball off the plate never earns the swing colour, which
+   * is what makes the two readable as different pitches at a glance.
    */
   private drawPrimeGlow(ctx: CanvasRenderingContext2D, ball: BallState, t: number): void {
+    if (!this.pitch.isStrike) return;
     const p = this.primePresence(t);
     if (p <= 0) return;
     // A quick breathe — alive at a glance without strobing.
@@ -1181,11 +1188,13 @@ export class AtBatView {
   }
 
   /**
-   * Timing ring: converges on the ball through the flight and locks onto its
-   * rim, gold, exactly while the ball is over the plate — "tap when the ring
-   * meets the ball", without a word of instruction. The same gold as the
-   * fielding landing ring, so one colour means "act here" everywhere. Once the
-   * window has passed the ring is simply gone: the chance went with it.
+   * Timing ring: converges on the ball through the flight and, on a strike,
+   * locks onto its rim, gold, exactly while the ball is over the plate —
+   * "tap when the ring meets the ball", without a word of instruction. The
+   * same gold as the fielding landing ring, so one colour means "act here"
+   * everywhere. On a ball the ring never locks: it washes out just before
+   * the plate, and the missing lock is the "lay off" read. Once the window
+   * has passed the ring is simply gone: the chance went with it.
    */
   private drawTimingRing(
     ctx: CanvasRenderingContext2D,
@@ -1204,14 +1213,18 @@ export class AtBatView {
     // perspective curve, so ring and ball arrive at the plate together.
     const gap = Math.pow(1 - conv, 1.35) * L.W * 0.34;
     const r = ball.r * 1.16 + gap;
-    const locked = this.primePresence(t);
+    const locked = this.pitch.isStrike ? this.primePresence(t) : 0;
+    // On a ball the ring dissolves as it reaches the plate instead of
+    // locking — by the time a strike would be glowing gold, there's nothing.
+    const wash = this.pitch.isStrike ? 1 : 1 - clamp((t - PRIME_START) / 0.07, 0, 1);
+    if (wash <= 0) return;
 
     ctx.save();
     if (locked > 0) {
       ctx.strokeStyle = `rgba(255,209,102,${0.5 + locked * 0.45})`;
       ctx.lineWidth = Math.max(2, ball.r * 0.09);
     } else {
-      ctx.strokeStyle = `rgba(255,255,255,${0.35 * fadeIn})`;
+      ctx.strokeStyle = `rgba(255,255,255,${0.35 * fadeIn * wash})`;
       ctx.lineWidth = Math.max(1.5, ball.r * 0.07);
     }
     ctx.beginPath();

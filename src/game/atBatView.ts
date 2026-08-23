@@ -4,7 +4,7 @@ import { readPitch, throwPitch } from '../core/pitching';
 import type { BattedBall } from '../core/types';
 import { IDEAL_UNDER, resolveSwing, sweetSpotRadius } from '../core/swing';
 import { foulChanceFor } from '../core/outcome';
-import { hasPerfectZone } from '../core/progression';
+import { hasBattingEye, hasPerfectZone } from '../core/progression';
 import { launchBall, predictLanding } from '../core/ballFlight';
 import { drawBaseball } from './baseball';
 import { isFair } from '../core/fieldGeometry';
@@ -156,6 +156,8 @@ export class AtBatView {
   private frozenBall: BallState | null = null;
   private afterFreeze: (() => void) | null = null;
   private readonly perfectZoneUnlocked: boolean;
+  /** Vision high enough that the ring and glow tell strike from ball. */
+  private readonly battingEye: boolean;
   private readonly weather: Weather;
   private readonly air: AirConditions;
   /** Seconds the weather has been animating; only advances while unpaused. */
@@ -167,6 +169,7 @@ export class AtBatView {
     this.root.classList.add('atbat');
     this.root.innerHTML = '';
     this.perfectZoneUnlocked = hasPerfectZone(opts.player.attributes);
+    this.battingEye = hasBattingEye(opts.player.attributes);
     this.weather = opts.weather ?? CALM;
     this.air = airFor(this.weather);
 
@@ -1169,10 +1172,12 @@ export class AtBatView {
    * Gold halo behind the ball while it's over the plate — the "swing now"
    * signal. Under the ball, so the seams stay crisp on top of the light.
    * Strikes only: a ball off the plate never earns the swing colour, which
-   * is what makes the two readable as different pitches at a glance.
+   * is what makes the two readable as different pitches at a glance. Needs
+   * the batting eye (see `hasBattingEye`): until Vision is there, nothing
+   * glows and the zone is yours to judge.
    */
   private drawPrimeGlow(ctx: CanvasRenderingContext2D, ball: BallState, t: number): void {
-    if (!this.pitch.isStrike) return;
+    if (!this.battingEye || !this.pitch.isStrike) return;
     const p = this.primePresence(t);
     if (p <= 0) return;
     // A quick breathe — alive at a glance without strobing.
@@ -1195,6 +1200,11 @@ export class AtBatView {
    * everywhere. On a ball the ring never locks: it washes out just before
    * the plate, and the missing lock is the "lay off" read. Once the window
    * has passed the ring is simply gone: the chance went with it.
+   *
+   * All of that ball-versus-strike reading is the batting eye, earned with
+   * Vision. Without it the ring still converges and locks — white, on every
+   * pitch — so the tap timing is there to learn, but it says nothing about
+   * whether the pitch is worth swinging at.
    */
   private drawTimingRing(
     ctx: CanvasRenderingContext2D,
@@ -1213,15 +1223,19 @@ export class AtBatView {
     // perspective curve, so ring and ball arrive at the plate together.
     const gap = Math.pow(1 - conv, 1.35) * L.W * 0.34;
     const r = ball.r * 1.16 + gap;
-    const locked = this.pitch.isStrike ? this.primePresence(t) : 0;
+    const reads = this.battingEye ? this.pitch.isStrike : true;
+    const locked = reads ? this.primePresence(t) : 0;
     // On a ball the ring dissolves as it reaches the plate instead of
     // locking — by the time a strike would be glowing gold, there's nothing.
-    const wash = this.pitch.isStrike ? 1 : 1 - clamp((t - PRIME_START) / 0.07, 0, 1);
+    const wash = reads ? 1 : 1 - clamp((t - PRIME_START) / 0.07, 0, 1);
     if (wash <= 0) return;
 
     ctx.save();
-    if (locked > 0) {
+    if (locked > 0 && this.battingEye) {
       ctx.strokeStyle = `rgba(255,209,102,${0.5 + locked * 0.45})`;
+      ctx.lineWidth = Math.max(2, ball.r * 0.09);
+    } else if (locked > 0) {
+      ctx.strokeStyle = `rgba(255,255,255,${0.45 + locked * 0.4})`;
       ctx.lineWidth = Math.max(2, ball.r * 0.09);
     } else {
       ctx.strokeStyle = `rgba(255,255,255,${0.35 * fadeIn * wash})`;

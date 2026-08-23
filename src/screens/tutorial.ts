@@ -6,6 +6,7 @@ import type { PositionId } from '../core/fieldGeometry';
 import type { Rng } from '../core/rng';
 import { ARCHETYPES, createPlayer } from '../core/player';
 import { playerWithGear } from '../core/gear';
+import { BATTING_EYE_THRESHOLD } from '../core/progression';
 import { LEVELS } from '../core/league';
 import { TEAM_KITS } from '../core/uniforms';
 import { AtBatView } from '../game/atBatView';
@@ -128,8 +129,8 @@ const DRILLS: Drill[] = [
     title: 'Work the count',
     body:
       'Not every pitch deserves a swing. The dashed box is the strike zone — if the ball is landing ' +
-      '<b class="info">outside it, let it go</b>. A pitch off the plate never flashes gold: the ring just fades out — ' +
-      '<b class="info">no gold, no swing</b>. Four balls is a walk and a free base. ' +
+      '<b class="info">outside it, let it go</b>. Here in practice you’ve got a pro’s eye: a pitch off the plate never flashes gold, the ring just fades out — ' +
+      '<b class="info">no gold, no swing</b>. You earn that read for real at 65 Vision; before then the zone is your call. Four balls is a walk and a free base. ' +
       'The pitch name appears out of the hand (that’s your Vision at work), and the count lives beside the zone.',
     goal: 'Draw a walk',
     praise: 'Ball four — take your base. Walks are free offense, and laying off junk is what gets you good pitches to hit.',
@@ -343,6 +344,8 @@ function practiceProfile(app: App): PlayerProfile {
   for (const key of Object.keys(attributes) as (keyof typeof attributes)[]) {
     attributes[key] = Math.max(attributes[key], 45);
   }
+  // The eye drill teaches the gold read, so the practice batter has it.
+  attributes.vision = Math.max(attributes.vision, BATTING_EYE_THRESHOLD);
   return { ...base, attributes, stamina: 100 };
 }
 

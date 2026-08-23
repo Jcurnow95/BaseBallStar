@@ -52,6 +52,20 @@ export function upgradeAttribute(player: PlayerProfile, key: AttributeKey): bool
   return true;
 }
 
+/* ---------------------------------------------------------- batting eye */
+
+/**
+ * Vision needed before the game tells you ball from strike at the plate: the
+ * gold glow and the timing ring's gold lock on a pitch over the plate, and
+ * the ring washing out on one off it. Below this the ring still closes on
+ * every pitch — timing stays learnable — but it locks white on balls and
+ * strikes alike, so whether to swing is your read of the zone, not the aid's.
+ */
+export const BATTING_EYE_THRESHOLD = 65;
+
+export const hasBattingEye = (attributes: Attributes): boolean =>
+  clamp(attributes.vision, 1, 99) >= BATTING_EYE_THRESHOLD;
+
 /* ------------------------------------------------------ perfect hit zone */
 
 /**

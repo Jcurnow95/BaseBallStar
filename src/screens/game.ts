@@ -129,6 +129,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
           <button class="skip-btn" id="skipAtBat">MY AT-BAT »</button>
           <button class="skip-btn" id="skipInning">END INNING »</button>
         </div>
+        <button class="steal-btn" id="steal" style="display:none"></button>
       </div>
       <div id="host"></div>
       <button class="speed-toggle" id="speed">FAST ▸</button>
@@ -151,6 +152,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const host = q(mount, '#host');
   const feed = q(mount, '#feed');
   const speedBtn = q<HTMLButtonElement>(mount, '#speed');
+  const stealBtn = q<HTMLButtonElement>(mount, '#steal');
   const soundSfxBtn = q<HTMLButtonElement>(mount, '#soundSfx');
   const soundCrowdBtn = q<HTMLButtonElement>(mount, '#soundCrowd');
 
@@ -375,8 +377,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     addFeed(`${n} run${n === 1 ? '' : 's'} score.`, ours ? 'good' : 'bad', 'run');
   };
 
+  /** The steal window is one tick long; whatever happens next, the button goes. */
+  const hideSteal = (): void => {
+    stealBtn.style.display = 'none';
+  };
+
   const tick = (): void => {
     if (disposed) return;
+    hideSteal();
     const event = sim.step();
     update();
 
@@ -401,6 +409,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       case 'fielding':
         beginFielding(event);
         break;
+      case 'stealChance': {
+        // You're aboard with the next bag open. The button hangs there for one
+        // beat; ignore it and your teammate just hits.
+        stealBtn.textContent = `STEAL ${event.fromBase === 0 ? '2ND' : '3RD'} · ${Math.round(event.chance * 100)}%`;
+        stealBtn.style.display = '';
+        setIdle(
+          `You're on ${event.fromBase === 0 ? 'first' : 'second'} — got a jump in you?`,
+          sim.inningLabel,
+        );
+        schedule(tick, delay + 1400);
+        break;
+      }
       case 'gameOver':
         endGame();
         break;
@@ -414,6 +434,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
    */
   const skipTo = (target: 'atbat' | 'inning'): void => {
     if (disposed || paused || view) return;
+    hideSteal();
     clearTimeout(timer);
     pendingFn = null;
 
@@ -434,6 +455,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         case 'log':
           addFeed(event.text, event.tone);
           if (event.runs) addRunsFeed(event.runs.count, event.runs.ours);
+          break;
+        case 'stealChance':
+          // Skipping past the window declines the jump.
           break;
         case 'atBat':
           update();
@@ -728,6 +752,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   q(mount, '#skipAtBat').addEventListener('click', () => skipTo('atbat'));
   q(mount, '#skipInning').addEventListener('click', () => skipTo('inning'));
+
+  stealBtn.addEventListener('click', () => {
+    if (disposed || paused) return;
+    hideSteal();
+    const result = sim.attemptSteal();
+    if (!result) return;
+    if (result.success) playSound('cheerShort');
+    addFeed(result.text, result.tone);
+    setIdle(result.text, sim.inningLabel, result.tone);
+    update();
+    schedule(tick, delay + 350);
+  });
 
   const syncSoundBtns = (): void => {
     soundSfxBtn.textContent = isChannelMuted('sfx') ? '🔇' : '🔊';

@@ -1716,8 +1716,16 @@ table.standings tr.clinched td:first-child::after {
   cursor: pointer;
 }
 
+/* The crowd/music toggle sits directly under the effects toggle. */
+.sound-toggle.crowd {
+  top: 48px;
+}
+
+/* Grayscale as well as dimming — the 🎵 button keeps the same glyph either
+   way, so opacity alone is too subtle a difference. */
 .sound-toggle.off {
-  opacity: 0.55;
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 
 /* Top-left, mirroring the sound toggle, for the same reason: clear of the

@@ -35,13 +35,13 @@ import { esc, q } from '../ui/dom';
 import type { FeedIcon } from '../ui/feedIcons';
 import { feedIconFor, feedIconSvg } from '../ui/feedIcons';
 import {
-  isMuted,
+  isChannelMuted,
   playSound,
   resumeAmbience,
   startAmbience,
   stopAmbience,
   suspendAmbience,
-  toggleMuted,
+  toggleChannel,
 } from '../ui/audio';
 
 const NORMAL_DELAY = 850;
@@ -132,7 +132,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       </div>
       <div id="host"></div>
       <button class="speed-toggle" id="speed">FAST ▸</button>
-      <button class="sound-toggle" id="sound" aria-label="Toggle sound"></button>
+      <button class="sound-toggle" id="soundSfx" aria-label="Toggle effect sounds"></button>
+      <button class="sound-toggle crowd" id="soundCrowd" aria-label="Toggle crowd and music"></button>
       <button class="pause-toggle" id="pause" aria-label="Pause">❚❚</button>
       <div class="pause-overlay" id="paused">
         <div class="pause-card">
@@ -150,7 +151,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const host = q(mount, '#host');
   const feed = q(mount, '#feed');
   const speedBtn = q<HTMLButtonElement>(mount, '#speed');
-  const soundBtn = q<HTMLButtonElement>(mount, '#sound');
+  const soundSfxBtn = q<HTMLButtonElement>(mount, '#soundSfx');
+  const soundCrowdBtn = q<HTMLButtonElement>(mount, '#soundCrowd');
 
   /* ------------------------------------------------------------ rendering */
 
@@ -727,19 +729,26 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   q(mount, '#skipAtBat').addEventListener('click', () => skipTo('atbat'));
   q(mount, '#skipInning').addEventListener('click', () => skipTo('inning'));
 
-  const syncSoundBtn = (): void => {
-    soundBtn.textContent = isMuted() ? '🔇' : '🔊';
-    soundBtn.classList.toggle('off', isMuted());
+  const syncSoundBtns = (): void => {
+    soundSfxBtn.textContent = isChannelMuted('sfx') ? '🔇' : '🔊';
+    soundSfxBtn.classList.toggle('off', isChannelMuted('sfx'));
+    soundCrowdBtn.textContent = '🎵';
+    soundCrowdBtn.classList.toggle('off', isChannelMuted('crowd'));
   };
 
-  soundBtn.addEventListener('click', () => {
-    toggleMuted();
-    syncSoundBtn();
+  soundSfxBtn.addEventListener('click', () => {
+    toggleChannel('sfx');
+    syncSoundBtns();
+  });
+
+  soundCrowdBtn.addEventListener('click', () => {
+    toggleChannel('crowd');
+    syncSoundBtns();
   });
 
   showIdle();
   update();
-  syncSoundBtn();
+  syncSoundBtns();
   if (playoffTag) addFeed(`Postseason baseball: ${playoffTag}.`, 'good');
   addFeed(`${myTeam.name} ${scheduled.home ? 'host' : 'visit'} the ${opponent.name}.`, 'neutral');
   startAmbience();

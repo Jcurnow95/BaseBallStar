@@ -20,7 +20,18 @@
 
 import { readKey, writeKey } from '../core/storage';
 
+/**
+ * Every sound belongs to one of two independently mutable channels:
+ *
+ * - `sfx`: the physical gameplay sounds — bat contact, whiffs, the mitt thump,
+ *   fielding catches. The feedback a player times their taps against.
+ * - `crowd`: everything atmospheric — the ambience bed, cheers, the home-run
+ *   roar, stings, claps, and the organ.
+ */
+export type AudioChannel = 'sfx' | 'crowd';
+
 interface Clip {
+  channel: AudioChannel;
   /** Base name in public/audio. An array means pick one at random per play. */
   file: string | readonly string[];
   /** Seconds into the file where the usable sound starts. */
@@ -59,6 +70,7 @@ const CLIPS: Record<SoundName, Clip> = {
   // Five takes of the same swing, picked at random and pitched slightly apart.
   // Strikeouts are the most-repeated sound in the game by a distance.
   whiff: {
+    channel: 'sfx',
     file: ['whiff-1', 'whiff-2', 'whiff-3', 'whiff-4', 'whiff-5'],
     offset: 0.04,
     duration: 0.2,
@@ -66,27 +78,27 @@ const CLIPS: Record<SoundName, Clip> = {
     vary: 0.08,
   },
   // The fourth hit in the file — the only one with real ring on it.
-  contactBarrel: { file: 'bat-hit-ping', offset: 1.26, duration: 0.75, gain: 1.45, vary: 0.04 },
-  contactSolid: { file: 'bat-tap', offset: 3.15, duration: 0.35, gain: 0.85, vary: 0.05 },
-  contactWeak: { file: 'bat-bonk', offset: 0.52, duration: 0.45, gain: 1.0, vary: 0.06 },
+  contactBarrel: { channel: 'sfx', file: 'bat-hit-ping', offset: 1.26, duration: 0.75, gain: 1.45, vary: 0.04 },
+  contactSolid: { channel: 'sfx', file: 'bat-tap', offset: 3.15, duration: 0.35, gain: 0.85, vary: 0.05 },
+  contactWeak: { channel: 'sfx', file: 'bat-bonk', offset: 0.52, duration: 0.45, gain: 1.0, vary: 0.06 },
   // A shorter, deader tick from the head of the same file as the barrel.
-  foul: { file: 'bat-hit-ping', offset: 0.35, duration: 0.3, gain: 1.9, vary: 0.07 },
+  foul: { channel: 'sfx', file: 'bat-hit-ping', offset: 0.35, duration: 0.3, gain: 1.9, vary: 0.07 },
   // Every taken pitch thumps into the catcher's glove.
-  mitt: { file: 'catch-basketball', offset: 19.62, duration: 0.28, gain: 0.75, vary: 0.06 },
-  catchMade: { file: 'catch-leather-thud', offset: 13.06, duration: 0.3, gain: 0.9, vary: 0.05 },
-  catchMissed: { file: 'catch-palming-football', offset: 0.35, duration: 0.35, gain: 2.4 },
+  mitt: { channel: 'sfx', file: 'catch-basketball', offset: 19.62, duration: 0.28, gain: 0.75, vary: 0.06 },
+  catchMade: { channel: 'sfx', file: 'catch-leather-thud', offset: 13.06, duration: 0.3, gain: 0.9, vary: 0.05 },
+  catchMissed: { channel: 'sfx', file: 'catch-palming-football', offset: 0.35, duration: 0.35, gain: 2.4 },
   // Starts *after* the crack at ~1.0s, so this is pure crowd eruption. The bat
   // already made its noise back at contact; replaying it here would double up.
-  homeRun: { file: 'homerun', offset: 1.8, duration: 5.5, gain: 0.75 },
-  rally: { file: 'sting-charge-short', offset: 0.13, duration: 2.6, gain: 0.9 },
-  fanfare: { file: 'sting-charge-long', offset: 0.1, duration: 3.8, gain: 0.8 },
+  homeRun: { channel: 'crowd', file: 'homerun', offset: 1.8, duration: 5.5, gain: 0.75 },
+  rally: { channel: 'crowd', file: 'sting-charge-short', offset: 0.13, duration: 2.6, gain: 0.9 },
+  fanfare: { channel: 'crowd', file: 'sting-charge-long', offset: 0.1, duration: 3.8, gain: 0.8 },
   // The cheer recordings all open with a slow two-second swell. A crowd that
   // takes two seconds to react reads as broken, so these start near the peak.
-  cheerBig: { file: 'cheer-strong', offset: 6.0, duration: 5.0, gain: 0.6 },
-  cheerShort: { file: 'cheer-strong-short', offset: 5.0, duration: 4.5, gain: 0.6 },
-  cheerSoft: { file: 'cheer-soft', offset: 8.0, duration: 4.0, gain: 0.65 },
-  clap: { file: 'clap-rhythmic', offset: 0.04, duration: 3.6, gain: 1.3 },
-  organ: { file: 'organ', offset: 0.04, duration: 12.2, gain: 1.1 },
+  cheerBig: { channel: 'crowd', file: 'cheer-strong', offset: 6.0, duration: 5.0, gain: 0.6 },
+  cheerShort: { channel: 'crowd', file: 'cheer-strong-short', offset: 5.0, duration: 4.5, gain: 0.6 },
+  cheerSoft: { channel: 'crowd', file: 'cheer-soft', offset: 8.0, duration: 4.0, gain: 0.65 },
+  clap: { channel: 'crowd', file: 'clap-rhythmic', offset: 0.04, duration: 3.6, gain: 1.3 },
+  organ: { channel: 'crowd', file: 'organ', offset: 0.04, duration: 12.2, gain: 1.1 },
 };
 
 /** Warmed in this order after the first tap: gameplay first, flourishes last. */
@@ -126,7 +138,7 @@ const audioUrl = (name: string): string => new URL(`audio/${name}.mp3`, document
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let unlocked = false;
-let muted = loadMuted();
+const mutedChannels = loadMuted();
 
 const buffers = new Map<string, AudioBuffer>();
 const loading = new Set<string>();
@@ -135,31 +147,34 @@ let ambience: HTMLAudioElement | null = null;
 let ambienceWanted = false;
 let ambienceFade = 0;
 
-function loadMuted(): boolean {
-  return readKey(STORAGE_KEY) === 'muted';
+function loadMuted(): Record<AudioChannel, boolean> {
+  const raw = readKey(STORAGE_KEY);
+  // 'muted'/'on' are from before the channels split, when one switch covered
+  // everything — carry the choice over to both.
+  if (raw === 'muted') return { sfx: true, crowd: true };
+  return {
+    sfx: raw?.includes('sfx:muted') ?? false,
+    crowd: raw?.includes('crowd:muted') ?? false,
+  };
 }
 
-function saveMuted(value: boolean): void {
-  writeKey(STORAGE_KEY, value ? 'muted' : 'on');
+function saveMuted(): void {
+  const state = (ch: AudioChannel): string => (mutedChannels[ch] ? 'muted' : 'on');
+  writeKey(STORAGE_KEY, `sfx:${state('sfx')},crowd:${state('crowd')}`);
 }
 
-export function isMuted(): boolean {
-  return muted;
+export function isChannelMuted(channel: AudioChannel): boolean {
+  return mutedChannels[channel];
 }
 
-export function setMuted(value: boolean): void {
-  muted = value;
-  saveMuted(value);
-  if (muted) {
-    fadeAmbienceOut();
-  } else if (ambienceWanted) {
-    startAmbience();
+export function toggleChannel(channel: AudioChannel): boolean {
+  mutedChannels[channel] = !mutedChannels[channel];
+  saveMuted();
+  if (channel === 'crowd') {
+    if (mutedChannels.crowd) fadeAmbienceOut();
+    else if (ambienceWanted) startAmbience();
   }
-}
-
-export function toggleMuted(): boolean {
-  setMuted(!muted);
-  return muted;
+  return mutedChannels[channel];
 }
 
 /**
@@ -222,10 +237,11 @@ async function load(file: string): Promise<AudioBuffer | null> {
 }
 
 export function playSound(name: SoundName): void {
-  if (muted || !ctx || !master) return;
-  if (ctx.state === 'suspended') void ctx.resume();
+  if (!ctx || !master) return;
 
   const clip = CLIPS[name];
+  if (mutedChannels[clip.channel]) return;
+  if (ctx.state === 'suspended') void ctx.resume();
   const file =
     typeof clip.file === 'string'
       ? clip.file
@@ -268,7 +284,7 @@ export function playSound(name: SoundName): void {
 
 export function startAmbience(): void {
   ambienceWanted = true;
-  if (muted) return;
+  if (mutedChannels.crowd) return;
 
   if (!ambience) {
     ambience = new Audio(audioUrl(AMBIENCE_FILE));

@@ -194,6 +194,14 @@ late**. You tap it. Where inside the ball you land decides everything:
 Don't swing and the umpire calls it: pitches outside the zone are balls, so taking a good
 at-bat and drawing a walk is a real option.
 
+**The batting eye.** A timing ring closes on the ball through every pitch and locks onto
+it as it reaches the plate — that's your tap moment. Once your Vision reaches **65** the
+ring also tells you ball from strike: on a pitch over the plate it locks gold and the ball
+glows gold; on one off the plate the gold never comes and the ring washes out — no gold, no
+swing. Below 65 the ring locks white on every pitch, so the timing is there to learn but
+whether it's a strike is your own read of the dashed zone. Progress is tracked in Player
+&amp; Development.
+
 After every swing the game freezes for a moment and draws your tap point (gold X) against
 the ideal contact point (green circle). That circle *is* your Contact attribute — it grows
 as you develop, and shrinks when you're worn down.
@@ -396,7 +404,7 @@ themselves, since those are what burn the day.
 | --- | --- |
 | Power | Raises your exit-velocity ceiling. This is what unlocks home runs. |
 | Contact | Widens the forgiveness circle around the ideal contact point. |
-| Vision | Reads pitch type out of the hand; keeps the strike-zone guide visible. |
+| Vision | Reads pitch type out of the hand; keeps the strike-zone guide visible. At 65, unlocks the batting eye (gold = strike). |
 | Speed | How fast you cover 90 feet. Beats out grounders, takes the extra base. |
 | Fielding | Widens your glove window on catch attempts. |
 | Arm | Throw velocity. Decides whether you can beat a runner to the bag. |
@@ -546,6 +554,7 @@ A playable vertical slice, not a finished game. What's real:
 - Six ballparks with distinct dimensions and wall heights, and balls that play off the wall
 - Solid outfield walls, and crowds that fill up as you climb the levels
 - Per-team home and away uniforms, so the two sides on the field are always distinct
+- Batting eye (ball/strike read at the plate) unlocked at 65 Vision
 - Perfect hit zone unlocked at 120 combined Contact and Vision
 - Nine-inning games with play-by-play, extra innings, standings, four-level promotion
 - Per-game pay off the contract you signed, and a gear store selling equipment that wears out

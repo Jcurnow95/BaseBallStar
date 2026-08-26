@@ -121,6 +121,15 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
       </div>
 
       ${
+        summary.newAchievements.length > 0
+          ? `<div class="notice">
+               Achievement${summary.newAchievements.length === 1 ? '' : 's'} unlocked:
+               <b>${summary.newAchievements.map((name) => esc(name)).join('</b>, <b>')}</b>.
+               Claim your points from the Achievements menu in the clubhouse.
+             </div>`
+          : ''
+      }
+      ${
         summary.levelsGained > 0
           ? `<div class="notice">You leveled up. Spend your points in Training &amp; Development before the next game.</div>`
           : ''

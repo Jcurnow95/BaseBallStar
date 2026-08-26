@@ -65,6 +65,23 @@ export const STEAL_STAMINA_COST = 2;
 export type StealJump = 'early' | 'great' | 'good' | 'late';
 
 
+/**
+ * How often a ball in play beats the simulated defense.
+ *
+ * Every ball in play that ISN'T hit at the player used to be an automatic out,
+ * while the ones hit at the player were handed to the live field — where about
+ * a fifth of them drop in. That made the player's own position the only hole
+ * in an otherwise flawless defense. Measured over a few hundred games it cost
+ * the club about two thirds of a run a night, which was enough on its own to
+ * turn a .545 side into a .467 one: the game was quietly punishing you for the
+ * one defensive job it gives you.
+ *
+ * Letting the simulated fielders miss at the same rate closes that hole, and
+ * fixes the thing that made these games 2-1 slogs — nine innings where every
+ * ball not hit at you was a guaranteed out.
+ */
+const BIP_HIT_CHANCE = 0.2;
+
 /** Only reachable if a save has a team with no roster at all. */
 const FILL_IN: RosterPlayer = { name: 'the utility man', age: 27, rating: 50, role: 'batter' };
 
@@ -77,6 +94,15 @@ function nextBatter(order: RosterPlayer[], index: number): RosterPlayer {
  * known, so the line may as well match it — every out reading "flies out to
  * center" is most of what a spectator sees over nine innings.
  */
+function describeHit(bb: BattedBall, bases: number): string {
+  const field = fieldFor(bb.spray, 'R');
+  if (bases >= 4) return `drives one out to ${field} — home run`;
+  if (bases === 2) return `doubles into the ${field}-field gap`;
+  if (bb.launchAngle < 8) return `sneaks a ground ball through the ${field} side`;
+  if (bb.launchAngle > 32) return `bloops one into shallow ${field}`;
+  return `lines a single to ${field}`;
+}
+
 function describeOut(bb: BattedBall): string {
   const field = fieldFor(bb.spray, 'R');
   if (bb.launchAngle < 8) return `grounds out to ${infielderFor(bb.spray, 'R')}`;
@@ -122,7 +148,15 @@ export class GameSim {
    */
   readonly teamErrors: GameScore = { us: 0, them: 0 };
 
-  /** Our starter. Cosmetic — the sim of their half never consults him. */
+  /**
+   * Our starter. He works their half the way their starter works ours: the
+   * strikeouts he gets and the contact he gives up both come off his rating.
+   *
+   * He used to be decorative — their half was pitched by `level.pitcherRating`,
+   * the league average, while our at-bats faced the opposition's real arm. So
+   * their good starter made our night harder and ours did nothing for us, and
+   * the club's whole pitching staff was a name on a screen.
+   */
   readonly ourPitcher: PitcherAI;
 
   /** The day's air, so "is this ball mine?" is judged on the same flight the field plays. */
@@ -429,7 +463,7 @@ export class GameSim {
     const name = batter.name;
     this.opponentLineupIndex++;
     const roll = this.rng.next();
-    const quality = this.level.pitcherRating / 100;
+    const quality = clamp(this.ourPitcher.rating, 10, 99) / 100;
     // Their better hitters strike out a touch less and hit a touch more.
     const skill = (batter.rating - 50) / 100;
 
@@ -463,8 +497,47 @@ export class GameSim {
       return event;
     }
 
+    if (this.ballInPlayFalls(battedBall.quality)) {
+      const bases = this.hitBasesFor(battedBall);
+      const runs = this.advanceOnHitOpponent(bases);
+      this.addRuns('them', runs);
+      this.teamHits.them++;
+      return this.log(`${name} ${describeHit(battedBall, bases)}.`, 'hit', runs, false);
+    }
+
     this.recordOut();
     return this.log(`${name} ${describeOut(battedBall)}.`, 'good');
+  }
+
+  /**
+   * Did a ball in play beat the defense behind the pitcher? Better contact
+   * falls in more often, and a better league turns more of it into outs. See
+   * `BIP_HIT_CHANCE` for why this is not simply "no".
+   */
+  private ballInPlayFalls(quality?: ContactQuality): boolean {
+    const defense = clamp(this.level.defenseRating, 10, 99) / 100;
+    const contact =
+      quality === 'barrel'
+        ? 1.7
+        : quality === 'solid'
+          ? 1.25
+          : quality === 'flare'
+            ? 0.9
+            : quality === 'weak'
+              ? 0.55
+              : // A simulated plate appearance has no batted ball behind it.
+                0.95;
+    return this.rng.chance(clamp(BIP_HIT_CHANCE * contact * (1.25 - defense * 0.5), 0.03, 0.6));
+  }
+
+  /** How far a ball that fell in goes. Most of them are singles. */
+  private hitBasesFor(bb?: BattedBall): number {
+    if (bb?.quality === 'barrel') {
+      if (this.rng.chance(0.14)) return 4;
+      return this.rng.chance(0.42) ? 2 : 1;
+    }
+    if (bb?.quality === 'solid') return this.rng.chance(0.26) ? 2 : 1;
+    return this.rng.chance(0.14) ? 2 : 1;
   }
 
   /** A plausible batted ball off an opposing hitter at this level. */
@@ -627,6 +700,26 @@ export class GameSim {
       const label = bases === 1 ? 'singles' : bases === 2 ? 'doubles' : 'homers';
       return this.log(`${name} ${label}.`, 'hit', runs, ours);
     }
+    // A ball in play the defense didn't get to. Symmetric with their half, so
+    // closing the hole at the player's position doesn't hand the opposition a
+    // scoring edge instead.
+    if (this.ballInPlayFalls()) {
+      const bases = this.hitBasesFor();
+      const runs = ours ? this.advanceOnHit(bases) : this.advanceOnHitOpponent(bases);
+      this.addRuns(ours ? 'us' : 'them', runs);
+      this.teamHits[ours ? 'us' : 'them']++;
+      const label =
+        bases === 2
+          ? this.rng.pick(['doubles down the line', 'doubles into the gap'])
+          : this.rng.pick([
+              'singles through the right side',
+              'lines a single to left',
+              'bloops one into center',
+              'beats out an infield single',
+            ]);
+      return this.log(`${name} ${label}.`, 'hit', runs, ours);
+    }
+
     this.recordOut();
     // No batted ball behind a simulated PA, so vary the line directly — half of
     // these otherwise read "grounds out" every time.

@@ -43,6 +43,8 @@ export interface AtBatOptions {
   batterKit: Uniform;
   /** The day's weather. Drawn, and used to judge whether contact stays fair. */
   weather?: Weather;
+  /** Home Run Derby grooving: every pitch a fastball over the heart. */
+  groove?: boolean;
   onCount(count: Count): void;
   /** A fair ball was put in play — the play itself resolves on the field. */
   onBallInPlay(battedBall: BattedBall): void;
@@ -205,7 +207,9 @@ export class AtBatView {
   /* ------------------------------------------------------------ sequencing */
 
   private nextPitch(): void {
-    this.pitch = throwPitch(this.opts.pitcher, this.count, this.opts.rng);
+    this.pitch = throwPitch(this.opts.pitcher, this.count, this.opts.rng, {
+      groove: this.opts.groove,
+    });
     this.pitchLabel = readPitch(this.pitch, this.opts.player.attributes.vision, this.opts.rng);
     this.swung = false;
     this.tapPoint = null;

@@ -134,6 +134,7 @@ export function createPlayer(
     level: 1,
     xp: 0,
     attributePoints: 3,
+    achievements: [],
     season: emptyBattingStats(),
     career: emptyBattingStats(),
     fielding: { chances: 0, putouts: 0, errors: 0 },

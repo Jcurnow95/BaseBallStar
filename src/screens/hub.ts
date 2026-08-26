@@ -389,7 +389,10 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div><b>${player.career.homeRuns}</b><span>HR</span></div>
           <div><b>${player.career.rbi}</b><span>RBI</span></div>
         </div>
-        <button class="btn ghost tiny" id="reset" style="margin-top:14px">Retire &amp; start over</button>
+        <div class="btn-row" style="margin-top:14px">
+          <button class="btn ghost tiny" id="mainmenu">Switch Player</button>
+          <button class="btn ghost tiny" id="reset">Retire &amp; start over</button>
+        </div>
       </div>
     </div>
   `;
@@ -409,6 +412,10 @@ export function renderHub(app: App, mount: HTMLElement): void {
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));
 
   if (devEnabled) q(mount, '#devmenu').addEventListener('click', () => app.go('dev'));
+
+  // Everything is already persisted as it happens; switching characters is
+  // just a walk back to the title screen.
+  q(mount, '#mainmenu').addEventListener('click', () => app.go('title'));
 
   q(mount, '#reset').addEventListener('click', async () => {
     const ok = await showDialog({

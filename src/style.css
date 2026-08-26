@@ -847,6 +847,14 @@ table.standings tr.me td {
   vertical-align: middle;
 }
 
+/* Full-standings screen: a level's name and its tag share the heading line. */
+.standings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 table.standings tr.cut td {
   border-bottom: 1px dashed var(--gold);
 }

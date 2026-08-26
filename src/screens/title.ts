@@ -38,8 +38,9 @@ export function renderTitle(app: App, mount: HTMLElement): void {
         <h2>Attributes matter</h2>
         <p class="tiny muted" style="margin:0">
           Contact widens your margin for error on the ball. Power turns good contact into extra bases.
-          Vision reads the pitch out of the hand. Stamina keeps the sweet spot from shrinking over a
-          long season — train it or pay for it in September.
+          Vision reads the pitch out of the hand. Speed steals bases — when the legs are fresh.
+          Stamina keeps the sweet spot from shrinking over a long season — train it or pay for it
+          in September.
         </p>
       </div>
     </div>

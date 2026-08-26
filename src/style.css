@@ -1551,6 +1551,63 @@ table.standings tr.clinched td:first-child::after {
   width: auto;
 }
 
+/* The steal window: bottom-right opposite the skips, gold and pulsing because
+   it's live for one beat and gone. The odds ride on the label. */
+.steal-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  background: linear-gradient(180deg, #ffd166, #eda92c);
+  border: none;
+  color: #2a1d00;
+  border-radius: 99px;
+  padding: 9px 16px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  width: auto;
+  box-shadow: 0 4px 16px rgba(255, 209, 102, 0.4);
+  animation: steal-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes steal-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+/* The jump read. Set: the pitcher is holding — the button goes cold and
+   still, because tapping now is a pickoff. Go: his first move — everything
+   turns green and loud for the beat you have to react in. */
+.steal-btn.set {
+  background: linear-gradient(180deg, #93a5bb, #5d7089);
+  color: #0e1622;
+  animation: none;
+  box-shadow: none;
+}
+
+.steal-btn.go {
+  background: linear-gradient(180deg, #7bf59b, #23c552);
+  color: #04240e;
+  box-shadow: 0 4px 20px rgba(46, 220, 100, 0.55);
+  animation: steal-go 0.4s ease-in-out infinite;
+}
+
+@keyframes steal-go {
+  0%,
+  100% {
+    transform: scale(1.05);
+  }
+  50% {
+    transform: scale(1.18);
+  }
+}
+
 /* Each result punches in rather than swapping silently. */
 .idle-stage .big.punch {
   animation: punch-in 0.3s ease;
@@ -1716,8 +1773,16 @@ table.standings tr.clinched td:first-child::after {
   cursor: pointer;
 }
 
+/* The crowd/music toggle sits directly under the effects toggle. */
+.sound-toggle.crowd {
+  top: 48px;
+}
+
+/* Grayscale as well as dimming — the 🎵 button keeps the same glyph either
+   way, so opacity alone is too subtle a difference. */
 .sound-toggle.off {
-  opacity: 0.55;
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 
 /* Top-left, mirroring the sound toggle, for the same reason: clear of the

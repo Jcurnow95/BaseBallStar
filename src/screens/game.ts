@@ -1,5 +1,5 @@
 import type { App, PostGameSummary } from '../app';
-import type { LogTone, SimEvent } from '../core/gameSim';
+import type { LogTone, SimEvent, StealJump } from '../core/gameSim';
 import { GameSim } from '../core/gameSim';
 import type { Count } from '../core/pitching';
 import {
@@ -320,6 +320,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   let pendingAt = 0;
   let pendingLeft = 0;
   let paused = false;
+  let pausedAt = 0;
 
   const schedule = (fn: () => void, ms = delay): void => {
     if (disposed) return;
@@ -354,10 +355,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       clearTimeout(timer);
       // Freeze what's left on the clock; wall time keeps going while paused.
       pendingLeft = Math.max(0, pendingAt - performance.now());
+      pausedAt = performance.now();
       suspendAmbience();
       q(mount, '#pauseSub').textContent = `${sim.inningLabel} · ${sim.outs} out`;
     } else {
       resumeAmbience();
+      // A pause during the GO! window shouldn't count against the jump.
+      if (stealPhase === 'go') goAt += performance.now() - pausedAt;
       if (pendingFn) schedule(pendingFn, pendingLeft);
     }
   };
@@ -380,7 +384,72 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   /** The steal window is one tick long; whatever happens next, the button goes. */
   const hideSteal = (): void => {
     stealBtn.style.display = 'none';
+    stealBtn.classList.remove('set', 'go');
+    stealPhase = 'idle';
   };
+
+  /* ------------------------------------------------------- the steal jump */
+
+  // Pressing STEAL doesn't roll the dice — it starts a read. The pitcher
+  // comes set (WAIT FOR IT…), holds a random beat, then moves (GO!). Your
+  // tap against that cue is the jump: before it and you're picked off, on
+  // it and the posted odds get a bonus, after it and they shrink, never and
+  // you dive back in. Both beats run on the single-slot game clock, so the
+  // pause button freezes the pitcher too.
+  let stealPhase: 'idle' | 'set' | 'go' = 'idle';
+  let goAt = 0;
+
+  function beginStealJump(): void {
+    clearTimeout(timer);
+    pendingFn = null;
+    stealPhase = 'set';
+    stealBtn.textContent = 'WAIT FOR IT…';
+    stealBtn.classList.add('set');
+    setIdle('The pitcher comes set. Go on his first move — break too soon and he has you.', sim.inningLabel);
+    schedule(fireGo, 700 + app.rng.next() * 1100);
+  }
+
+  function fireGo(): void {
+    stealPhase = 'go';
+    goAt = performance.now();
+    stealBtn.textContent = 'GO!';
+    stealBtn.classList.remove('set');
+    stealBtn.classList.add('go');
+    // Freeze past this and you never went: the bail path fires.
+    schedule(missStealJump, 900);
+  }
+
+  function resolveStealTap(): void {
+    if (stealPhase === 'set') {
+      finishSteal('early');
+      return;
+    }
+    const reaction = performance.now() - goAt;
+    const windows = sim.stealJumpWindows();
+    finishSteal(reaction <= windows.great ? 'great' : reaction <= windows.good ? 'good' : 'late');
+  }
+
+  function finishSteal(jump: StealJump): void {
+    hideSteal();
+    const result = sim.attemptSteal(jump);
+    if (!result) return;
+    if (result.success) playSound('cheerShort');
+    addFeed(result.text, result.tone);
+    setIdle(result.text, sim.inningLabel, result.tone);
+    update();
+    schedule(tick, delay + 350);
+  }
+
+  function missStealJump(): void {
+    hideSteal();
+    const result = sim.bailSteal();
+    if (result) {
+      addFeed(result.text, result.tone);
+      setIdle(result.text, sim.inningLabel);
+    }
+    update();
+    schedule(tick, delay + 350);
+  }
 
   const tick = (): void => {
     if (disposed) return;
@@ -415,7 +484,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         stealBtn.textContent = `STEAL ${event.fromBase === 0 ? '2ND' : '3RD'} · ${Math.round(event.chance * 100)}%`;
         stealBtn.style.display = '';
         setIdle(
-          `You're on ${event.fromBase === 0 ? 'first' : 'second'} — got a jump in you?`,
+          `You're on ${event.fromBase === 0 ? 'first' : 'second'} — hit STEAL to read the pitcher.`,
           sim.inningLabel,
         );
         schedule(tick, delay + 1400);
@@ -433,7 +502,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
    * still gets every line, so nothing is lost — just the waiting.
    */
   const skipTo = (target: 'atbat' | 'inning'): void => {
-    if (disposed || paused || view) return;
+    if (disposed || paused || view || stealPhase !== 'idle') return;
     hideSteal();
     clearTimeout(timer);
     pendingFn = null;
@@ -755,14 +824,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   stealBtn.addEventListener('click', () => {
     if (disposed || paused) return;
-    hideSteal();
-    const result = sim.attemptSteal();
-    if (!result) return;
-    if (result.success) playSound('cheerShort');
-    addFeed(result.text, result.tone);
-    setIdle(result.text, sim.inningLabel, result.tone);
-    update();
-    schedule(tick, delay + 350);
+    if (stealPhase === 'idle') beginStealJump();
+    else resolveStealTap();
   });
 
   const syncSoundBtns = (): void => {

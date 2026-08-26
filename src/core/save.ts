@@ -1,5 +1,6 @@
 import type { PlayerProfile } from './types';
 import type { LeagueState } from './league';
+import type { LevelTable } from './otherLeagues';
 import { readKey, removeKey, writeKey } from './storage';
 
 const STORAGE_KEY = 'baseball-star:save:v1';
@@ -12,6 +13,12 @@ export interface SaveData {
   player: PlayerProfile;
   league: LeagueState;
   seasonYear: number;
+  /**
+   * Standings for the levels the player isn't at, kept in step with the
+   * player's season by `syncOtherLevels`. Optional so pre-feature saves still
+   * load; a missing one is built the first time the standings screen asks.
+   */
+  otherLevels?: LevelTable[];
 }
 
 export function loadSave(): SaveData | null {

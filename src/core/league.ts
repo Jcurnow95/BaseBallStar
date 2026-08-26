@@ -484,8 +484,34 @@ export function simulateOtherTeams(
   }
 }
 
+/**
+ * Six fresh club names for a league the player isn't in. Cities and nicknames
+ * are unique within the six, and no full name repeats one in `taken` — so two
+ * levels of the ladder never both field a Riverside Rapids.
+ */
+export function generateLeagueNames(rng: Rng, taken: ReadonlySet<string>): string[] {
+  const cities = [...CITY_NAMES];
+  const nicks = [...TEAM_NICKS];
+  const names: string[] = [];
+
+  for (let i = 0; i < 6; i++) {
+    const city = cities.splice(rng.int(0, cities.length - 1), 1)[0];
+    let pickAt = rng.int(0, nicks.length - 1);
+    for (let tries = 0; tries < nicks.length; tries++) {
+      const at = (pickAt + tries) % nicks.length;
+      if (!taken.has(`${city} ${nicks[at]}`)) {
+        pickAt = at;
+        break;
+      }
+    }
+    names.push(`${city} ${nicks.splice(pickAt, 1)[0]}`);
+  }
+
+  return names;
+}
+
 /** Chance `a` beats `b`, damped so even the worst club wins its share. */
-export function winChance(a: Team, b: Team): number {
+export function winChance(a: { strength?: number }, b: { strength?: number }): number {
   const edge = ((a.strength ?? 50) - (b.strength ?? 50)) / 100;
   return clamp(0.5 + edge * 0.62, 0.24, 0.76);
 }

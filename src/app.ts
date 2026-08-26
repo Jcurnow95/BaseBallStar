@@ -14,6 +14,7 @@ export type Route =
   | 'game'
   | 'postgame'
   | 'seasonEnd'
+  | 'standings'
   | 'store'
   | 'howto'
   | 'tutorial'

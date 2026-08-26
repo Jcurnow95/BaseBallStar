@@ -3,8 +3,11 @@ import {
   ATTRIBUTE_BLURBS,
   ATTRIBUTE_KEYS,
   ATTRIBUTE_LABELS,
+  POSITIONS,
+  POSITION_LABELS,
   overallRating,
 } from '../core/player';
+import type { Position } from '../core/types';
 import {
   TRAINING_OPTIONS,
   applyTraining,
@@ -111,6 +114,23 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
           </p>
         </div>
 
+        <div class="panel">
+          <h2>Position</h2>
+          <p class="tiny muted" style="margin:0 0 8px">
+            Where you play decides which balls are yours to chase in the field.
+            Switch whenever you like — it takes effect from your next game.
+          </p>
+          <div class="chip-row">
+            ${POSITIONS.map(
+              (pos) =>
+                `<button class="chip ${pos === player.position ? 'on' : ''}" data-pos="${pos}">${pos}</button>`,
+            ).join('')}
+          </div>
+          <p class="tiny muted" style="margin:8px 0 0">
+            Now playing: <b style="color:var(--text)">${POSITION_LABELS[player.position]}</b>
+          </p>
+        </div>
+
         ${
           offDay
             ? `<div class="panel">
@@ -207,6 +227,26 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
             confirmLabel: 'Let me at it',
           });
         }
+      });
+    }
+
+    for (const chip of qa<HTMLButtonElement>(mount, '[data-pos]')) {
+      chip.addEventListener('click', async () => {
+        const pos = chip.dataset.pos as Position;
+        if (pos === player.position) return;
+        const ok = await showDialog({
+          title: `Move to ${POSITION_LABELS[pos]}?`,
+          body:
+            `You'll take the field at ${POSITION_LABELS[pos].toLowerCase()} instead of ` +
+            `${POSITION_LABELS[player.position].toLowerCase()}, starting with your next game. ` +
+            'You can switch back any time.',
+          confirmLabel: 'Make the move',
+          cancelLabel: 'Stay put',
+        });
+        if (!ok) return;
+        player.position = pos;
+        app.persist();
+        draw();
       });
     }
 

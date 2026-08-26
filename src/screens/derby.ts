@@ -6,10 +6,8 @@ import { BATTING_EYE_THRESHOLD, PERFECT_ZONE_THRESHOLD } from '../core/progressi
 import { LEVELS, teamKit } from '../core/league';
 import { TEAM_KITS, uniformFor } from '../core/uniforms';
 import { AtBatView } from '../game/atBatView';
-import { launchBall, stepBall } from '../core/ballFlight';
-import { BALLPARKS, fenceAt, wallHeightAt } from '../core/ballpark';
-import { isFair, magnitude } from '../core/fieldGeometry';
-import type { AirConditions } from '../core/weather';
+import { DerbyFlightView } from '../game/derbyFlight';
+import { BALLPARKS } from '../core/ballpark';
 import { CALM, airFor } from '../core/weather';
 import { readKey, writeKey } from '../core/storage';
 import { playSound, startAmbience, stopAmbience } from '../ui/audio';
@@ -95,34 +93,6 @@ function derbyProfile(app: App): PlayerProfile {
   attributes.vision = Math.max(attributes.vision, BATTING_EYE_THRESHOLD);
   attributes.contact = Math.max(attributes.contact, PERFECT_ZONE_THRESHOLD - attributes.vision);
   return { ...base, attributes, stamina: 100 };
-}
-
-/* -------------------------------------------------------------- physics */
-
-/**
- * Fly the ball off the bat and see if it clears The Bandbox's wall on the
- * way out. Same integration as the field sim's boundary check, minus the
- * fielders — nobody plays defense at a derby.
- */
-function judgeContact(bb: BattedBall, air: AirConditions): { homeRun: boolean; distance: number } {
-  const ball = launchBall(bb.exitVelocity, bb.launchAngle, bb.spray, 1, bb.sideSpin ?? 0, air);
-  const dt = 1 / 120;
-  let time = 0;
-  let homeRun = false;
-  while (!ball.bounced && !ball.atRest && time < 12) {
-    stepBall(ball, dt);
-    time += dt;
-    const spot = { x: ball.x, y: ball.y };
-    if (
-      !homeRun &&
-      isFair(spot) &&
-      magnitude(spot) > fenceAt(PARK, spot) &&
-      ball.z > wallHeightAt(PARK, spot)
-    ) {
-      homeRun = true;
-    }
-  }
-  return { homeRun, distance: Math.round(Math.hypot(ball.x, ball.y)) };
 }
 
 /* --------------------------------------------------------------- screen */
@@ -227,6 +197,7 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
     const note = q(mount, '#note');
 
     let view: AtBatView | null = null;
+    let flight: DerbyFlightView | null = null;
     let noteTimer = 0;
     let soundTimer = 0;
     let finished = false;
@@ -251,6 +222,8 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
     const destroyView = (): void => {
       view?.destroy();
       view = null;
+      flight?.destroy();
+      flight = null;
     };
 
     teardownRun = (): void => {
@@ -311,25 +284,38 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
       });
     };
 
+    // The swing hands off to the flight view: the same physics the field sim
+    // runs, drawn as it happens, and the on-screen ruling is the ruling.
     const scoreBall = (bb: BattedBall): void => {
       swings++;
-      const { homeRun, distance } = judgeContact(bb, air);
-      if (homeRun) {
-        homers++;
-        longest = Math.max(longest, distance);
-        playSound('homeRun');
-        clearTimeout(soundTimer);
-        soundTimer = window.setTimeout(() => playSound('fanfare'), 1400);
-        showNote(`GONE! ${distance} ft.`);
-      } else {
-        misses++;
-        showNote(
-          distance >= 300
-            ? `Died at the track — ${distance} ft. So close.`
-            : `In play, ${distance} ft. Doesn't count tonight.`,
-        );
-      }
-      nextBall();
+      flight = new DerbyFlightView(host, {
+        battedBall: bb,
+        park: PARK,
+        air,
+        onHomeRun: () => {
+          playSound('homeRun');
+          clearTimeout(soundTimer);
+          soundTimer = window.setTimeout(() => playSound('fanfare'), 1400);
+        },
+        onDone: ({ homeRun, distance }) => {
+          flight?.destroy();
+          flight = null;
+          if (finished) return;
+          if (homeRun) {
+            homers++;
+            longest = Math.max(longest, distance);
+            showNote(`GONE! ${distance} ft.`);
+          } else {
+            misses++;
+            showNote(
+              distance >= 300
+                ? `Died at the track — ${distance} ft. So close.`
+                : `In play, ${distance} ft. Doesn't count tonight.`,
+            );
+          }
+          nextBall();
+        },
+      });
     };
 
     q(mount, '#derbyEnd').addEventListener('click', () => {

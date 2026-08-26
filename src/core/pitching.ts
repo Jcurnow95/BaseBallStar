@@ -87,21 +87,28 @@ function releasePoint(plateX: number, plateY: number, def: PitchDefinition) {
   };
 }
 
-export function throwPitch(pitcher: PitcherAI, count: Count, rng: Rng): Pitch {
+export function throwPitch(
+  pitcher: PitcherAI,
+  count: Count,
+  rng: Rng,
+  opts?: { groove?: boolean },
+): Pitch {
   const skill = pitcher.rating / 100;
+  const groove = opts?.groove ?? false;
 
   // Better pitchers throw more secondary stuff; low-level arms live on the fastball.
   const secondaryChance = 0.28 + skill * 0.34;
-  const type: PitchType = rng.chance(secondaryChance)
-    ? rng.pick(ALL_TYPES.filter((t) => t !== 'fastball'))
-    : 'fastball';
+  const type: PitchType =
+    !groove && rng.chance(secondaryChance)
+      ? rng.pick(ALL_TYPES.filter((t) => t !== 'fastball'))
+      : 'fastball';
   const def = PITCHES[type];
 
   // Ahead in the count, expand the zone and try to get the hitter to chase.
   // Behind, they have to come back over the plate.
   const ahead = count.strikes - count.balls;
   const chaseChance = clamp(0.22 + ahead * 0.13 + skill * 0.14, 0.04, 0.62);
-  const wantsChase = rng.chance(chaseChance) && count.strikes < 3;
+  const wantsChase = !groove && rng.chance(chaseChance) && count.strikes < 3;
 
   // Command: high-rated pitchers miss their spot less. The gap between a
   // Single-A arm and a big-league one is mostly here — a bad pitcher should be
@@ -112,7 +119,13 @@ export function throwPitch(pitcher: PitcherAI, count: Count, rng: Rng): Pitch {
   let plateX: number;
   let plateY: number;
 
-  if (wantsChase) {
+  if (groove) {
+    // Derby grooving: a fastball over the heart of the plate, every time. The
+    // scatter keeps taps from becoming muscle memory but never leaves the
+    // middle third, so every pitch is one you can hit out.
+    plateX = rng.range(-0.4, 0.4);
+    plateY = rng.range(-0.35, 0.35);
+  } else if (wantsChase) {
     // Aim just off a corner.
     const side = rng.chance(0.5) ? -1 : 1;
     if (rng.chance(0.55)) {

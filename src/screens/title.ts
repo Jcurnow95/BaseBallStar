@@ -1,6 +1,7 @@
 import type { App } from '../app';
 import { q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
+import { openDerby } from './derby';
 import { openHowto } from './howto';
 import { openTutorial } from './tutorial';
 
@@ -47,6 +48,7 @@ export function renderTitle(app: App, mount: HTMLElement): void {
 
     <button class="btn primary" id="new">${hasSave ? 'New Career' : 'Start Your Career'}</button>
     ${hasSave ? '<button class="btn ghost" id="continue">Continue Career</button>' : ''}
+    <button class="btn ghost" id="derby">Home Run Derby</button>
   `;
 
   q(mount, '#new').addEventListener('click', async () => {
@@ -69,4 +71,5 @@ export function renderTitle(app: App, mount: HTMLElement): void {
 
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'title'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'title'));
+  q(mount, '#derby').addEventListener('click', () => openDerby(app, 'title'));
 }

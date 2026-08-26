@@ -18,6 +18,7 @@ export type Route =
   | 'store'
   | 'howto'
   | 'tutorial'
+  | 'derby'
   | 'dev';
 
 export interface PostGameSummary {

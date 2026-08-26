@@ -309,6 +309,35 @@ select {
   letter-spacing: 0.04em;
 }
 
+/* ---------------------------------------------------- title: player slots */
+
+.slot-card {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.slot-card + .slot-card {
+  margin-top: 8px;
+}
+
+.slot-card.empty .who strong {
+  color: var(--muted);
+}
+
+.slot-card.empty .who span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* An open spot's badge is an outline, not a position. */
+.badge.open {
+  background: none;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
+
 /* --------------------------------------------------------------- hub bits */
 
 .hub-head {

@@ -8,6 +8,14 @@ const STORAGE_KEY = 'baseball-star:save:v1';
 // ballparks. Older saves have no calendar to run on, so they're discarded.
 const SAVE_VERSION = 2;
 
+/** Three careers live side by side, picked from the title screen. */
+export const SLOT_COUNT = 3;
+
+// Slot 0 keeps the original single-save key, so a career from before slots
+// existed shows up as the first character without any migration step.
+const slotKey = (slot: number): string =>
+  slot === 0 ? STORAGE_KEY : `${STORAGE_KEY}:slot${slot}`;
+
 export interface SaveData {
   version: number;
   player: PlayerProfile;
@@ -21,12 +29,21 @@ export interface SaveData {
   otherLevels?: LevelTable[];
 }
 
-export function loadSave(): SaveData | null {
+export function loadSave(slot: number): SaveData | null {
+  const raw = readKey(slotKey(slot));
+  return raw ? parseSave(raw) : null;
+}
+
+/**
+ * Parse and validate a serialised save — from storage or from a file another
+ * device exported. Anything that isn't a save this version can run returns
+ * null rather than throwing.
+ */
+export function parseSave(raw: string): SaveData | null {
   try {
-    const raw = readKey(STORAGE_KEY);
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as SaveData;
     if (parsed.version !== SAVE_VERSION) return null;
+    if (!parsed.player || !parsed.league) return null;
     normalise(parsed);
     return parsed;
   } catch {
@@ -46,14 +63,19 @@ function normalise(save: SaveData): void {
   if (!player.gear) player.gear = {};
 }
 
-export function writeSave(data: Omit<SaveData, 'version'>): void {
+export function writeSave(slot: number, data: Omit<SaveData, 'version'>): void {
   // Failures are swallowed inside the storage layer; storage can be
   // unavailable in private modes and the demo still plays fine.
-  writeKey(STORAGE_KEY, JSON.stringify({ ...data, version: SAVE_VERSION }));
+  writeKey(slotKey(slot), serialiseSave(data));
 }
 
-export function clearSave(): void {
-  removeKey(STORAGE_KEY);
+/** The exact bytes a save occupies — what export writes and import reads. */
+export function serialiseSave(data: Omit<SaveData, 'version'>): string {
+  return JSON.stringify({ ...data, version: SAVE_VERSION });
+}
+
+export function clearSave(slot: number): void {
+  removeKey(slotKey(slot));
 }
 
 export function newSave(player: PlayerProfile, league: LeagueState): SaveData {

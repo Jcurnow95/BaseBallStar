@@ -1537,7 +1537,7 @@ table.standings tr.clinched td:first-child::after {
 }
 
 /* Skip controls: the sim exists to be fast-forwarded. Bottom-left, mirroring
-   the speed toggle on the right, so the whole control row reads together. */
+   the steal button on the right, so the whole control row reads together. */
 .sim-skips {
   position: absolute;
   left: 8px;
@@ -1744,11 +1744,14 @@ table.standings tr.clinched td:first-child::after {
   }
 }
 
+/* Top-left beside the pause button, clear of the steal button that owns the
+   bottom-right corner during the sim. */
 .speed-toggle {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
+  left: 50px;
+  top: 8px;
   z-index: 5;
+  height: 34px;
   background: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.18);
   color: #fff;

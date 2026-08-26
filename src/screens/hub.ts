@@ -359,6 +359,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
         <div class="tiny muted" style="margin-top:8px">
           Squares are club colours${playoffs ? '' : ` · Top ${PLAYOFF_TEAMS} make the playoffs · x = clinched`}
         </div>
+        <button class="link-btn" id="allStandings">Standings Around the Leagues</button>
       </div>
 
       <div class="panel">
@@ -402,6 +403,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   }
 
   q(mount, '#train').addEventListener('click', () => app.go('training'));
+  q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));

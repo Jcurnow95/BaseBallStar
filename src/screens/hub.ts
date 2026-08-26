@@ -4,7 +4,10 @@ import {
   SEASON_GAMES,
   ensureRosters,
   isRegularSeasonOver,
+  FORCED_RETIREMENT_AGE,
+  RETIREMENT_WATCH_AGE,
   isSeasonOver,
+  nearingRetirement,
   nextGame,
   parkForGame,
   playerTeam,
@@ -35,6 +38,7 @@ import {
   ATTRIBUTE_LABELS,
   ATTRIBUTE_KEYS,
   battingAverage,
+  careerPhase,
   onBasePct,
   overallRating,
   slugging,
@@ -89,6 +93,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const series = playerSeries(league);
   const ovr = overallRating(player.attributes);
   const homePark = ballparkById(team.parkId);
+  // Teammates on the way out, so the clubhouse table warns you before names
+  // start disappearing over the winter.
+  const vets = (team.roster ?? []).filter(nearingRetirement).length;
 
   // What kind of day a calendar slot is, for the week strip and season strip.
   const dayKind = (index: number): 'game' | 'off' | 'playoff' | 'end' => {
@@ -261,6 +268,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
             <div class="id-chips">
               <span class="id-chip">${esc(level.name)}</span>
               <span class="id-chip">${esc(team.name)}</span>
+              <span class="id-chip" title="${esc(careerPhase(player.age))}">Age ${player.age}</span>
               <span class="id-chip">Bats ${player.bats}</span>
               <span class="id-chip">Lv ${player.level}</span>
               <span class="id-chip">Home · ${esc(homePark.name)}</span>
@@ -375,18 +383,28 @@ export function renderHub(app: App, mount: HTMLElement): void {
         <h2>Clubhouse</h2>
         <table class="standings">
           <tr><th>Player</th><th>Age</th><th>Rating</th></tr>
+          <tr class="me">
+            <td>${esc(player.name)}<span class="you-tag">You</span></td>
+            <td>${player.age}</td><td>${ovr}</td>
+          </tr>
           ${(team.roster ?? [])
             .map(
               (p) => `
             <tr>
               <td>${esc(p.name)}${p.role === 'pitcher' ? ' <span class="tiny muted">P</span>' : ''}</td>
-              <td>${p.age}</td><td>${p.rating}</td>
+              <td class="${nearingRetirement(p) ? 'vet' : ''}" ${
+                nearingRetirement(p) ? 'title="Playing out the end of his career"' : ''
+              }>${p.age}</td><td>${p.rating}</td>
             </tr>`,
             )
             .join('')}
         </table>
         <div class="tiny muted" style="margin-top:10px; text-align:center">
-          Your teammates, for as long as the front office keeps them together.
+          Your teammates, for as long as the front office keeps them together.${
+            vets > 0
+              ? ` <span class="vet">${vets} in gold ${vets === 1 ? 'is' : 'are'} near the end — expect ${vets === 1 ? 'a retirement' : 'retirements'} this winter.</span>`
+              : ''
+          }
         </div>
       </div>
 
@@ -398,6 +416,15 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div><b>${player.career.homeRuns}</b><span>HR</span></div>
           <div><b>${player.career.rbi}</b><span>RBI</span></div>
         </div>
+        ${
+          player.age >= RETIREMENT_WATCH_AGE
+            ? `<div class="tiny muted" style="margin-top:12px; line-height:1.55">
+                 You're ${player.age}. The players you came up with are done by
+                 ${FORCED_RETIREMENT_AGE} — you can keep going as long as you like, and hang
+                 them up whenever you say so.
+               </div>`
+            : ''
+        }
         <div class="btn-row" style="margin-top:14px">
           <button class="btn ghost tiny" id="mainmenu">Switch Player</button>
           <button class="btn ghost tiny" id="reset">Retire &amp; start over</button>

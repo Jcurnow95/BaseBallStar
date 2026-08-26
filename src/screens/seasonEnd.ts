@@ -5,12 +5,13 @@ import { bracketHtml } from '../ui/bracket';
 import { formatMoney } from '../core/gear';
 import {
   battingAverage,
+  careerPhase,
   emptyBattingStats,
   onBasePct,
   overallRating,
   slugging,
 } from '../core/player';
-import { checkPromotion } from '../core/progression';
+import { checkPromotion, offseasonAgePoints } from '../core/progression';
 import { esc, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
@@ -86,6 +87,7 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
         <h2>Front office report</h2>
         <div class="reward"><span>Scout grade</span><b>${check.score}</b></div>
         <div class="reward"><span>Overall rating</span><b>${check.overall}</b></div>
+        <div class="reward"><span>Age</span><b>${player.age} · ${esc(careerPhase(player.age))}</b></div>
         <div class="reward"><span>Team finish</span><b>${finish}${suffix} · ${team.wins}-${team.losses}</b></div>
         <div class="reward"><span>Postseason</span><b>${esc(postseasonLine)}</b></div>
         <p class="tiny" style="margin:12px 0 0; line-height:1.55">${esc(check.reason)}</p>
@@ -121,8 +123,12 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     player.season = emptyBattingStats();
     player.stamina = 100;
     player.energy = 100;
-    // An offseason of work is worth a couple of free points; a ring, a bit more.
-    player.attributePoints += 2 + (check.promoted ? 2 : 0) + (champion ? 1 : 0);
+    // A winter passes, so you have a birthday whether you earned it or not.
+    player.age++;
+    const agePoints = offseasonAgePoints(player.age);
+    // An offseason of work is worth a couple of free points; a ring, a bit
+    // more; and a body still filling out, more again.
+    player.attributePoints += 2 + agePoints + (check.promoted ? 2 : 0) + (champion ? 1 : 0);
     if (champion) player.money += RING_BONUS;
 
     app.lastGame = null;
@@ -134,8 +140,11 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     await showDialog({
       title: `Season ${save.seasonYear} — ${LEVELS[save.league.levelId].name}`,
       body:
-        `You report to the ${playerTeam(save.league).name}.\n` +
+        `You report to the ${playerTeam(save.league).name} at ${player.age}. ${careerPhase(player.age)}.\n` +
         `Overall ${overallRating(player.attributes)} · ${player.attributePoints} attribute points to spend.` +
+        (agePoints > 0
+          ? `\n${agePoints} of them came free — you're still growing into your frame.`
+          : '') +
         newsText,
       confirmLabel: 'Report to camp',
     });

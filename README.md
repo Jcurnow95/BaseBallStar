@@ -504,6 +504,15 @@ once, at the end. It exists because of a real bug: "is the season over?" was ans
 after two or three games. Exits non-zero on failure.
 
 ```bash
+npx tsx tools/aging.ts
+```
+
+Walks a career through twenty winters and checks that everyone gets older properly: the
+player ages a year a season from 18, nobody in the league plays past
+`FORCED_RETIREMENT_AGE`, and the opening-day clubhouse has fully turned over by the end.
+Guards against a league that never renews. Exits non-zero on failure.
+
+```bash
 npx tsx tools/parks.ts
 ```
 
@@ -559,6 +568,7 @@ A playable vertical slice, not a finished game. What's real:
 - Nine-inning games with play-by-play, extra innings, standings, four-level promotion
 - Per-game pay off the contract you signed, and a gear store selling equipment that wears out
 - Day-by-day season calendar with off days for training, and a localStorage save
+- Careers start at 18 and age a winter at a time; teammates grow, fade and retire around you
 
 Deliberately simplified in the live play — worth knowing before you build on it:
 

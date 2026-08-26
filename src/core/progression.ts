@@ -30,6 +30,21 @@ export function grantXp(player: PlayerProfile, amount: number): LevelUpReport {
 }
 
 /**
+ * Extra offseason attribute points a player's age is worth. A body still
+ * filling out gains fastest, and the curve flattens through the twenties.
+ *
+ * Note what this deliberately isn't: an age *penalty*. Simulated players fade
+ * in their thirties because the league needs somewhere for rookies to come
+ * from, but taking a career's hard-won attributes back off the player is the
+ * opposite of fun. Your number never goes down — it just stops climbing free.
+ */
+export function offseasonAgePoints(age: number): number {
+  if (age <= 21) return 2;
+  if (age <= 25) return 1;
+  return 0;
+}
+
+/**
  * Attribute points needed for the next +1. Later points cost more, but the
  * old curve doubled at 50 — right where a second-season player was — so
  * development stalled exactly when the league was getting harder.

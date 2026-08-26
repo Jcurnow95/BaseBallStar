@@ -1,6 +1,7 @@
 import type { PlayerProfile } from './types';
 import type { LeagueState } from './league';
 import type { LevelTable } from './otherLeagues';
+import { ROOKIE_AGE } from './player';
 import { readKey, removeKey, writeKey } from './storage';
 
 const STORAGE_KEY = 'baseball-star:save:v1';
@@ -62,6 +63,11 @@ function normalise(save: SaveData): void {
   if (!player.contract) player.contract = 'standard';
   if (!player.gear) player.gear = {};
   if (!Array.isArray(player.achievements)) player.achievements = [];
+  // A career from before ages existed gets the one it would have had: signed
+  // at eighteen, a birthday for every season already played.
+  if (typeof player.age !== 'number') {
+    player.age = ROOKIE_AGE + Math.max(0, (save.seasonYear ?? 1) - 1);
+  }
 }
 
 export function writeSave(slot: number, data: Omit<SaveData, 'version'>): void {

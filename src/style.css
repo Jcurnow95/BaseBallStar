@@ -888,6 +888,13 @@ table.standings tr.cut td {
   border-bottom: 1px dashed var(--gold);
 }
 
+/* Clubhouse: a teammate old enough that this could be his last season. */
+.vet,
+table.standings td.vet {
+  color: var(--gold);
+  font-weight: 700;
+}
+
 table.standings tr.clinched td:first-child::after {
   content: 'x';
   margin-left: 6px;

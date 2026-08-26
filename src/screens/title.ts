@@ -5,6 +5,7 @@ import type { SaveData } from '../core/save';
 import { SLOT_COUNT, clearSave, loadSave, parseSave, writeSave } from '../core/save';
 import { esc, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
+import { openDerby } from './derby';
 import { exportSaveFile, pickSaveFile } from '../ui/transfer';
 import { openHowto } from './howto';
 import { openTutorial } from './tutorial';
@@ -105,6 +106,8 @@ export function renderTitle(app: App, mount: HTMLElement): void {
         </p>
       </div>
     </div>
+
+    <button class="btn ghost" id="derby">Home Run Derby</button>
   `;
 
   const exportSlot = async (save: SaveData): Promise<void> => {
@@ -186,4 +189,5 @@ export function renderTitle(app: App, mount: HTMLElement): void {
 
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'title'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'title'));
+  q(mount, '#derby').addEventListener('click', () => openDerby(app, 'title'));
 }

@@ -19,6 +19,7 @@ export type Route =
   | 'achievements'
   | 'howto'
   | 'tutorial'
+  | 'derby'
   | 'dev';
 
 export interface PostGameSummary {

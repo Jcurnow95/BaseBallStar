@@ -463,13 +463,34 @@ function shop(player: PlayerProfile): number {
 }
 
 /** An off day at the facility, the way the training screen spends one. */
-function trainDay(player: PlayerProfile, skill: Skill): { xp: number; sessions: number } {
+/**
+ * How the player spends an off day.
+ *
+ * This matters more than it looks. A 'balanced' player who rests whenever
+ * conditioning dips never sees the fatigue term in `sweetSpotRadius` bite at
+ * all — which made an earlier run of this harness report that stamina was a
+ * dead system, when what it had actually measured was its own resting policy.
+ * 'grind' is the player who takes the XP every time, which is what the drills
+ * are visibly there to encourage.
+ */
+export type TrainPolicy = 'balanced' | 'grind';
+
+function trainDay(
+  player: PlayerProfile,
+  skill: Skill,
+  policy: TrainPolicy = 'balanced',
+): { xp: number; sessions: number } {
   const byId = Object.fromEntries(TRAINING_OPTIONS.map((o) => [o.id, o]));
   let xp = 0;
   let sessions = 0;
   for (let guard = 0; guard < 8; guard++) {
     let choice = null;
-    if (player.stamina <= 40 && player.energy >= byId.rest.energyCost) choice = byId.rest;
+    if (policy === 'grind') {
+      // Always take the experience; never spend a day on the body.
+      if (player.energy >= byId.bp.energyCost) choice = byId.bp;
+      else if (player.energy >= byId.fielding.energyCost) choice = byId.fielding;
+      else if (player.energy >= byId.film.energyCost) choice = byId.film;
+    } else if (player.stamina <= 40 && player.energy >= byId.rest.energyCost) choice = byId.rest;
     else if (player.stamina <= 65 && player.energy >= byId.conditioning.energyCost)
       choice = byId.conditioning;
     else if (player.energy >= byId.bp.energyCost && player.stamina > 55) choice = byId.bp;
@@ -505,6 +526,7 @@ function playCareer(
   maxSeasons: number,
   feel: FeelCounters,
   archetypeIndex = 3,
+  policy: TrainPolicy = 'balanced',
 ): CareerResult {
   const rng = new Rng(seed);
   const player = createPlayer('Sim', 'CF', 'R', ARCHETYPES[archetypeIndex]);
@@ -542,7 +564,7 @@ function playCareer(
       const scheduled = nextGame(league);
       if (!scheduled) {
         if (!isGameDay(league)) {
-          const t = trainDay(player, skill);
+          const t = trainDay(player, skill, policy);
           xpFromTraining += t.xp;
           trainingSessions += t.sessions;
           trainingDays++;

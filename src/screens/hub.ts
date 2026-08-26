@@ -40,6 +40,7 @@ import {
   slugging,
 } from '../core/player';
 import { seasonScore, xpForLevel } from '../core/progression';
+import { unclaimedAchievements } from '../core/achievements';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 import { devMenuEnabled } from './dev';
@@ -149,9 +150,15 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const fraying = GEAR_SLOTS.map((s) => player.gear[s]).filter(
     (g): g is NonNullable<typeof g> => !!g && g.gamesLeft <= 2,
   ).length;
+  // Milestones sit one tap away, and the badge nags until the points are
+  // collected — an earned reward should never rot unseen.
+  const toClaim = unclaimedAchievements(player).length;
   const storeButton = `
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
+    </button>
+    <button class="btn ghost" id="achievements" style="margin-top:8px">
+      Achievements${toClaim > 0 ? `<span class="btn-badge">${toClaim} to claim</span>` : ''}
     </button>
     <button class="link-btn" id="howto">How to Play</button>
     <button class="link-btn" id="tutorial">Practice Drills — Playable Tutorial</button>
@@ -391,7 +398,10 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div><b>${player.career.homeRuns}</b><span>HR</span></div>
           <div><b>${player.career.rbi}</b><span>RBI</span></div>
         </div>
-        <button class="btn ghost tiny" id="reset" style="margin-top:14px">Retire &amp; start over</button>
+        <div class="btn-row" style="margin-top:14px">
+          <button class="btn ghost tiny" id="mainmenu">Switch Player</button>
+          <button class="btn ghost tiny" id="reset">Retire &amp; start over</button>
+        </div>
       </div>
     </div>
   `;
@@ -407,11 +417,16 @@ export function renderHub(app: App, mount: HTMLElement): void {
   q(mount, '#train').addEventListener('click', () => app.go('training'));
   q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
+  q(mount, '#achievements').addEventListener('click', () => app.go('achievements'));
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));
   q(mount, '#derby').addEventListener('click', () => openDerby(app, 'hub'));
 
   if (devEnabled) q(mount, '#devmenu').addEventListener('click', () => app.go('dev'));
+
+  // Everything is already persisted as it happens; switching characters is
+  // just a walk back to the title screen.
+  q(mount, '#mainmenu').addEventListener('click', () => app.go('title'));
 
   q(mount, '#reset').addEventListener('click', async () => {
     const ok = await showDialog({

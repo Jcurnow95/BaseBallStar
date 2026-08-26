@@ -22,6 +22,7 @@ import { describeWeather, windLabel, windMph } from '../core/weather';
 import { uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
 import { addStats } from '../core/player';
+import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
 import { clamp } from '../core/rng';
 import type { BattedBall } from '../core/types';
@@ -744,11 +745,21 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       simulateOtherTeams(league, app.rng, [opponent.id]);
     }
 
+    // Career totals are still pre-game here; snapshot which achievements were
+    // already met so the postgame screen can call out the ones this game earned.
+    const metBefore = new Set(
+      ACHIEVEMENTS.filter((a) => isAchievementMet(a, player)).map((a) => a.id),
+    );
+
     addStats(player.season, sim.gameStats);
     addStats(player.career, sim.gameStats);
     player.fielding.chances += sim.putouts + sim.errors;
     player.fielding.putouts += sim.putouts;
     player.fielding.errors += sim.errors;
+
+    const newAchievements = ACHIEVEMENTS.filter(
+      (a) => !metBefore.has(a.id) && isAchievementMet(a, player),
+    ).map((a) => a.name);
 
     const xp = gameXp(sim.gameStats, sim.putouts);
     const report = grantXp(player, xp);
@@ -792,6 +803,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       wornOut,
       levelsGained: report.levelsGained,
       pointsGained: report.pointsGained,
+      newAchievements,
       playoff: playoff ?? undefined,
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.

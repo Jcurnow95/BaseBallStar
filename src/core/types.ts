@@ -60,6 +60,8 @@ export interface PlayerProfile {
   level: number;
   xp: number;
   attributePoints: number;
+  /** Ids of career achievements already claimed for points. See `core/achievements.ts`. */
+  achievements: string[];
   season: BattingStats;
   career: BattingStats;
   fielding: FieldingStats;

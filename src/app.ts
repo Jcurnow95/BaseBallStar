@@ -16,6 +16,7 @@ export type Route =
   | 'seasonEnd'
   | 'standings'
   | 'store'
+  | 'achievements'
   | 'howto'
   | 'tutorial'
   | 'dev';
@@ -36,6 +37,8 @@ export interface PostGameSummary {
   wornOut: string[];
   levelsGained: number;
   pointsGained: number;
+  /** Career achievements this game pushed over the line, by name. */
+  newAchievements: string[];
   /** Where the series stands after this game, when it was a playoff game. */
   playoff?: PlayoffGameOutcome;
   seasonComplete: boolean;

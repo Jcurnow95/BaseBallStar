@@ -72,6 +72,17 @@ export const ARCHETYPES: Archetype[] = [
 
 export const POSITIONS: Position[] = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'];
 
+export const POSITION_LABELS: Record<Position, string> = {
+  C: 'Catcher',
+  '1B': 'First Base',
+  '2B': 'Second Base',
+  '3B': 'Third Base',
+  SS: 'Shortstop',
+  LF: 'Left Field',
+  CF: 'Center Field',
+  RF: 'Right Field',
+};
+
 export const emptyBattingStats = (): BattingStats => ({
   pa: 0,
   ab: 0,

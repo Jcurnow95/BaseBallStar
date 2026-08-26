@@ -76,7 +76,10 @@ const CARDS: Card[] = [
       'The dashed line shows the bag you’re headed for. It turns <b class="bad">red</b> when the ball is beating you there — ' +
       'going back is a race too. ' +
       'On base with a teammate up, a <b class="gold">STEAL</b> button flashes up with your odds — ' +
-      'Speed sets them, tired legs shave them, and every sprint burns energy and stamina. Pick your moment.',
+      'Speed sets them, tired legs shave them, and every sprint burns energy and stamina. ' +
+      'Press it and the pitcher comes set: <b class="info">WAIT FOR IT…</b>, then tap the moment it flips to ' +
+      '<b class="good">GO!</b>. A lightning tap boosts your odds, a slow one shrinks them, and jumping ' +
+      'before he moves gets you picked off. Fresh legs react faster.',
     art: `
       <svg viewBox="0 0 120 84" aria-hidden="true">
         <rect x="0" y="0" width="120" height="84" rx="8" fill="#1f7a3f"/>

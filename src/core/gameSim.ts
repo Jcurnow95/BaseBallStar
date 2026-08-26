@@ -56,6 +56,14 @@ const MAX_INNINGS = 12;
 export const STEAL_ENERGY_COST = 6;
 export const STEAL_STAMINA_COST = 2;
 
+/**
+ * How the timing minigame graded the break: 'early' is before the pitcher
+ * ever moved (a pickoff waiting to happen), 'great' beat the reaction
+ * window fatigue allows, 'good' is an ordinary clean jump, 'late' left
+ * with the catcher already loading up.
+ */
+export type StealJump = 'early' | 'great' | 'good' | 'late';
+
 
 /** Only reachable if a save has a team with no roster at all. */
 const FILL_IN: RosterPlayer = { name: 'the utility man', age: 27, rating: 50, role: 'batter' };
@@ -281,17 +289,36 @@ export class GameSim {
   }
 
   /**
+   * How sharp a tap has to be to count as each jump, in milliseconds after
+   * the pitcher's first move. The great-jump window is where fatigue lives
+   * in your fingers: fresh legs get a third of a second, a body running on
+   * fumes barely half that — the elite jump stops being reachable before
+   * stealing itself does.
+   */
+  stealJumpWindows(): { great: number; good: number } {
+    const freshness =
+      (this.player.stamina / 100) * 0.5 + (Math.min(this.player.energy, 50) / 50) * 0.5;
+    return { great: 160 + Math.round(freshness * 180), good: 650 };
+  }
+
+  /**
    * The player takes off. Costs come out whether he makes it or not; the
-   * result comes back as a feed line. Null when no window is open (the UI
+   * result comes back as a feed line. The jump quality comes from the timing
+   * minigame: break before the pitcher moves and he has you dead to rights,
+   * go on his first flinch and the posted odds get a bonus, leave late and
+   * the catcher gets a head start. Null when no window is open (the UI
    * raced a resolved play).
    */
-  attemptSteal(): { text: string; tone: LogTone; success: boolean } | null {
+  attemptSteal(jump: StealJump = 'good'): { text: string; tone: LogTone; success: boolean } | null {
     if (!this.stealWindow || this.playerBase === null || this.playerBase > 1) return null;
     this.stealWindow = false;
     const from = this.playerBase as 0 | 1;
     const target = from + 1;
     const bag = target === 1 ? 'second' : 'third';
-    const chance = this.stealChance(from);
+    let chance = this.stealChance(from);
+    if (jump === 'early') chance *= 0.4;
+    else if (jump === 'great') chance = clamp(chance + 0.12, 0.08, 0.97);
+    else if (jump === 'late') chance = clamp(chance - 0.18, 0.05, 0.95);
 
     this.player.energy = clamp(this.player.energy - STEAL_ENERGY_COST, 0, 100);
     this.player.stamina = clamp(this.player.stamina - STEAL_STAMINA_COST, 0, 100);
@@ -301,13 +328,39 @@ export class GameSim {
       this.bases[target] = true;
       this.playerBase = target as 1 | 2;
       this.gameStats.stolenBases++;
-      return { text: `You take off and slide in ahead of the tag — stolen ${bag}!`, tone: 'good', success: true };
+      const text =
+        jump === 'early'
+          ? `You gamble on the first flinch and he never gets a play off — stolen ${bag}!`
+          : jump === 'great'
+            ? `Huge jump — you're into ${bag} standing up. Stolen base!`
+            : jump === 'late'
+              ? `Slow out of the blocks, but you sneak in under the tag — stolen ${bag}!`
+              : `You take off and slide in ahead of the tag — stolen ${bag}!`;
+      return { text, tone: 'good', success: true };
     }
 
     this.bases[from] = false;
     this.playerBase = null;
     this.recordOut();
-    return { text: `The throw beats you to ${bag} — caught stealing.`, tone: 'bad', success: false };
+    const text =
+      jump === 'early'
+        ? 'You break too soon — he steps off and runs you down. Picked off.'
+        : jump === 'late'
+          ? `Late jump, and the throw beats you to ${bag} by a mile — caught stealing.`
+          : `The throw beats you to ${bag} — caught stealing.`;
+    return { text, tone: 'bad', success: false };
+  }
+
+  /**
+   * The player showed steal but never went — froze past the pitcher's move
+   * and had to dive back in. No attempt, no real cost beyond a little
+   * wasted adrenaline; the window closes and the at-bat goes on.
+   */
+  bailSteal(): { text: string; tone: LogTone } | null {
+    if (!this.stealWindow) return null;
+    this.stealWindow = false;
+    this.player.energy = clamp(this.player.energy - 2, 0, 100);
+    return { text: 'You bluff the break, then dive back in ahead of the pickoff.', tone: 'neutral' };
   }
 
   /**

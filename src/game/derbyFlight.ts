@@ -191,9 +191,12 @@ export class DerbyFlightView {
 
   private updateCamera(dt: number): void {
     // Chase the ball, pulling back the further it gets from the plate so the
-    // wall comes into frame right as the ball threatens it.
+    // wall comes into frame right as the ball threatens it. The floor stays
+    // tight enough that a deep fly still reads as a ball, not a pixel — the
+    // chase cam brings the wall in on its own, so full-park framing isn't
+    // what the pull-back is for.
     const range = Math.hypot(this.ball.x, this.ball.y);
-    const desired = clamp(2.6 - range / 220, 1.5, 2.6);
+    const desired = clamp(2.6 - range / 260, 1.9, 2.6);
     const follow = 1 - Math.exp(-dt * 5);
     // Lead the camera slightly up-field so the plate context trails behind.
     this.camera.x += (this.ball.x - this.camera.x) * follow;

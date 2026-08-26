@@ -37,6 +37,9 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
   let activeDrill: (() => void) | null = null;
 
   const draw = (): void => {
+    // Redrawing replaces the scroll container, so carry its position over —
+    // spending a point shouldn't bounce the menu back to the top.
+    const scrollTop = mount.querySelector('.scroll')?.scrollTop ?? 0;
     mount.innerHTML = `
       <div class="scroll">
         <div class="panel">
@@ -176,6 +179,7 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
         offDay ? 'style="margin-top:8px"' : ''
       }>Back to Clubhouse</button>
     `;
+    q(mount, '.scroll').scrollTop = scrollTop;
 
     for (const button of qa<HTMLButtonElement>(mount, '.up')) {
       button.addEventListener('click', async () => {

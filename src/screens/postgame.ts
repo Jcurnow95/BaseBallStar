@@ -55,6 +55,8 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     stats.homeRuns > 0 ? `${stats.homeRuns} HR` : '',
     stats.rbi > 0 ? `${stats.rbi} RBI` : '',
     stats.walks > 0 ? `${stats.walks} BB` : '',
+    stats.stolenBases > 0 ? `${stats.stolenBases} SB` : '',
+    stats.runs > 0 ? `${stats.runs} R` : '',
     stats.strikeouts > 0 ? `${stats.strikeouts} K` : '',
   ]
     .filter(Boolean)

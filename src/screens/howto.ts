@@ -74,7 +74,9 @@ const CARDS: Card[] = [
       '<b class="good">GO</b> sends him for the next base; <b class="gold">HOLD</b> pulls him up; ' +
       '<b class="info">BACK</b> turns him round for the bag he left. ' +
       'The dashed line shows the bag you’re headed for. It turns <b class="bad">red</b> when the ball is beating you there — ' +
-      'going back is a race too.',
+      'going back is a race too. ' +
+      'On base with a teammate up, a <b class="gold">STEAL</b> button flashes up with your odds — ' +
+      'Speed sets them, tired legs shave them, and every sprint burns energy and stamina. Pick your moment.',
     art: `
       <svg viewBox="0 0 120 84" aria-hidden="true">
         <rect x="0" y="0" width="120" height="84" rx="8" fill="#1f7a3f"/>

@@ -1551,6 +1551,36 @@ table.standings tr.clinched td:first-child::after {
   width: auto;
 }
 
+/* The steal window: bottom-right opposite the skips, gold and pulsing because
+   it's live for one beat and gone. The odds ride on the label. */
+.steal-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  background: linear-gradient(180deg, #ffd166, #eda92c);
+  border: none;
+  color: #2a1d00;
+  border-radius: 99px;
+  padding: 9px 16px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  width: auto;
+  box-shadow: 0 4px 16px rgba(255, 209, 102, 0.4);
+  animation: steal-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes steal-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
 /* Each result punches in rather than swapping silently. */
 .idle-stage .big.punch {
   animation: punch-in 0.3s ease;

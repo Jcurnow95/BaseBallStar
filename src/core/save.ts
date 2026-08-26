@@ -61,6 +61,7 @@ function normalise(save: SaveData): void {
   if (typeof player.money !== 'number') player.money = 500;
   if (!player.contract) player.contract = 'standard';
   if (!player.gear) player.gear = {};
+  if (!Array.isArray(player.achievements)) player.achievements = [];
 }
 
 export function writeSave(slot: number, data: Omit<SaveData, 'version'>): void {

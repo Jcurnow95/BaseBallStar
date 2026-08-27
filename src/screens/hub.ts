@@ -22,6 +22,7 @@ import {
   seriesOpponent,
   startPlayoffs,
 } from '../core/playoffs';
+import { achievementProgress } from '../core/achievements';
 import { bracketHtml } from '../ui/bracket';
 import { ballparkById } from '../core/ballpark';
 import { describeWeather } from '../core/weather';
@@ -150,9 +151,16 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const fraying = GEAR_SLOTS.map((s) => player.gear[s]).filter(
     (g): g is NonNullable<typeof g> => !!g && g.gamesLeft <= 2,
   ).length;
+  // The case wears its own progress, so the clubhouse always says how much of
+  // it is still out there to go and get.
+  const caseProgress = achievementProgress(save.achievements);
+  const caseBadge = `<span class="btn-badge">${caseProgress.earned}/${caseProgress.total}</span>`;
   const storeButton = `
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
+    </button>
+    <button class="btn ghost" id="trophies" style="margin-top:8px">
+      Trophy Case${caseBadge}
     </button>
     <button class="link-btn" id="howto">How to Play</button>
     <button class="link-btn" id="tutorial">Practice Drills — Playable Tutorial</button>`;
@@ -415,6 +423,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
 
   q(mount, '#train').addEventListener('click', () => app.go('training'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
+  q(mount, '#trophies').addEventListener('click', () => app.go('trophies'));
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));
 

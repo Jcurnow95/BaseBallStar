@@ -1,6 +1,7 @@
 import type { PlayerProfile } from './types';
 import type { LeagueState } from './league';
 import type { SeasonAwards } from './awards';
+import type { UnlockedAchievement } from './achievements';
 import { readKey, removeKey, writeKey } from './storage';
 
 const STORAGE_KEY = 'baseball-star:save:v1';
@@ -15,6 +16,8 @@ export interface SaveData {
   seasonYear: number;
   /** Award season, one entry per year voted. See `core/awards.ts`. */
   awards: SeasonAwards[];
+  /** The trophy case, oldest first. See `core/achievements.ts`. */
+  achievements: UnlockedAchievement[];
 }
 
 export function loadSave(): SaveData | null {
@@ -43,6 +46,9 @@ function normalise(save: SaveData): void {
   if (!player.contract) player.contract = 'standard';
   if (!player.gear) player.gear = {};
   if (!Array.isArray(save.awards)) save.awards = [];
+  // A save from before the trophy case starts it empty rather than back-filled:
+  // a slam that was hit two seasons ago left no record to find.
+  if (!Array.isArray(save.achievements)) save.achievements = [];
 }
 
 export function writeSave(data: Omit<SaveData, 'version'>): void {
@@ -56,5 +62,5 @@ export function clearSave(): void {
 }
 
 export function newSave(player: PlayerProfile, league: LeagueState): SaveData {
-  return { version: SAVE_VERSION, player, league, seasonYear: 1, awards: [] };
+  return { version: SAVE_VERSION, player, league, seasonYear: 1, awards: [], achievements: [] };
 }

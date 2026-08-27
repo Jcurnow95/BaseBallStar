@@ -2,6 +2,8 @@ import type { App } from '../app';
 import { LEVELS, createLeague, playerTeam, rolloverSeason, standings, teamById } from '../core/league';
 import { ROUND_LABEL } from '../core/playoffs';
 import { ensureSeasonAwards, mvpBonus, playerMvp } from '../core/awards';
+import { checkAchievements } from '../core/achievements';
+import { unlockedPanelHtml } from '../ui/achievementList';
 import { bracketHtml } from '../ui/bracket';
 import { formatMoney } from '../core/gear';
 import {
@@ -33,10 +35,25 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
   // save that was parked at the end of a year comes back in, so vote them here
   // if nobody has. Idempotent either way — the ballot is kept in the save.
   const awards = ensureSeasonAwards(save.awards, player, league, save.seasonYear, app.rng);
-  // Pin them now rather than on the way out: a player who reads the review and
-  // closes the app should come back to the same ballot, not a fresh vote.
-  app.persist();
   const mvp = playerMvp(awards);
+
+  // The honors the trophy case can only learn about tonight: a ring, an MVP,
+  // and the call upstairs. Everything else was banked game by game.
+  const unlocked = checkAchievements(save.achievements, {
+    player,
+    levelId: league.levelId,
+    seasonYear: save.seasonYear,
+    honors: {
+      champion,
+      mvp: mvp !== null,
+      promoted: check.promoted,
+      nextLevelId: check.nextLevelId,
+    },
+  });
+
+  // Pin all of it now rather than on the way out: a player who reads the review
+  // and closes the app should come back to the same ballot and the same case.
+  app.persist();
   const MVP_BONUS = mvpBonus(league.levelId);
   const leagueMvp = awards.mvps[awards.playerLevelId];
   const postseasonLine = ((): string => {
@@ -94,6 +111,8 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
             : ''
         }
       </div>
+
+      ${unlockedPanelHtml(unlocked)}
 
       <div class="panel">
         <h2>Final line</h2>

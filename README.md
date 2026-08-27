@@ -441,6 +441,49 @@ Where the bar sits is what makes it worth chasing. `tools/awards.ts` measures it
 season wins MVP roughly half to three quarters of the time depending on the level, an
 ordinary one about one year in eight, and a bad one never.
 
+## The trophy case
+
+An MVP is the one thing a season *votes* on, but most of a career is made of afternoons
+nobody votes on: the ball you hit with the bases loaded, the one that ended a game in the
+bottom of the ninth, the hundredth hit that arrived on a Tuesday. **34 achievements** name
+those, and the **Trophy Case** button in the clubhouse shows all of them — the ones you
+have and the ones you don't, with what each takes, because a locked row that hides its
+requirement is a row nobody chases.
+
+They come in four tiers:
+
+- **Moments** (15) — one game, one swing. Your first hit and first home run, a grand slam,
+  a walk-off, a walk-off homer, an inside-the-park home run, coming back late, the cycle, a
+  two- or three-homer game, a four-hit game, a perfect day at the plate, five RBI, three
+  putouts without an error, and a home run in October.
+- **Season** (8) — 3 / 6 / 10 home runs, 20 RBI, 30 hits, 12 walks, and hitting .350 or .400
+  over a season (minimum 60 at-bats).
+- **Career** (7) — 100 / 250 / 500 hits, 10 / 25 / 50 home runs, 150 RBI.
+- **Honors** (4) — a ring, an MVP, your first call-up, and reaching the Majors.
+
+Some of these can't be read off a box score. A grand slam is only a grand slam because of
+what was on the bases *before* the swing, and a walk-off is only a walk-off because of what
+the scoreboard said before it and after it — so `core/gameSim.ts` watches for them as the
+game runs and hands the flags over afterwards. `core/achievements.ts` never sees the sim,
+only a snapshot, and everything else falls out of the season and career lines that already
+exist.
+
+An achievement is checked once and kept forever, stamped with the year and level it
+happened at. Nothing re-evaluates a locked one against old numbers, so a season that has
+already been banked can never retroactively earn or lose one. A save from before the case
+existed starts empty rather than back-filled — a slam hit two seasons ago left no record to
+find. And because the trophy case fires on the game a milestone actually lands in, the
+postgame screen is where you find out, in a gold panel above your line.
+
+Thresholds are tuned for a **24-game season**, which is about a hundred plate appearances
+and twenty-five hits — a forty-homer target would be unreachable here. `tools/achievements.ts`
+measures where they sit by playing twelve-season careers through the real hitting model:
+star play ends up holding 12 of the 15 numeric achievements, an ordinary career 7, and a
+bad one 2.
+
+The postgame also calls out a slam or a walk-off **every** time, not just the first — an
+achievement fires once in a career, but a walk-off is a walk-off whenever it happens.
+
 ## Project layout
 
 ```
@@ -460,14 +503,16 @@ src/
     league.ts        Levels, teams, home parks, schedule, calendar, standings
     playoffs.ts      The postseason bracket, series and the trophy
     awards.ts        Award season: the MVP ballot in every league
+    achievements.ts  The trophy case: what a career earns and when it earned it
     progression.ts   XP, attribute points, training, promotion checks
   game/            Canvas views: atBatView (catcher POV), playView (top-down field),
                    catchOverlay (the stretch-catch minigame), coachTips (one-time hints),
                    weatherFx (rain streaks and the wind flag)
   screens/         Title, create player, hub, how-to-play, training, gear store, game day,
-                   results, awards night, season review
+                   results, awards night, season review, trophy case
   ui/              Canvas helpers, DOM helpers, modal, sprites (animated players)
 tools/             Headless harnesses — see below
+                   (humanBat.ts is the shared "play a real season" model they measure with)
 ```
 
 `core/` deliberately has zero DOM dependencies. If you later want the simulation in Rust
@@ -555,6 +600,24 @@ reports how often each takes the award. A star season should win about half the 
 better, an ordinary one rarely, a bad one never. It also asserts the winner *looks* like a
 winner: no MVP more than 12% off the best OPS on his own ballot, which is what stops the
 club-record term handing the trophy to a .225 hitter on a good team.
+
+```bash
+npx tsx tools/achievements.ts
+```
+
+Checks the trophy case, in the same two halves. **Correctness** drives a real `GameSim`
+with the situation forced — bases loaded in the fourth, tied in the bottom of the ninth,
+the same home run on the road — and asserts both what must fire and what must not: a homer
+in the third isn't a walk-off, two men on isn't a slam, a ball in the seats isn't an
+inside-the-parker, and the opponent's grand slam is never yours. It also asserts a brand-new
+career unlocks nothing, and that re-checking never awards the same thing twice.
+
+**Reach** plays twelve-season careers through the hitting model at three standards of play,
+walking up a level every three years, and prints what each one ends up holding. A star
+career should clear most of the season and career tiers but never empty the case; a bad one
+should earn almost nothing on the numbers. Both harnesses share `tools/humanBat.ts`, which
+is the "play a real season" model `tools/awards.ts` also measures with — the answer to *is
+this reachable?* has to come from one place.
 
 ## Building for Android and iOS
 

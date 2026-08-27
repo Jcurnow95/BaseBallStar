@@ -16,18 +16,10 @@
  */
 import { BALLOT_SIZE, runSeasonAwards, synthesizeSeason } from '../src/core/awards';
 import { LEVELS, SEASON_GAMES, createLeague, playerTeam } from '../src/core/league';
-import { throwPitch } from '../src/core/pitching';
-import { IDEAL_UNDER, resolveSwing } from '../src/core/swing';
-import { resolveBattedBall } from '../src/core/outcome';
-import {
-  ARCHETYPES,
-  battingAverage,
-  createPlayer,
-  emptyBattingStats,
-  ops,
-} from '../src/core/player';
+import { battingAverage, emptyBattingStats, ops } from '../src/core/player';
 import { Rng, clamp } from '../src/core/rng';
-import type { BattingStats, PlayerProfile } from '../src/core/types';
+import type { BattingStats } from '../src/core/types';
+import { SKILLS, playSeason, playerAt } from './humanBat';
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = ''): void => {
@@ -41,130 +33,12 @@ const check = (label: string, ok: boolean, detail = ''): void => {
 
 /* ------------------------------------------------- a human season, for real */
 
-/** Aim scatter in ball radii, the same three standards `tools/balance.ts` uses. */
-const SKILLS = [
-  { name: 'star', sigma: 0.36, discipline: 0.85 },
-  { name: 'ordinary', sigma: 0.52, discipline: 0.62 },
-  { name: 'flailing', sigma: 0.95, discipline: 0.12 },
-];
-
-type Skill = (typeof SKILLS)[number];
-
-/** One plate appearance, run through the real swing and batted-ball code. */
-function simulatePA(player: PlayerProfile, levelId: number, skill: Skill, rng: Rng): BattingStats {
-  const level = LEVELS[levelId];
-  const pitcher = { name: 'CPU', rating: level.pitcherRating };
-  const line = emptyBattingStats();
-  line.pa = 1;
-
-  let balls = 0;
-  let strikes = 0;
-
-  for (let pitchNo = 0; pitchNo < 20; pitchNo++) {
-    const pitch = throwPitch(pitcher, { balls, strikes }, rng);
-    const zoneSwing = 0.6 + (1 - skill.discipline) * 0.22;
-    const chase = clamp(0.4 - skill.discipline * 0.3, 0.03, 0.5);
-    const shouldSwing =
-      strikes === 2 && pitch.isStrike ? true : rng.chance(pitch.isStrike ? zoneSwing : chase);
-
-    if (!shouldSwing) {
-      if (pitch.isStrike) {
-        strikes++;
-        if (strikes >= 3) {
-          line.ab++;
-          line.strikeouts++;
-          return line;
-        }
-      } else {
-        balls++;
-        if (balls >= 4) {
-          line.walks++;
-          return line;
-        }
-      }
-      continue;
-    }
-
-    const velocityPenalty = 820 / pitch.def.duration;
-    const movement = 1 + (Math.abs(pitch.def.breakX) + Math.abs(pitch.def.breakY)) * 0.22;
-    const visionHelp = 1 - (player.attributes.vision / 100) * 0.14;
-    const sigma = skill.sigma * velocityPenalty * movement * visionHelp;
-
-    const swing = resolveSwing(
-      {
-        offsetX: rng.gaussian() * sigma,
-        offsetY: IDEAL_UNDER + rng.gaussian() * sigma,
-        timing: 0.98 + rng.gaussian() * sigma * 0.12,
-      },
-      { attributes: player.attributes, stamina: player.stamina },
-      rng,
-    );
-
-    if (swing.whiff || !swing.battedBall) {
-      strikes++;
-      if (strikes >= 3) {
-        line.ab++;
-        line.strikeouts++;
-        return line;
-      }
-      continue;
-    }
-
-    const outcome = resolveBattedBall(
-      swing.battedBall,
-      player.attributes,
-      player.bats,
-      level.defenseRating,
-      rng,
-    );
-
-    if (outcome.result === 'foul') {
-      if (strikes < 2) strikes++;
-      continue;
-    }
-
-    line.ab++;
-    if (outcome.result === 'single') (line.hits++, line.singles++);
-    else if (outcome.result === 'double') (line.hits++, line.doubles++);
-    else if (outcome.result === 'triple') (line.hits++, line.triples++);
-    else if (outcome.result === 'homeRun') (line.hits++, line.homeRuns++);
-    return line;
-  }
-
-  line.ab++;
-  return line;
-}
-
-const add = (target: BattingStats, delta: BattingStats): void => {
-  for (const key of Object.keys(delta) as (keyof BattingStats)[]) target[key] += delta[key];
-};
-
-/** A whole season at the plate, batting second over the full schedule. */
-function playSeason(player: PlayerProfile, levelId: number, skill: Skill, rng: Rng): BattingStats {
-  const totals = emptyBattingStats();
-  // Batting second in a nine-man order is a shade over four trips a night.
-  const plateAppearances = Math.round(SEASON_GAMES * rng.range(3.8, 4.3));
-  for (let i = 0; i < plateAppearances; i++) add(totals, simulatePA(player, levelId, skill, rng));
-
-  // Runs and RBI aren't modelled by the abstract resolver, so estimate them
-  // the way the ballot will see them: mostly a function of the extra bases.
-  const extra = totals.hits - totals.homeRuns;
-  totals.rbi = Math.round(totals.homeRuns * 1.7 + extra * 0.42);
-  totals.runs = Math.round(totals.homeRuns + extra * 0.44 + totals.walks * 0.3);
-  return totals;
-}
-
-/** The attributes a player realistically carries at each level. */
-const LEVEL_ATTRIBUTES = [38, 55, 70, 82];
-
-function playerAt(levelId: number): PlayerProfile {
-  const player = createPlayer('You', 'CF', 'R', ARCHETYPES[3]);
-  const target = LEVEL_ATTRIBUTES[levelId];
-  for (const key of Object.keys(player.attributes) as (keyof typeof player.attributes)[]) {
-    player.attributes[key] = target;
-  }
-  return player;
-}
+/*
+ * The three standards of play, one plate appearance and one season, all run
+ * through the real swing and batted-ball code, live in `tools/humanBat.ts` —
+ * `tools/achievements.ts` asks the same question of the same model, and the
+ * answer has to come from one place.
+ */
 
 /* ------------------------------------------------------------- legal lines */
 

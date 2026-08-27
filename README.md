@@ -414,6 +414,33 @@ Clear both and you get called up; miss and you repeat the level.
 Games earn XP → levels → attribute points. Between games you spend Energy on training,
 and each option trades Energy, Stamina and XP differently.
 
+## Award season
+
+The year doesn't end with the last out. Once the trophy is handed out, **awards night**
+runs before the front-office review: **every league in the organization votes an MVP** —
+Single-A, Double-A, Triple-A and the Majors — and your season is on the ballot in the one
+you played in.
+
+You see the winner, the top five of your own league's ballot with their first-place vote
+shares, and a line for each of the other three leagues. Win it and you take a bonus
+(`$600` per level, so `$2,400` in the Majors), an extra attribute point, and a permanent
+line in the **trophy case** on the clubhouse screen.
+
+The complication is that nobody but you has a batting line — the sim only tracks your own
+plate appearances, and everybody else is a name with a rating. So `core/awards.ts`
+*synthesizes* a season for every other batter from their rating and their league's hitting
+environment, and scores those lines against your real one. They're rolled once and kept in
+the save, so the ballot never changes under you.
+
+Voting weighs OPS first, then home runs and RBI, then whether the club won. Those last
+terms are deliberately small thumbs rather than scales — RBI mostly measures who bats in
+front of you, and an early cut of the ballot had a .241 hitter with 24 RBI beating a .321
+hitter with a 1.013 OPS.
+
+Where the bar sits is what makes it worth chasing. `tools/awards.ts` measures it: a great
+season wins MVP roughly half to three quarters of the time depending on the level, an
+ordinary one about one year in eight, and a bad one never.
+
 ## Project layout
 
 ```
@@ -431,11 +458,14 @@ src/
     pitching.ts      Pitch arsenal, late break, pitcher AI and command
     gameSim.ts       Nine-inning game loop; surfaces your moments as events
     league.ts        Levels, teams, home parks, schedule, calendar, standings
+    playoffs.ts      The postseason bracket, series and the trophy
+    awards.ts        Award season: the MVP ballot in every league
     progression.ts   XP, attribute points, training, promotion checks
   game/            Canvas views: atBatView (catcher POV), playView (top-down field),
                    catchOverlay (the stretch-catch minigame), coachTips (one-time hints),
                    weatherFx (rain streaks and the wind flag)
-  screens/         Title, create player, hub, how-to-play, training, gear store, game day, results
+  screens/         Title, create player, hub, how-to-play, training, gear store, game day,
+                   results, awards night, season review
   ui/              Canvas helpers, DOM helpers, modal, sprites (animated players)
 tools/             Headless harnesses — see below
 ```
@@ -462,7 +492,7 @@ device, set `baseball-star:dev` to `1` in localStorage.
 
 ## Headless harnesses
 
-The models are tuned against measurements, not by feel. All three run without a browser.
+The models are tuned against measurements, not by feel. All of these run without a browser.
 
 ```bash
 npx tsx tools/fitFlight.ts
@@ -513,6 +543,18 @@ resolve on the field, this harness covers **the plate appearance** (counts, walk
 strikeouts, foul rate, contact quality) plus the abstract resolver still used for
 simulated non-player at-bats. Your own batting line comes out of `playSim.ts`, where your
 baserunning and the defense decide it.
+
+```bash
+npx tsx tools/awards.ts
+```
+
+Checks the MVP ballot. Two halves: correctness (every synthesized batting line is
+internally legal, every league hands out exactly one MVP, vote shares sum to 100%), and
+balance — it plays real seasons through the hitting model at three standards of play and
+reports how often each takes the award. A star season should win about half the time or
+better, an ordinary one rarely, a bad one never. It also asserts the winner *looks* like a
+winner: no MVP more than 12% off the best OPS on his own ballot, which is what stops the
+club-record term handing the trophy to a .225 hitter on a good team.
 
 ## Building for Android and iOS
 

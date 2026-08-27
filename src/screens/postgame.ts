@@ -131,11 +131,12 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     </div>
 
     <button class="btn primary" id="next">${
-      summary.seasonComplete ? 'Season Review' : 'Back to Clubhouse'
+      summary.seasonComplete ? 'Awards Night' : 'Back to Clubhouse'
     }</button>
   `;
 
   q(mount, '#next').addEventListener('click', () => {
-    app.go(summary.seasonComplete ? 'seasonEnd' : 'hub');
+    // The year ends with the awards, then the front office review.
+    app.go(summary.seasonComplete ? 'awards' : 'hub');
   });
 }

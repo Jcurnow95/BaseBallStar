@@ -2,7 +2,7 @@ import type { App } from '../app';
 import type { Handedness, Position } from '../core/types';
 import type { ContractStyle } from '../core/gear';
 import { CONTRACTS, contractById, contractSalary, formatMoney } from '../core/gear';
-import { ARCHETYPES, ATTRIBUTE_LABELS, POSITIONS, createPlayer } from '../core/player';
+import { ARCHETYPES, ATTRIBUTE_LABELS, POSITIONS, ROOKIE_AGE, createPlayer } from '../core/player';
 import { createLeague, playerTeam } from '../core/league';
 import { newSave } from '../core/save';
 import { esc, q, qa } from '../ui/dom';
@@ -28,6 +28,10 @@ export function renderCreate(app: App, mount: HTMLElement): void {
       <div class="panel">
         <label class="field-label" for="pname">Name</label>
         <input id="pname" type="text" maxlength="22" placeholder="e.g. Jeff Smith" autocomplete="off" />
+        <div class="tiny muted" style="margin-top:8px">
+          You are ${ROOKIE_AGE} and signing your first professional contract.
+          Every season you finish, you get a year older.
+        </div>
       </div>
 
       <div class="panel">
@@ -127,7 +131,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
     await showDialog({
       title: 'Contract signed',
       body:
-        `${player.name} signs with the ${playerTeam(league).name} — ${offer.name}, ` +
+        `${player.name}, ${player.age}, signs with the ${playerTeam(league).name} — ${offer.name}, ` +
         `${formatMoney(contractSalary(0, contract))} a game plus bonuses.\n\n` +
         `There is ${formatMoney(player.money)} in the bank — the gear store is open before your first game.`,
       confirmLabel: "Let's go",

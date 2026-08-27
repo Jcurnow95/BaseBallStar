@@ -45,6 +45,11 @@ export interface PlayerProfile {
   position: Position;
   bats: Handedness;
   archetype: string;
+  /**
+   * Years old. A career starts at 18 and ages a year every offseason, so a
+   * long playthrough reads as an arc: prospect, prime, veteran.
+   */
+  age: number;
   /** Base attributes, before equipment. See `core/gear.ts`. */
   attributes: Attributes;
   /** Dollars in the bank, spent in the gear store. */

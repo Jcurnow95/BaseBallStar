@@ -72,6 +72,21 @@ export const ARCHETYPES: Archetype[] = [
 
 export const POSITIONS: Position[] = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'];
 
+/** Every career starts here: eighteen, signing your first professional deal. */
+export const ROOKIE_AGE = 18;
+
+/**
+ * Where a player stands in their career, read off their age alone. Flavour
+ * for the clubhouse — nothing mechanical hangs off the label itself.
+ */
+export function careerPhase(age: number): string {
+  if (age <= 21) return 'Prospect';
+  if (age <= 25) return 'On the rise';
+  if (age <= 31) return 'In his prime';
+  if (age <= 35) return 'Veteran';
+  return 'Old pro';
+}
+
 export const POSITION_LABELS: Record<Position, string> = {
   C: 'Catcher',
   '1B': 'First Base',
@@ -124,6 +139,7 @@ export function createPlayer(
     position,
     bats,
     archetype: archetype.name,
+    age: ROOKIE_AGE,
     attributes,
     // A signing cheque, so the store is worth a look before the first game.
     money: 500,

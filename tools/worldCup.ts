@@ -24,7 +24,7 @@ import {
   regularSeasonGames,
 } from '../src/core/league';
 import { ARCHETYPES, createPlayer, emptyBattingStats } from '../src/core/player';
-import { newSave } from '../src/core/save';
+import { newSave, serialiseSave } from '../src/core/save';
 import type { SaveData } from '../src/core/save';
 import { NATIONS } from '../src/core/nations';
 import {
@@ -295,6 +295,23 @@ console.log('\nfour-year cycle:');
   );
   console.log(`  played in years ${years.join(', ')}`);
   check((save.cupHistory ?? []).length === years.length, 'every tournament filed in history');
+}
+
+// 5. A tournament carries 32 squads into the save. Three careers share one
+//    localStorage origin, so this is worth watching rather than discovering
+//    as a save that silently stops writing.
+console.log('\nsave size:');
+{
+  const save = newCareer(3, 'usa', 7);
+  const rng = new Rng(7);
+  const bare = serialiseSave(save).length;
+  startWorldCup(save, rng, 80);
+  playCup(save, rng);
+  const withCup = serialiseSave(save).length;
+  const kb = (n: number): string => `${(n / 1024).toFixed(0)} kB`;
+  console.log(`  career ${kb(bare)} · with a tournament ${kb(withCup)} · three slots ${kb(withCup * 3)}`);
+  check(withCup < 512 * 1024, `a saved tournament stays under 512 kB (was ${kb(withCup)})`);
+  check(withCup * 3 < 2 * 1024 * 1024, 'three full careers stay under 2 MB');
 }
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} CHECK(S) FAILED.`);

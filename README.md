@@ -398,6 +398,50 @@ and plan whether to burn yourself down before it.
 the attribute reference are always reachable — the calendar only gates the training drills
 themselves, since those are what burn the day.
 
+## The Baseball World Trophy
+
+Every fourth year — the year your career starts, then years 5, 9, 13 and on — the world
+stops for a tournament. Thirty-two countries. Everybody calls the trophy **the Trough**.
+
+It runs in the **preseason**, before opening day, and the club season cannot tell it
+happened: tournament games stay off the league table and out of your season line, so they
+can't touch your scout grade or the MVP ballot. They do count on your **career** line,
+which is the point of playing.
+
+**Picking a country.** You choose one when you create your player, and it never changes.
+Each country wants a minimum overall rating before it will pick you, and the deeper the
+country the steeper the ask — Japan wants a 73, the United States a 71, Great Britain a
+53, India a 44. Choosing a powerhouse means a better team to win it with and a real chance
+of never being called at all. The create screen shows every country's bar before you sign.
+
+**Getting picked** takes two things: Triple-A or better, and a case that clears your
+country's bar. Your case is your overall rating, plus 8 for playing in the majors, plus up
+to 6 for MVPs already on the shelf. Miss on either and you are told why, in the clubhouse
+and on the tournament screen — the tournament is played out without you and you read the
+result like everyone else.
+
+**The format.**
+
+- **Group stage** — eight groups of four, drawn from four pots by strength so no group is
+  stacked and none is a walkover. Round robin, three matchdays, a rest day between each.
+- **Qualifying** — the eight group winners go through, plus the **eight best records among
+  everyone else**. A wildcard round, so a brutal group doesn't end your tournament on its
+  own.
+- **Knockout** — sixteen teams, single elimination, one game a round: last sixteen,
+  quarter-final, semi-final, final. Seeded 1v16 / 8v9 / 5v12 / 4v13 and so on, so the two
+  best records can only meet in the final. Knockout games play until somebody wins.
+
+You play your own country's games; every other match in the round is simulated the moment
+yours is done, so the group tables and the bracket are always current. Difficulty comes off
+the *opponent*, not your rung of the ladder — the weakest countries pitch about like
+Triple-A, the strongest a shade above the majors. Tournament games pay the top rate
+whatever level you were called up from, and you report to camp rested however far the run
+went.
+
+Four trophies live here: **First Cap** for playing at all, **For the Flag** for a home run
+in the tournament, **On the World Stage** for reaching the final, and **The Trough** for
+winning it.
+
 ## Attributes
 
 | Attribute | What it actually does |
@@ -510,6 +554,8 @@ src/
     gameSim.ts       Nine-inning game loop; surfaces your moments as events
     league.ts        Levels, teams, home parks, schedule, calendar, standings
     playoffs.ts      The postseason bracket, series and the trophy
+    nations.ts       The 32 countries that contest the Baseball World Trophy
+    worldCup.ts      The world tournament: the draw, the groups, the bracket
     awards.ts        Award season: the MVP ballot in every league
     achievements.ts  Career milestones you claim for attribute points
     trophies.ts      The trophy case: what a career earns and when it earned it
@@ -547,6 +593,22 @@ device, set `baseball-star:dev` to `1` in localStorage.
 ## Headless harnesses
 
 The models are tuned against measurements, not by feel. All of these run without a browser.
+
+```bash
+npx tsx tools/worldCup.ts
+```
+
+Walks Baseball World Trophy tournaments through the same calls the screens make, on forty
+seeds, and asserts what would be miserable to find by hand: all 48 group matches played
+once each, sixteen qualifiers made of the eight group winners and the eight best records
+behind them, the bracket burning down 8-4-2-1 to a single champion, the player's run
+landing on distinct increasing calendar days, and the club season still sitting at 24
+unplayed games with an empty table. It also checks the four-year cycle lands on years 1, 5,
+9, 13, 17 and that a saved tournament stays inside a sane size — 32 squads go into
+localStorage alongside three careers.
+
+It earned its keep on the first run: a knockout match recorded level had no winner, so the
+next round was never built and the tournament sat half-played in the save forever.
 
 ```bash
 npx tsx tools/fitFlight.ts

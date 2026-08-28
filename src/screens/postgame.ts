@@ -2,6 +2,7 @@ import type { App } from '../app';
 import { battingAverage } from '../core/player';
 import { contractById, formatMoney } from '../core/gear';
 import { ROUND_LABEL } from '../core/playoffs';
+import { ROUND_LABEL as CUP_ROUND_LABEL } from '../core/worldCup';
 import { unlockedPanelHtml } from '../ui/trophyList';
 import { esc, q } from '../ui/dom';
 
@@ -15,9 +16,37 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
   const save = app.requireSave();
   const { stats } = summary;
   const playoff = summary.playoff;
-  const champion = playoff?.status === 'champion';
-  const verdict = champion ? 'CHAMPIONS' : summary.tie ? 'TIE' : summary.win ? 'WIN' : 'LOSS';
+  const cup = summary.cup;
+  const champion = playoff?.status === 'champion' || cup?.status === 'champion';
+  const verdict = champion
+    ? cup
+      ? 'WORLD CHAMPIONS'
+      : 'CHAMPIONS'
+    : summary.tie
+      ? 'TIE'
+      : summary.win
+        ? 'WIN'
+        : 'LOSS';
   const verdictClass = champion ? 'champ' : summary.tie ? 'tie' : summary.win ? 'win' : 'loss';
+
+  // Where the tournament stands. `note` is written where the bracket lives, so
+  // this screen never has to reason about groups or seeding.
+  const cupHtml = cup
+    ? `<div class="notice ${
+        cup.status === 'eliminated' ? 'warn' : cup.status === 'champion' ? 'moment' : ''
+      }" style="margin-bottom:12px">
+         <b>Baseball World Trophy · ${esc(CUP_ROUND_LABEL[cup.round])}</b> · ${esc(cup.note)}
+       </div>`
+    : '';
+
+  // A tournament game has no season line to quote — it is played before
+  // opening day and deliberately kept out of `season` — so the development
+  // panel quotes the tournament instead.
+  const cupLine = save.worldCup?.playerStats;
+  const tournamentAvg =
+    !cupLine || cupLine.ab === 0
+      ? '.000'
+      : (cupLine.hits / cupLine.ab).toFixed(3).replace(/^0/, '');
 
   // Where the series stands, and what it means.
   const seriesHtml = ((): string => {
@@ -88,6 +117,7 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
       </div>
 
       ${seriesHtml}
+      ${cupHtml}
 
       ${
         moments.length > 0
@@ -140,7 +170,10 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
             ? `<div class="reward"><span>Level up ×${summary.levelsGained}</span><b>+${summary.pointsGained} pts</b></div>`
             : ''
         }
-        <div class="reward"><span>Season average</span><b>${battingAverage(save.player.season)}</b></div>
+        <div class="reward">
+          <span>${cup ? 'Tournament average' : 'Season average'}</span>
+          <b>${cup ? tournamentAvg : battingAverage(save.player.season)}</b>
+        </div>
         <div class="reward"><span>Stamina</span><b>${Math.round(save.player.stamina)}%</b></div>
       </div>
 

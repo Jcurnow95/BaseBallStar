@@ -3,6 +3,8 @@ import type { LeagueState } from './league';
 import type { SeasonAwards } from './awards';
 import type { UnlockedTrophy } from './trophies';
 import type { LevelTable } from './otherLeagues';
+import type { CupRecord, WorldCup } from './worldCup';
+import { DEFAULT_NATION_ID } from './nations';
 import { ROOKIE_AGE } from './player';
 import { readKey, removeKey, writeKey } from './storage';
 
@@ -34,6 +36,13 @@ export interface SaveData {
    * load; a missing one is built the first time the standings screen asks.
    */
   otherLevels?: LevelTable[];
+  /**
+   * This year's Baseball World Trophy, if this is one of the years it's played.
+   * Replaced wholesale every fourth year. See `core/worldCup.ts`.
+   */
+  worldCup?: WorldCup;
+  /** Every tournament the career has lived through, oldest first. */
+  cupHistory?: CupRecord[];
 }
 
 export function loadSave(slot: number): SaveData | null {
@@ -80,6 +89,11 @@ function normalise(save: SaveData): void {
   if (typeof player.age !== 'number') {
     player.age = ROOKIE_AGE + Math.max(0, (save.seasonYear ?? 1) - 1);
   }
+  // A career from before countries existed plays under the default flag. It's
+  // the one choice on the create screen that can't be made retroactively, and
+  // leaving it unset would quietly keep the player out of every tournament.
+  if (typeof player.country !== 'string') player.country = DEFAULT_NATION_ID;
+  if (!Array.isArray(save.cupHistory)) save.cupHistory = [];
 }
 
 export function writeSave(slot: number, data: Omit<SaveData, 'version'>): void {

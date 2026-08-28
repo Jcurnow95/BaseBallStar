@@ -2,8 +2,18 @@ import type { App } from '../app';
 import type { Handedness, Position } from '../core/types';
 import type { ContractStyle } from '../core/gear';
 import { CONTRACTS, contractById, contractSalary, formatMoney } from '../core/gear';
-import { ARCHETYPES, ATTRIBUTE_LABELS, POSITIONS, ROOKIE_AGE, createPlayer } from '../core/player';
+import {
+  ARCHETYPES,
+  ATTRIBUTE_LABELS,
+  POSITIONS,
+  ROOKIE_AGE,
+  createPlayer,
+  overallRating,
+} from '../core/player';
 import { createLeague, playerTeam } from '../core/league';
+import { DEFAULT_NATION_ID, NATIONS, nationById } from '../core/nations';
+import { CUP_ELIGIBLE_LEVEL, squadBar, startWorldCup } from '../core/worldCup';
+import { LEVELS } from '../core/league';
 import { newSave } from '../core/save';
 import { esc, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
@@ -13,6 +23,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
   let bats: Handedness = 'R';
   let archetypeId = ARCHETYPES[0].id;
   let contract: ContractStyle = 'standard';
+  let country = DEFAULT_NATION_ID;
 
   const bonusText = (bonuses: Partial<Record<string, number>>): string =>
     Object.entries(bonuses)
@@ -49,6 +60,20 @@ export function renderCreate(app: App, mount: HTMLElement): void {
           <div class="chip on" data-bats="R">Right</div>
           <div class="chip" data-bats="L">Left</div>
         </div>
+      </div>
+
+      <div class="panel">
+        <span class="field-label">Home country</span>
+        <div class="nation-grid" id="nations">
+          ${NATIONS.map(
+            (n) => `
+            <div class="nation-chip${n.id === country ? ' on' : ''}" data-nation="${n.id}"
+                 title="${esc(n.name)} · squad bar ${squadBar(n)} OVR">
+              <b>${n.flag}</b><span>${esc(n.code)}</span>
+            </div>`,
+          ).join('')}
+        </div>
+        <div class="nation-detail" id="nationDetail"></div>
       </div>
 
       <div class="panel">
@@ -102,6 +127,35 @@ export function renderCreate(app: App, mount: HTMLElement): void {
     });
   }
 
+  // The country line spells out the trade the player is making, because it is
+  // the one choice on this screen they can never revisit: a deep baseball
+  // country is a better team to win the Trough with and a harder squad to get
+  // into at all.
+  const nationDetail = q(mount, '#nationDetail');
+  const paintNation = (): void => {
+    const n = nationById(country);
+    const bar = squadBar(n);
+    const hardness =
+      bar >= 68 ? 'One of the hardest squads in the world to break into.'
+      : bar >= 58 ? 'A strong baseball country. You will have to earn the call.'
+      : bar >= 48 ? 'A solid side with room for a good player.'
+      : 'A small baseball country. Get to Triple-A and the shirt is yours.';
+    nationDetail.innerHTML = `
+      <strong>${n.flag} ${esc(n.name)}</strong>
+      <div class="reward"><span>Squad bar</span><b>${bar} OVR</b></div>
+      <div class="reward"><span>Also needs</span><b>${esc(LEVELS[CUP_ELIGIBLE_LEVEL].name)} or better</b></div>
+      <p class="tiny muted">${esc(hardness)} The Baseball World Trophy is played every four years, starting this one.</p>`;
+  };
+  paintNation();
+
+  for (const chip of qa(mount, '#nations .nation-chip')) {
+    chip.addEventListener('click', () => {
+      country = chip.dataset.nation!;
+      qa(mount, '#nations .nation-chip').forEach((c) => c.classList.toggle('on', c === chip));
+      paintNation();
+    });
+  }
+
   for (const card of qa(mount, '#archetypes .arch-card')) {
     card.addEventListener('click', () => {
       archetypeId = card.dataset.arch!;
@@ -121,10 +175,15 @@ export function renderCreate(app: App, mount: HTMLElement): void {
   q(mount, '#start').addEventListener('click', async () => {
     const name = nameInput.value.trim() || 'Jeff Smith';
     const archetype = ARCHETYPES.find((a) => a.id === archetypeId) ?? ARCHETYPES[0];
-    const player = createPlayer(name, position, bats, archetype, contract);
+    const player = createPlayer(name, position, bats, archetype, contract, country);
     const league = createLeague(0, app.rng);
 
     app.save = newSave(player, league);
+
+    // Year one is a tournament year. An eighteen-year-old in Single-A is never
+    // in it, but the world plays for the Trough whether or not you're there,
+    // and the career should start knowing that.
+    const intro = startWorldCup(app.save, app.rng, overallRating(player.attributes));
     app.persist();
 
     const offer = contractById(contract);
@@ -135,6 +194,11 @@ export function renderCreate(app: App, mount: HTMLElement): void {
         `${formatMoney(contractSalary(0, contract))} a game plus bonuses.\n\n` +
         `There is ${formatMoney(player.money)} in the bank — the gear store is open before your first game.`,
       confirmLabel: "Let's go",
+    });
+    await showDialog({
+      title: `Baseball World Trophy · Year ${app.save.seasonYear}`,
+      body: intro.lines.join('\n\n'),
+      confirmLabel: 'On with the season',
     });
     app.go('hub');
   });

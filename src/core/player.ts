@@ -7,6 +7,7 @@ import type {
   Position,
 } from './types';
 import type { ContractStyle } from './gear';
+import { DEFAULT_NATION_ID } from './nations';
 import { clamp } from './rng';
 
 export const ATTRIBUTE_KEYS: AttributeKey[] = [
@@ -128,6 +129,7 @@ export function createPlayer(
   bats: Handedness,
   archetype: Archetype,
   contract: ContractStyle = 'standard',
+  country: string = DEFAULT_NATION_ID,
 ): PlayerProfile {
   const attributes = { ...BASE_ATTRIBUTES };
   for (const key of ATTRIBUTE_KEYS) {
@@ -140,6 +142,7 @@ export function createPlayer(
     bats,
     archetype: archetype.name,
     age: ROOKIE_AGE,
+    country,
     attributes,
     // A signing cheque, so the store is worth a look before the first game.
     money: 500,

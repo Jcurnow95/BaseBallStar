@@ -50,6 +50,12 @@ export interface PlayerProfile {
    * long playthrough reads as an arc: prospect, prime, veteran.
    */
   age: number;
+  /**
+   * Nation id — the flag you play under in the Baseball World Trophy. Chosen
+   * once, when the player is created, and never changed: it decides how hard
+   * you have to be to get picked. See `core/nations.ts`.
+   */
+  country: string;
   /** Base attributes, before equipment. See `core/gear.ts`. */
   attributes: Attributes;
   /** Dollars in the bank, spent in the gear store. */

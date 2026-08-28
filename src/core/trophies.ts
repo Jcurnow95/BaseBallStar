@@ -89,6 +89,19 @@ export function emptyGameFeats(): GameFeats {
   };
 }
 
+/**
+ * What a Baseball World Trophy game was, for the trophies only it can win.
+ * Deliberately a plain shape rather than an import from `core/worldCup.ts` —
+ * the tournament knows about trophies, not the other way round.
+ */
+export interface CupCheck {
+  /** Round label id: 'group', 'r16', 'quarter', 'semi', 'final'. */
+  round: string;
+  /** True on a game that was the final, or that won a place in it. */
+  finalist: boolean;
+  champion: boolean;
+}
+
 /** The game just finished, as the trophy tests want to read it. */
 export interface GameCheck {
   /** The player's line for that game alone. */
@@ -99,6 +112,8 @@ export interface GameCheck {
   win: boolean;
   /** True when the game was a postseason game. */
   playoff: boolean;
+  /** Set when the game was played for your country, not your club. */
+  worldCup?: CupCheck;
 }
 
 /** What a season ended in, checked on awards night rather than after a game. */
@@ -292,6 +307,26 @@ export const TROPHIES: Trophy[] = [
       return !!gc && gc.playoff && gc.stats.homeRuns >= 1;
     },
   },
+  {
+    id: 'first-cap',
+    name: 'First Cap',
+    icon: '🎽',
+    blurb: 'Play a game for your country.',
+    tier: 'moment',
+    headline: true,
+    test: (c) => g(c)?.worldCup != null,
+  },
+  {
+    id: 'cup-homer',
+    name: 'For the Flag',
+    icon: '🎌',
+    blurb: 'Hit a home run in a Baseball World Trophy game.',
+    tier: 'moment',
+    test: (c) => {
+      const gc = g(c);
+      return !!gc?.worldCup && gc.stats.homeRuns >= 1;
+    },
+  },
 
   /* -------------------------------------------------------------- season */
   {
@@ -448,6 +483,24 @@ export const TROPHIES: Trophy[] = [
     tier: 'honor',
     headline: true,
     test: (c) => c.honors?.promoted === true,
+  },
+  {
+    id: 'cup-final',
+    name: 'On the World Stage',
+    icon: '🌍',
+    blurb: 'Reach the Baseball World Trophy final.',
+    tier: 'honor',
+    headline: true,
+    test: (c) => g(c)?.worldCup?.finalist === true,
+  },
+  {
+    id: 'trough',
+    name: 'The Trough',
+    icon: '🥇',
+    blurb: 'Win the Baseball World Trophy.',
+    tier: 'honor',
+    headline: true,
+    test: (c) => g(c)?.worldCup?.champion === true,
   },
   {
     id: 'the-show',

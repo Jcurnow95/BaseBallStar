@@ -2875,6 +2875,12 @@ table.standings td.down {
   color: var(--red);
 }
 
+/* The season log carries four figure columns beside the club names, so it
+   gets the same sideways-scroll treatment as the wide standings table. */
+table.standings.fixtures {
+  min-width: 320px;
+}
+
 /* The season log: the matchup column carries the text, the rest are figures. */
 table.standings.fixtures td:nth-child(2),
 table.standings.fixtures th:nth-child(2) {
@@ -2891,6 +2897,29 @@ table.standings.fixtures th:first-child {
 
 table.standings.fixtures tr.ahead td {
   color: var(--muted);
+}
+
+/* Result, score and running record are three separate readings. Pressed up
+   against each other the W ran into the score and the score into the record,
+   so each gets its own lane with air in front of it. */
+table.standings.fixtures td:nth-child(3),
+table.standings.fixtures th:nth-child(3) {
+  width: 30px;
+  text-align: center;
+  padding-left: 14px;
+}
+
+table.standings.fixtures td:nth-child(4),
+table.standings.fixtures th:nth-child(4) {
+  width: 62px;
+  padding-left: 16px;
+  white-space: nowrap;
+}
+
+table.standings.fixtures td:nth-child(5),
+table.standings.fixtures th:nth-child(5) {
+  width: 56px;
+  padding-left: 16px;
 }
 
 /* W, L or T, sized so a column of them scans down the page. */

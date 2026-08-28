@@ -147,10 +147,12 @@ export function renderFixtures(app: App, mount: HTMLElement): void {
 
       <div class="panel">
         <h2>Fixtures</h2>
-        <table class="standings fixtures">
-          <tr><th>#</th><th>Opponent</th><th>R</th><th>Score</th><th>Record</th></tr>
-          ${log.map(fixtureRow).join('')}
-        </table>
+        <div class="table-scroll">
+          <table class="standings fixtures">
+            <tr><th>#</th><th>Opponent</th><th>R</th><th>Score</th><th>Record</th></tr>
+            ${log.map(fixtureRow).join('')}
+          </table>
+        </div>
       </div>
     </div>
     <button class="btn primary" id="done">Back to Clubhouse</button>`;

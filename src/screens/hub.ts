@@ -143,11 +143,11 @@ export function renderHub(app: App, mount: HTMLElement): void {
         .join('')}
     </div>
     <div class="cal-key tiny muted">
-      <span><i class="cal-day game now"></i> today</span>
-      <span><i class="cal-day game ahead"></i> game</span>
-      <span><i class="cal-day off ahead"></i> off day</span>
-      ${playoffs && playoffs.playerResult !== 'missed' ? '<span><i class="cal-day game playoff ahead"></i> playoff</span>' : ''}
-      <span><i class="cal-day game past"></i> done</span>
+      <span><i class="cal-day game now"></i> Today</span>
+      <span><i class="cal-day game ahead"></i> Game</span>
+      <span><i class="cal-day off ahead"></i> Off day</span>
+      ${playoffs && playoffs.playerResult !== 'missed' ? '<span><i class="cal-day game playoff ahead"></i> Playoff</span>' : ''}
+      <span><i class="cal-day game past"></i> Done</span>
       <span>Day ${Math.min(league.day + 1, league.calendar.length)} of ${league.calendar.length}</span>
     </div>`;
 

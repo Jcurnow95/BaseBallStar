@@ -8,24 +8,17 @@ import {
 } from '../core/league';
 import { syncOtherLevels, tableStandings } from '../core/otherLeagues';
 import { PLAYOFF_TEAMS } from '../core/playoffs';
+import type { StandingsLine } from '../core/seasonStats';
+import { formatDiff, formatPct, gamesBack, standingsLine } from '../core/seasonStats';
 import { kitFor } from '../core/uniforms';
 import { esc, q } from '../ui/dom';
 
 /** One display row, whichever kind of league it came from. */
-interface Row {
+interface Row extends StandingsLine {
   name: string;
-  wins: number;
-  losses: number;
   accent: string;
   kitName: string;
   me: boolean;
-}
-
-/** Games behind the leader, in the usual half-game currency. */
-function gamesBack(leader: Row, t: Row): string {
-  const gb = (leader.wins - t.wins + (t.losses - leader.losses)) / 2;
-  if (gb <= 0) return '—';
-  return gb % 1 === 0 ? String(gb) : gb.toFixed(1);
 }
 
 export function renderStandings(app: App, mount: HTMLElement): void {
@@ -42,9 +35,8 @@ export function renderStandings(app: App, mount: HTMLElement): void {
       return playoffSeedOrder(league).map((t) => {
         const kit = teamKit(league, t.id);
         return {
+          ...standingsLine(t),
           name: t.name,
-          wins: t.wins,
-          losses: t.losses,
           accent: kit.accent,
           kitName: kit.name,
           me: t.id === league.playerTeamId,
@@ -56,9 +48,8 @@ export function renderStandings(app: App, mount: HTMLElement): void {
     return tableStandings(table).map((t, i) => {
       const kit = kitFor(t.kitId, i);
       return {
+        ...standingsLine(t),
         name: t.name,
-        wins: t.wins,
-        losses: t.losses,
         accent: kit.accent,
         kitName: kit.name,
         me: false,
@@ -80,27 +71,37 @@ export function renderStandings(app: App, mount: HTMLElement): void {
       const leader = rows[0];
       const mine = level.id === league.levelId;
       const cutIndex = mine && !league.playoffs ? PLAYOFF_TEAMS - 1 : -1;
+      // The T column earns its place only once somebody in this level has one.
+      const anyTies = rows.some((t) => t.ties > 0);
       return `
       <div class="panel">
         <div class="standings-head">
           <h2>${esc(level.name)}</h2>
           ${mine ? '<span class="you-tag">Your level</span>' : `<span class="tiny muted">${esc(level.short)}</span>`}
         </div>
-        <table class="standings">
-          <tr><th>Team</th><th>W</th><th>L</th><th>GB</th></tr>
-          ${rows
-            .map(
-              (t, i) => `
-            <tr class="${t.me ? 'me' : ''} ${i === cutIndex ? 'cut' : ''}">
-              <td><i class="kit-chip" style="background:${t.accent}" title="${esc(t.kitName)}"></i>${esc(t.name)}${
-                t.me ? '<span class="you-tag">You</span>' : ''
-              }</td>
-              <td>${t.wins}</td><td>${t.losses}</td>
-              <td>${leader ? gamesBack(leader, t) : '—'}</td>
-            </tr>`,
-            )
-            .join('')}
-        </table>
+        <div class="table-scroll">
+          <table class="standings wide">
+            <tr>
+              <th>Team</th><th>W</th><th>L</th>${anyTies ? '<th>T</th>' : ''}
+              <th>Pct</th><th>GB</th><th>RF</th><th>RA</th><th>Diff</th>
+            </tr>
+            ${rows
+              .map(
+                (t, i) => `
+              <tr class="${t.me ? 'me' : ''} ${i === cutIndex ? 'cut' : ''}">
+                <td><i class="kit-chip" style="background:${t.accent}" title="${esc(t.kitName)}"></i>${esc(t.name)}${
+                  t.me ? '<span class="you-tag">You</span>' : ''
+                }</td>
+                <td>${t.wins}</td><td>${t.losses}</td>${anyTies ? `<td>${t.ties}</td>` : ''}
+                <td>${formatPct(t.pct)}</td>
+                <td>${leader ? gamesBack(leader, t) : '—'}</td>
+                <td>${t.runsFor}</td><td>${t.runsAgainst}</td>
+                <td class="${t.diff > 0 ? 'up' : t.diff < 0 ? 'down' : ''}">${formatDiff(t.diff)}</td>
+              </tr>`,
+              )
+              .join('')}
+          </table>
+        </div>
         ${
           cutIndex >= 0
             ? `<div class="tiny muted" style="margin-top:8px">Top ${PLAYOFF_TEAMS} make the playoffs.</div>`
@@ -116,11 +117,15 @@ export function renderStandings(app: App, mount: HTMLElement): void {
         <h2>Around the leagues</h2>
         <div class="tiny muted">
           Every level of the ladder, top to bottom. ${seasonLine}
+          RF and RA are runs scored and allowed; a game still level after twelve
+          innings is called a tie.
         </div>
+        <button class="link-btn" id="fixtures">Your Season Log</button>
       </div>
       ${levelsHtml}
     </div>
     <button class="btn primary" id="done">Back to Clubhouse</button>`;
 
+  q(mount, '#fixtures').addEventListener('click', () => app.go('fixtures'));
   q(mount, '#done').addEventListener('click', () => app.go('hub'));
 }

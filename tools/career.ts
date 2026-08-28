@@ -33,6 +33,7 @@ import {
   nextGame,
   parkForGame,
   playerTeam,
+  recordResult,
   rolloverSeason,
   simulateOtherTeams,
   standings,
@@ -621,14 +622,9 @@ function playCareer(
       scheduled.played = true;
       scheduled.playerTeamScore = sim.score.us;
       scheduled.opponentScore = sim.score.them;
+      scheduled.innings = sim.inningsPlayed;
       if (!scheduled.playoff) {
-        if (sim.score.us > sim.score.them) {
-          myTeam.wins++;
-          opponent.losses++;
-        } else if (sim.score.us < sim.score.them) {
-          myTeam.losses++;
-          opponent.wins++;
-        }
+        recordResult(myTeam, opponent, sim.score.us, sim.score.them);
         simulateOtherTeams(league, rng, [opponent.id]);
       }
       addStats(player.season, sim.gameStats);

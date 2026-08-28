@@ -18,6 +18,7 @@ export type Route =
   | 'trophies'
   | 'seasonEnd'
   | 'standings'
+  | 'fixtures'
   | 'store'
   | 'achievements'
   | 'howto'

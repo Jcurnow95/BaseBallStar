@@ -422,6 +422,76 @@ Clear both and you get called up; miss and you repeat the level.
 Games earn XP → levels → attribute points. Between games you spend Energy on training,
 and each option trades Energy, Stamina and XP differently.
 
+## Award season
+
+The year doesn't end with the last out. Once the trophy is handed out, **awards night**
+runs before the front-office review: **every league in the organization votes an MVP** —
+Single-A, Double-A, Triple-A and the Majors — and your season is on the ballot in the one
+you played in.
+
+You see the winner, the top five of your own league's ballot with their first-place vote
+shares, and a line for each of the other three leagues. Win it and you take a bonus
+(`$600` per level, so `$2,400` in the Majors), an extra attribute point, and a permanent
+line in the **trophy case** on the clubhouse screen.
+
+The complication is that nobody but you has a batting line — the sim only tracks your own
+plate appearances, and everybody else is a name with a rating. So `core/awards.ts`
+*synthesizes* a season for every other batter from their rating and their league's hitting
+environment, and scores those lines against your real one. They're rolled once and kept in
+the save, so the ballot never changes under you.
+
+Voting weighs OPS first, then home runs and RBI, then whether the club won. Those last
+terms are deliberately small thumbs rather than scales — RBI mostly measures who bats in
+front of you, and an early cut of the ballot had a .241 hitter with 24 RBI beating a .321
+hitter with a 1.013 OPS.
+
+Where the bar sits is what makes it worth chasing. `tools/awards.ts` measures it: a great
+season wins MVP roughly half to three quarters of the time depending on the level, an
+ordinary one about one year in eight, and a bad one never.
+
+## The trophy case
+
+An MVP is the one thing a season *votes* on, but most of a career is made of afternoons
+nobody votes on: the ball you hit with the bases loaded, the one that ended a game in the
+bottom of the ninth, the hundredth hit that arrived on a Tuesday. **34 trophies** name
+those, and the **Trophy Case** button in the clubhouse shows all of them — the ones you
+have and the ones you don't, with what each takes, because a locked row that hides its
+requirement is a row nobody chases.
+
+They come in four tiers:
+
+- **Moments** (15) — one game, one swing. Your first hit and first home run, a grand slam,
+  a walk-off, a walk-off homer, an inside-the-park home run, coming back late, the cycle, a
+  two- or three-homer game, a four-hit game, a perfect day at the plate, five RBI, three
+  putouts without an error, and a home run in October.
+- **Season** (8) — 3 / 6 / 10 home runs, 20 RBI, 30 hits, 12 walks, and hitting .350 or .400
+  over a season (minimum 60 at-bats).
+- **Career** (7) — 100 / 250 / 500 hits, 10 / 25 / 50 home runs, 150 RBI.
+- **Honors** (4) — a ring, an MVP, your first call-up, and reaching the Majors.
+
+Some of these can't be read off a box score. A grand slam is only a grand slam because of
+what was on the bases *before* the swing, and a walk-off is only a walk-off because of what
+the scoreboard said before it and after it — so `core/gameSim.ts` watches for them as the
+game runs and hands the flags over afterwards. `core/trophies.ts` never sees the sim,
+only a snapshot, and everything else falls out of the season and career lines that already
+exist.
+
+A trophy is checked once and kept forever, stamped with the year and level it
+happened at. Nothing re-evaluates a locked one against old numbers, so a season that has
+already been banked can never retroactively earn or lose one. A save from before the case
+existed starts empty rather than back-filled — a slam hit two seasons ago left no record to
+find. And because the trophy case fires on the game a milestone actually lands in, the
+postgame screen is where you find out, in a gold panel above your line.
+
+Thresholds are tuned for a **24-game season**, which is about a hundred plate appearances
+and twenty-five hits — a forty-homer target would be unreachable here. `tools/trophies.ts`
+measures where they sit by playing twelve-season careers through the real hitting model:
+star play ends up holding 12 of the 15 numeric trophies, an ordinary career 7, and a
+bad one 2.
+
+The postgame also calls out a slam or a walk-off **every** time, not just the first — a
+trophy fires once in a career, but a walk-off is a walk-off whenever it happens.
+
 ## Project layout
 
 ```
@@ -439,13 +509,19 @@ src/
     pitching.ts      Pitch arsenal, late break, pitcher AI and command
     gameSim.ts       Nine-inning game loop; surfaces your moments as events
     league.ts        Levels, teams, home parks, schedule, calendar, standings
+    playoffs.ts      The postseason bracket, series and the trophy
+    awards.ts        Award season: the MVP ballot in every league
+    achievements.ts  Career milestones you claim for attribute points
+    trophies.ts      The trophy case: what a career earns and when it earned it
     progression.ts   XP, attribute points, training, promotion checks
   game/            Canvas views: atBatView (catcher POV), playView (top-down field),
                    catchOverlay (the stretch-catch minigame), coachTips (one-time hints),
                    weatherFx (rain streaks and the wind flag)
-  screens/         Title, create player, hub, how-to-play, training, gear store, game day, results
+  screens/         Title, create player, hub, how-to-play, training, gear store, game day,
+                   results, awards night, season review, trophy case
   ui/              Canvas helpers, DOM helpers, modal, sprites (animated players)
 tools/             Headless harnesses — see below
+                   (humanBat.ts is the shared "play a real season" model they measure with)
 ```
 
 `core/` deliberately has zero DOM dependencies. If you later want the simulation in Rust
@@ -470,7 +546,7 @@ device, set `baseball-star:dev` to `1` in localStorage.
 
 ## Headless harnesses
 
-The models are tuned against measurements, not by feel. All three run without a browser.
+The models are tuned against measurements, not by feel. All of these run without a browser.
 
 ```bash
 npx tsx tools/fitFlight.ts
@@ -530,6 +606,36 @@ resolve on the field, this harness covers **the plate appearance** (counts, walk
 strikeouts, foul rate, contact quality) plus the abstract resolver still used for
 simulated non-player at-bats. Your own batting line comes out of `playSim.ts`, where your
 baserunning and the defense decide it.
+
+```bash
+npx tsx tools/awards.ts
+```
+
+Checks the MVP ballot. Two halves: correctness (every synthesized batting line is
+internally legal, every league hands out exactly one MVP, vote shares sum to 100%), and
+balance — it plays real seasons through the hitting model at three standards of play and
+reports how often each takes the award. A star season should win about half the time or
+better, an ordinary one rarely, a bad one never. It also asserts the winner *looks* like a
+winner: no MVP more than 12% off the best OPS on his own ballot, which is what stops the
+club-record term handing the trophy to a .225 hitter on a good team.
+
+```bash
+npx tsx tools/trophies.ts
+```
+
+Checks the trophy case, in the same two halves. **Correctness** drives a real `GameSim`
+with the situation forced — bases loaded in the fourth, tied in the bottom of the ninth,
+the same home run on the road — and asserts both what must fire and what must not: a homer
+in the third isn't a walk-off, two men on isn't a slam, a ball in the seats isn't an
+inside-the-parker, and the opponent's grand slam is never yours. It also asserts a brand-new
+career unlocks nothing, and that re-checking never awards the same thing twice.
+
+**Reach** plays twelve-season careers through the hitting model at three standards of play,
+walking up a level every three years, and prints what each one ends up holding. A star
+career should clear most of the season and career tiers but never empty the case; a bad one
+should earn almost nothing on the numbers. Both harnesses share `tools/humanBat.ts`, which
+is the "play a real season" model `tools/awards.ts` also measures with — the answer to *is
+this reachable?* has to come from one place.
 
 ## Building for Android and iOS
 

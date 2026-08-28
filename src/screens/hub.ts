@@ -25,6 +25,7 @@ import {
   seriesOpponent,
   startPlayoffs,
 } from '../core/playoffs';
+import { trophyProgress } from '../core/trophies';
 import { bracketHtml } from '../ui/bracket';
 import { ballparkById } from '../core/ballpark';
 import { describeWeather } from '../core/weather';
@@ -43,6 +44,7 @@ import {
   overallRating,
   slugging,
 } from '../core/player';
+import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
 import { unclaimedAchievements } from '../core/achievements';
 import { esc, meterHtml, q } from '../ui/dom';
@@ -93,6 +95,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const series = playerSeries(league);
   const ovr = overallRating(player.attributes);
   const homePark = ballparkById(team.parkId);
+  const mvps = mvpSeasons(save.awards);
   // Teammates on the way out, so the clubhouse table warns you before names
   // start disappearing over the winter.
   const vets = (team.roster ?? []).filter(nearingRetirement).length;
@@ -157,12 +160,19 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const fraying = GEAR_SLOTS.map((s) => player.gear[s]).filter(
     (g): g is NonNullable<typeof g> => !!g && g.gamesLeft <= 2,
   ).length;
+  // The case wears its own progress, so the clubhouse always says how much of
+  // it is still out there to go and get.
+  const caseProgress = trophyProgress(save.trophies);
+  const caseBadge = `<span class="btn-badge">${caseProgress.earned}/${caseProgress.total}</span>`;
   // Milestones sit one tap away, and the badge nags until the points are
   // collected — an earned reward should never rot unseen.
   const toClaim = unclaimedAchievements(player).length;
   const storeButton = `
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
+    </button>
+    <button class="btn ghost" id="trophies" style="margin-top:8px">
+      Trophy Case${caseBadge}
     </button>
     <button class="btn ghost" id="achievements" style="margin-top:8px">
       Achievements${toClaim > 0 ? `<span class="btn-badge">${toClaim} to claim</span>` : ''}
@@ -191,9 +201,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
   if (seasonDone) {
     matchupHtml = `
       <div class="notice ${playoffs?.playerResult === 'champion' ? '' : 'warn'}" style="margin-bottom:12px">
-        ${wrapUp} Time to find out what the organization thinks of you.
+        ${wrapUp} The ${esc(level.name)} MVP is announced tonight.
       </div>
-      <button class="btn primary" id="finish">Season Review</button>
+      <button class="btn primary" id="finish">Awards Night</button>
       ${devButton}
       ${storeButton}`;
   } else if (upcoming) {
@@ -417,6 +427,16 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div><b>${player.career.rbi}</b><span>RBI</span></div>
         </div>
         ${
+          mvps.length > 0
+            ? `<div style="margin-top:12px">${mvps
+                .map(
+                  (t) =>
+                    `<div class="reward"><span>🏆 Season ${t.year} · ${esc(LEVELS[t.levelId].name)}</span><b>MVP</b></div>`,
+                )
+                .join('')}</div>`
+            : ''
+        }
+        ${
           player.age >= RETIREMENT_WATCH_AGE
             ? `<div class="tiny muted" style="margin-top:12px; line-height:1.55">
                  You're ${player.age}. The players you came up with are done by
@@ -433,7 +453,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
     </div>
   `;
 
-  if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('seasonEnd'));
+  if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('awards'));
   else if (upcoming) {
     // First game ever goes by way of the how-to; after that, straight in.
     q(mount, '#play').addEventListener('click', () =>
@@ -444,6 +464,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   q(mount, '#train').addEventListener('click', () => app.go('training'));
   q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
+  q(mount, '#trophies').addEventListener('click', () => app.go('trophies'));
   q(mount, '#achievements').addEventListener('click', () => app.go('achievements'));
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));

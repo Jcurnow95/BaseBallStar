@@ -5,6 +5,7 @@ import type { BattingStats } from './core/types';
 import type { Earnings } from './core/gear';
 import type { GameScore } from './core/gameSim';
 import type { PlayoffGameOutcome } from './core/playoffs';
+import type { Trophy, GameFeats } from './core/trophies';
 
 export type Route =
   | 'title'
@@ -13,6 +14,8 @@ export type Route =
   | 'training'
   | 'game'
   | 'postgame'
+  | 'awards'
+  | 'trophies'
   | 'seasonEnd'
   | 'standings'
   | 'store'
@@ -42,6 +45,10 @@ export interface PostGameSummary {
   newAchievements: string[];
   /** Where the series stands after this game, when it was a playoff game. */
   playoff?: PlayoffGameOutcome;
+  /** The moments the sim spotted, so the recap can call them out every time. */
+  feats: GameFeats;
+  /** Anything the game just added to the trophy case, in display order. */
+  unlocked: Trophy[];
   seasonComplete: boolean;
 }
 

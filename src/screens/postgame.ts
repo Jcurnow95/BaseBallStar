@@ -2,6 +2,7 @@ import type { App } from '../app';
 import { battingAverage } from '../core/player';
 import { contractById, formatMoney } from '../core/gear';
 import { ROUND_LABEL } from '../core/playoffs';
+import { unlockedPanelHtml } from '../ui/trophyList';
 import { esc, q } from '../ui/dom';
 
 export function renderPostGame(app: App, mount: HTMLElement): void {
@@ -50,6 +51,21 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     return `<div class="notice ${cls}" style="margin-bottom:12px"><b>${round}</b> · ${note}</div>`;
   })();
 
+  // The moments worth saying out loud, whether or not they were new. An
+  // trophy fires once in a career; a walk-off is a walk-off every time.
+  const moments = [
+    summary.feats.walkOffHomeRun
+      ? 'Walk-off home run. You ended it with one swing.'
+      : summary.feats.walkOff
+        ? 'Walk-off. The winning run came home on your at-bat.'
+        : '',
+    summary.feats.grandSlam ? 'Grand slam — all four came around.' : '',
+    summary.feats.insideThePark ? 'Inside-the-park home run. You ran it out.' : '',
+    !summary.feats.walkOff && summary.feats.clutchHit
+      ? 'You brought them back late.'
+      : '',
+  ].filter(Boolean);
+
   const line = [
     `${stats.hits}-for-${stats.ab}`,
     stats.homeRuns > 0 ? `${stats.homeRuns} HR` : '',
@@ -72,6 +88,14 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
       </div>
 
       ${seriesHtml}
+
+      ${
+        moments.length > 0
+          ? `<div class="notice moment">${moments.map((m) => esc(m)).join('<br/>')}</div>`
+          : ''
+      }
+
+      ${unlockedPanelHtml(summary.unlocked)}
 
       <div class="panel">
         <h2>Your line</h2>
@@ -142,11 +166,12 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     </div>
 
     <button class="btn primary" id="next">${
-      summary.seasonComplete ? 'Season Review' : 'Back to Clubhouse'
+      summary.seasonComplete ? 'Awards Night' : 'Back to Clubhouse'
     }</button>
   `;
 
   q(mount, '#next').addEventListener('click', () => {
-    app.go(summary.seasonComplete ? 'seasonEnd' : 'hub');
+    // The year ends with the awards, then the front office review.
+    app.go(summary.seasonComplete ? 'awards' : 'hub');
   });
 }

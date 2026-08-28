@@ -22,6 +22,7 @@ import { describeWeather, windLabel, windMph } from '../core/weather';
 import { uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
 import { addStats } from '../core/player';
+import { checkTrophies } from '../core/trophies';
 import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
 import { clamp } from '../core/rng';
@@ -780,6 +781,23 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     advanceDay(league, app.rng);
     recoverOvernight(player);
 
+    // The trophy case, checked against the game that just ended. The season
+    // and career lines were folded in above, so a career milestone fires on
+    // the game it actually landed in rather than the next one.
+    const unlocked = checkTrophies(save.trophies, {
+      player,
+      levelId: league.levelId,
+      seasonYear: save.seasonYear,
+      game: {
+        stats: sim.gameStats,
+        feats: sim.feats,
+        putouts: sim.putouts,
+        errors: sim.errors,
+        win: sim.score.us > sim.score.them,
+        playoff: !!scheduled.playoff,
+      },
+    });
+
     // Move the postseason along: record a series game, or seed the bracket
     // the moment the regular season is done.
     let playoff: PlayoffGameOutcome | null = null;
@@ -805,6 +823,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       pointsGained: report.pointsGained,
       newAchievements,
       playoff: playoff ?? undefined,
+      feats: { ...sim.feats },
+      unlocked,
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.
       seasonComplete: isSeasonOver(league),

@@ -186,6 +186,20 @@ export function slugging(s: BattingStats): string {
   return (tb / s.ab).toFixed(3).replace(/^0/, '');
 }
 
+/**
+ * On-base plus slugging — the one number that sums a season at the plate, and
+ * what the MVP ballot is argued over. Kept unstripped above 1.000, since a
+ * leading zero is the whole point of the milestone.
+ */
+export function ops(s: BattingStats): string {
+  const denom = s.ab + s.walks;
+  const obp = denom === 0 ? 0 : (s.hits + s.walks) / denom;
+  const tb = s.singles + s.doubles * 2 + s.triples * 3 + s.homeRuns * 4;
+  const slg = s.ab === 0 ? 0 : tb / s.ab;
+  const total = obp + slg;
+  return total >= 1 ? total.toFixed(3) : total.toFixed(3).replace(/^0/, '');
+}
+
 export function addStats(target: BattingStats, delta: Partial<BattingStats>): void {
   for (const key of Object.keys(delta) as (keyof BattingStats)[]) {
     target[key] += delta[key] ?? 0;

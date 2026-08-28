@@ -2604,3 +2604,215 @@ input[type='number'] {
   padding-top: 10px;
   font-weight: 700;
 }
+
+/* ---------------------------------------------------------- award season */
+
+.mvp-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+.mvp-card.me {
+  border-color: var(--gold);
+  background: rgba(255, 209, 102, 0.1);
+}
+
+.mvp-trophy {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.mvp-who {
+  flex: 1;
+  min-width: 0;
+}
+
+.mvp-who strong {
+  display: block;
+  font-size: 17px;
+}
+
+.mvp-who span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mvp-card .ovr b {
+  color: var(--gold);
+}
+
+/* The ballot re-uses the standings table, but its second column is a name,
+   not a number, so the right-aligned default has to be undone. */
+table.standings.ballot th:first-child,
+table.standings.ballot td:first-child {
+  width: 22px;
+  color: var(--muted);
+}
+
+table.standings.ballot th:nth-child(2),
+table.standings.ballot td:nth-child(2) {
+  text-align: left;
+  width: auto;
+}
+
+table.standings.ballot td:nth-child(2) i {
+  display: block;
+  margin-top: 1px;
+  font-style: normal;
+  font-weight: 400;
+}
+
+table.standings.ballot th:nth-child(3),
+table.standings.ballot td:nth-child(3) {
+  width: 52px;
+}
+
+.award-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.award-row:last-of-type {
+  border-bottom: 0;
+}
+
+.award-row .lvl {
+  flex: 0 0 44px;
+  text-align: center;
+  padding: 4px 0;
+  border-radius: 7px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.award-row .what {
+  flex: 1;
+  min-width: 0;
+}
+
+.award-row .what strong {
+  display: block;
+  font-size: 14px;
+}
+
+.award-row .what i {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.award-row .share {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+/* --------------------------------------------------------- trophy case */
+
+/* A moment worth calling out on the recap — the gold cousin of `.notice`. */
+.notice.moment {
+  background: rgba(255, 209, 102, 0.14);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* One achievement, earned or not. Locked rows stay legible on purpose: the
+   blurb is the thing a player is chasing, so hiding it hides the game. */
+.ach-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ach-row:last-of-type {
+  border-bottom: 0;
+}
+
+.ach-row.locked {
+  opacity: 0.5;
+}
+
+.ach-icon {
+  flex: 0 0 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.ach-row.earned .ach-icon {
+  border-color: var(--accent-dim);
+}
+
+.ach-row.headline .ach-icon {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(255, 209, 102, 0.25);
+}
+
+.ach-what {
+  flex: 1;
+  min-width: 0;
+}
+
+.ach-what strong {
+  display: block;
+  font-size: 14px;
+}
+
+.ach-what i {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.ach-when {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-align: right;
+}
+
+.ach-when.new {
+  color: var(--bg);
+  background: var(--gold);
+  border-radius: 6px;
+  padding: 3px 7px;
+}
+
+/* The panel that announces a fresh unlock, on the postgame and the review. */
+.ach-new {
+  border-color: var(--gold);
+}
+
+.ach-new h2 {
+  color: var(--gold);
+}

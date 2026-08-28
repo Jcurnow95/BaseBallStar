@@ -13,7 +13,12 @@
  *    unlock record carries the year and level it happened at: it's history,
  *    not a derived view of the current save.
  *
- * 2. Every test reads a snapshot the caller assembles, never the sim. The
+ * 2. Earning one pays attribute points. The case isn't only a wall of names —
+ *    a trophy moves the player, the same way the claimable milestones in
+ *    `core/achievements.ts` do. A trophy is granted the moment it fires rather
+ *    than claimed, so the points land with it, in `checkTrophies`.
+ *
+ * 3. Every test reads a snapshot the caller assembles, never the sim. The
  *    moments that need base state and the clock (a slam, a walk-off) are
  *    spotted by `gameSim` while the game is live and handed over as flags;
  *    everything else falls out of the season and career lines that already
@@ -39,7 +44,8 @@ export interface Trophy {
   tier: TrophyTier;
   /**
    * True for one that can only ever fire once in a career and is worth calling
-   * out loudly when it does. Purely presentational.
+   * out loudly when it does. It reads on the tile, and it pays an extra
+   * attribute point — see `trophyPoints`.
    */
   headline?: boolean;
   test: (ctx: TrophyContext) => boolean;
@@ -457,6 +463,29 @@ export const TROPHIES: Trophy[] = [
   },
 ];
 
+/**
+ * What a trophy pays in attribute points, by tier, with a bonus for the
+ * once-in-a-career ones. A scale rather than a number written on each trophy,
+ * so the values can't drift apart as trophies are added: a moment is one good
+ * afternoon, a season is a year of work, a career mark is most of a career.
+ */
+const TIER_POINTS: Record<TrophyTier, number> = {
+  moment: 1,
+  season: 2,
+  career: 3,
+  honor: 3,
+};
+
+/** Attribute points paid out the moment a trophy is earned. */
+export function trophyPoints(trophy: Trophy): number {
+  return TIER_POINTS[trophy.tier] + (trophy.headline ? 1 : 0);
+}
+
+/** What a set of trophies is worth, for the screens that total it up. */
+export function totalTrophyPoints(trophies: readonly Trophy[]): number {
+  return trophies.reduce((sum, trophy) => sum + trophyPoints(trophy), 0);
+}
+
 const BY_ID = new Map(TROPHIES.map((a) => [a.id, a]));
 
 export function trophyById(id: string): Trophy | undefined {
@@ -475,11 +504,13 @@ export const TIER_ORDER: TrophyTier[] = ['moment', 'season', 'career', 'honor'];
 
 /**
  * Test everything still locked and bank whatever just came true. Mutates
- * `unlocked` — the caller's save is the record — and returns only the ones
- * that fired on this call, which is what the postgame screen announces.
+ * `unlocked` — the caller's save is the record — pays each fresh trophy's
+ * attribute points onto `ctx.player`, and returns only the ones that fired on
+ * this call, which is what the postgame screen announces.
  *
  * Safe to call as often as you like: a trophy already in the list is
- * never re-tested, so a screen that renders twice can't double-award.
+ * never re-tested, so a screen that renders twice can't double-award the
+ * trophy or the points that come with it.
  */
 export function checkTrophies(
   unlocked: UnlockedTrophy[],
@@ -496,6 +527,9 @@ export function checkTrophies(
       seasonYear: ctx.seasonYear,
       levelId: ctx.levelId,
     });
+    // Paid here rather than claimed later. The unlock record written just
+    // above is the receipt, so the same trophy can never pay twice.
+    ctx.player.attributePoints += trophyPoints(trophy);
     fresh.push(trophy);
   }
 

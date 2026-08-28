@@ -2792,6 +2792,30 @@ table.standings.ballot td:nth-child(3) {
   line-height: 1.4;
 }
 
+/* What a trophy pays. Sits between the name and the date, quiet while the
+   trophy is locked and lit once it's been banked. */
+.ach-pts {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.ach-row.earned .ach-pts {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.ach-row.headline .ach-pts {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
 .ach-when {
   flex: 0 0 auto;
   font-size: 10px;
@@ -2814,5 +2838,84 @@ table.standings.ballot td:nth-child(3) {
 }
 
 .ach-new h2 {
+  color: var(--gold);
+}
+
+/* ------------------------------------------------------- season fixtures */
+
+/* A standings table with runs on it is wider than a phone. Let it scroll
+   sideways inside its panel rather than squeezing the club names to nothing. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table.standings.wide {
+  min-width: 430px;
+}
+
+table.standings.wide td:not(:first-child),
+table.standings.wide th:not(:first-child) {
+  width: 34px;
+}
+
+table.standings.wide td:first-child,
+table.standings.wide th:first-child {
+  white-space: nowrap;
+  padding-right: 10px;
+}
+
+/* Run differential: green when a club has outscored the league, red when it
+   hasn't. The sign says it too, so this reads fine without the colour. */
+table.standings td.up {
+  color: var(--accent);
+}
+
+table.standings td.down {
+  color: var(--red);
+}
+
+/* The season log: the matchup column carries the text, the rest are figures. */
+table.standings.fixtures td:nth-child(2),
+table.standings.fixtures th:nth-child(2) {
+  text-align: left;
+  width: auto;
+  white-space: nowrap;
+}
+
+table.standings.fixtures td:first-child,
+table.standings.fixtures th:first-child {
+  width: 26px;
+  color: var(--muted);
+}
+
+table.standings.fixtures tr.ahead td {
+  color: var(--muted);
+}
+
+/* W, L or T, sized so a column of them scans down the page. */
+.res {
+  display: inline-block;
+  min-width: 17px;
+  padding: 1px 0;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.res.win {
+  background: rgba(53, 194, 106, 0.18);
+  color: var(--accent);
+}
+
+.res.loss {
+  background: rgba(255, 107, 107, 0.16);
+  color: var(--red);
+}
+
+.res.tie {
+  background: rgba(255, 209, 102, 0.16);
   color: var(--gold);
 }

@@ -1,8 +1,10 @@
 import type { App } from '../app';
+import type { Team } from '../core/league';
 import {
   LEVELS,
   SEASON_GAMES,
   ensureRosters,
+  gamesPlayed as clubGames,
   isRegularSeasonOver,
   FORCED_RETIREMENT_AGE,
   RETIREMENT_WATCH_AGE,
@@ -17,6 +19,7 @@ import {
   teamKit,
   weatherForGame,
 } from '../core/league';
+import { formatDiff, formatTally, standingsLine } from '../core/seasonStats';
 import {
   PLAYOFF_TEAMS,
   ROUND_LABEL,
@@ -60,12 +63,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
    * one of your game days, so everyone has the same number left. Clinched when
    * fewer than `PLAYOFF_TEAMS` others could still catch its win total.
    */
-  const clinched = (t: { id: string; wins: number; losses: number }): boolean => {
+  const clinched = (t: Team): boolean => {
     const league = app.requireSave().league;
     if (league.playoffs) return false;
-    const remaining = Math.max(0, SEASON_GAMES - (t.wins + t.losses));
+    const remaining = Math.max(0, SEASON_GAMES - clubGames(t));
     const threats = league.teams.filter(
-      (o) => o.id !== t.id && o.wins + Math.max(0, SEASON_GAMES - (o.wins + o.losses)) >= t.wins,
+      (o) => o.id !== t.id && o.wins + Math.max(0, SEASON_GAMES - clubGames(o)) >= t.wins,
     ).length;
     return remaining < SEASON_GAMES && threats < PLAYOFF_TEAMS;
   };
@@ -74,6 +77,10 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const { player, league } = save;
   const level = LEVELS[league.levelId];
   const team = playerTeam(league);
+  // 12-9, or 12-9-1 once a game has been called level.
+  const record = formatTally(standingsLine(team));
+  // Nobody wants a column of zeroes; the T appears the week a tie does.
+  const leagueHasTies = league.teams.some((t) => (t.ties ?? 0) > 0);
 
   // A save that finished its regular season before there was a postseason
   // gets its bracket seeded on the way in.
@@ -226,7 +233,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <span class="tiny muted">${esc(park.name)} · ${esc(describeWeather(weather))}</span>
         </div>
         <div class="ovr">
-          <b>${line ? `${line.us}-${line.them}` : `${team.wins}-${team.losses}`}</b>
+          <b>${line ? `${line.us}-${line.them}` : record}</b>
           <span>${line ? 'Series' : 'Record'}</span>
         </div>
       </div>
@@ -247,7 +254,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <span class="tiny muted">${nextUp}</span>
         </div>
         <div class="ovr">
-          <b>${team.wins}-${team.losses}</b>
+          <b>${record}</b>
           <span>Record</span>
         </div>
       </div>
@@ -368,17 +375,19 @@ export function renderHub(app: App, mount: HTMLElement): void {
       <div class="panel">
         <h2>${esc(level.name)} standings</h2>
         <table class="standings">
-          <tr><th>Team</th><th>W</th><th>L</th></tr>
+          <tr><th>Team</th><th>W</th><th>L</th>${leagueHasTies ? '<th>T</th>' : ''}<th>Diff</th></tr>
           ${standings(league)
             .map((t, i) => {
               const kit = teamKit(league, t.id);
               const cut = i === PLAYOFF_TEAMS - 1 && !playoffs;
+              const row = standingsLine(t);
               return `
             <tr class="${t.id === league.playerTeamId ? 'me' : ''} ${cut ? 'cut' : ''} ${clinched(t) ? 'clinched' : ''}">
               <td><i class="kit-chip" style="background:${kit.accent}" title="${esc(kit.name)}"></i>${esc(t.name)}${
                 t.id === league.playerTeamId ? '<span class="you-tag">You</span>' : ''
               }</td>
-              <td>${t.wins}</td><td>${t.losses}</td>
+              <td>${t.wins}</td><td>${t.losses}</td>${leagueHasTies ? `<td>${row.ties}</td>` : ''}
+              <td class="${row.diff > 0 ? 'up' : row.diff < 0 ? 'down' : ''}">${formatDiff(row.diff)}</td>
             </tr>`;
             })
             .join('')}
@@ -386,6 +395,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
         <div class="tiny muted" style="margin-top:8px">
           Squares are club colours${playoffs ? '' : ` · Top ${PLAYOFF_TEAMS} make the playoffs · x = clinched`}
         </div>
+        <button class="link-btn" id="seasonLog">Season Log &amp; Fixtures</button>
         <button class="link-btn" id="allStandings">Standings Around the Leagues</button>
       </div>
 
@@ -462,6 +472,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   }
 
   q(mount, '#train').addEventListener('click', () => app.go('training'));
+  q(mount, '#seasonLog').addEventListener('click', () => app.go('fixtures'));
   q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
   q(mount, '#trophies').addEventListener('click', () => app.go('trophies'));

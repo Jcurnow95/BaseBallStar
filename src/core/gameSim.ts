@@ -140,6 +140,12 @@ export class GameSim {
   readonly mustDecide: boolean;
 
   inning = 1;
+  /**
+   * The last inning play actually reached — nine for a regulation game, more
+   * when it went to extras. `inning` runs on past the finish as halves close
+   * out, so this is the number the season log records.
+   */
+  inningsPlayed = 1;
   half: 'top' | 'bottom' = 'top';
   outs = 0;
   bases: boolean[] = [false, false, false];
@@ -291,6 +297,7 @@ export class GameSim {
       return { kind: 'gameOver', ...this.gameResult() };
     }
 
+    this.inningsPlayed = Math.max(this.inningsPlayed, this.inning);
     return this.weAreBatting ? this.stepOurHalf() : this.stepTheirHalf();
   }
 

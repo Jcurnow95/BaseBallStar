@@ -144,6 +144,16 @@ export interface Team {
   name: string;
   wins: number;
   losses: number;
+  /**
+   * Games called level. A regular-season game is stopped after twelve innings
+   * whatever the score, so a tie is a real result here and not a curiosity.
+   * Optional so saves from before ties were counted still load.
+   */
+  ties?: number;
+  /** Runs scored across the season. Optional so older saves still load. */
+  runsFor?: number;
+  /** Runs allowed across the season. Optional so older saves still load. */
+  runsAgainst?: number;
   /** Id of the ballpark this team plays its home games in. */
   parkId: string;
   /** Id of the team's colour identity. Optional so pre-uniform saves still load. */
@@ -171,6 +181,12 @@ export interface ScheduledGame {
   played: boolean;
   playerTeamScore?: number;
   opponentScore?: number;
+  /**
+   * How many innings it took. Nine unless it went to extras, and the only way
+   * the season log can tell a 4-3 grind in the twelfth from a 4-3 in the
+   * ninth. Optional: games played before this was tracked list as regulation.
+   */
+  innings?: number;
   /**
    * The forecast for the day, rolled with the schedule so the clubhouse can
    * warn you about it. Optional so saves from before weather still load; a
@@ -281,6 +297,9 @@ export function createLeague(levelId: number, rng: Rng): LeagueState {
       name: `${city} ${nick}`,
       wins: 0,
       losses: 0,
+      ties: 0,
+      runsFor: 0,
+      runsAgainst: 0,
       parkId: park.id,
       kitId: kit.id,
       strength,
@@ -332,6 +351,9 @@ export function rolloverSeason(league: LeagueState, rng: Rng): string[] {
   for (const team of league.teams) {
     team.wins = 0;
     team.losses = 0;
+    team.ties = 0;
+    team.runsFor = 0;
+    team.runsAgainst = 0;
     const roster = team.roster!;
     const mine = team.id === league.playerTeamId;
 
@@ -509,6 +531,95 @@ export function nextGame(league: LeagueState): ScheduledGame | null {
   return game && !game.played ? game : null;
 }
 
+/* ------------------------------------------------- what a club has done */
+
+/**
+ * The counting stats every club carries, whether it's a club in the player's
+ * own league or just a name on the table one level up. Everything a standings
+ * page shows past the club's name comes out of these five numbers.
+ */
+export interface TeamRecord {
+  wins: number;
+  losses: number;
+  ties?: number;
+  runsFor?: number;
+  runsAgainst?: number;
+}
+
+/** Games this club has actually played, ties included. */
+export const gamesPlayed = (t: TeamRecord): number => t.wins + t.losses + (t.ties ?? 0);
+
+/**
+ * Winning percentage, counted the way baseball counts it: ties are set aside
+ * rather than treated as half a win, so a 10-10-1 club and a 10-10 club both
+ * read .500. A club that hasn't decided a game reads .000, which keeps an
+ * opening-day table in a stable order.
+ */
+export function winningPct(t: TeamRecord): number {
+  const decided = t.wins + t.losses;
+  return decided === 0 ? 0 : t.wins / decided;
+}
+
+/** Runs scored less runs allowed — the quickest read on whether a record is real. */
+export const runDiff = (t: TeamRecord): number => (t.runsFor ?? 0) - (t.runsAgainst ?? 0);
+
+/**
+ * Credit a finished game to both clubs. The single place wins, losses, ties
+ * and run totals are written, so no result can land on the table half-counted
+ * — and the reason a tie is no longer dropped on the floor, which is what
+ * happened when only the win and the loss had somewhere to go.
+ */
+export function recordResult(a: TeamRecord, b: TeamRecord, aRuns: number, bRuns: number): void {
+  a.runsFor = (a.runsFor ?? 0) + aRuns;
+  a.runsAgainst = (a.runsAgainst ?? 0) + bRuns;
+  b.runsFor = (b.runsFor ?? 0) + bRuns;
+  b.runsAgainst = (b.runsAgainst ?? 0) + aRuns;
+
+  if (aRuns > bRuns) {
+    a.wins++;
+    b.losses++;
+  } else if (bRuns > aRuns) {
+    b.wins++;
+    a.losses++;
+  } else {
+    a.ties = (a.ties ?? 0) + 1;
+    b.ties = (b.ties ?? 0) + 1;
+  }
+}
+
+/**
+ * How often a game nobody watched ends level. The player's own games are
+ * called after twelve innings and finish tied a few percent of the time;
+ * simulated games have to do the same, or the T column would never have
+ * anybody in it but you.
+ */
+const SIM_TIE_CHANCE = 0.04;
+
+/**
+ * Play out a game between two clubs nobody watched and put it on the table.
+ * Better clubs win more — a straight coin flip left every team within a game
+ * of .500, so the standings said nothing about anybody — and the score is
+ * invented rather than left at nothing, because a league where five of six
+ * clubs finish on zero runs for has no runs column worth showing.
+ */
+export function simulateGame(
+  a: TeamRecord & { strength?: number },
+  b: TeamRecord & { strength?: number },
+  rng: Rng,
+): void {
+  if (rng.chance(SIM_TIE_CHANCE)) {
+    const level = Math.max(0, Math.round(4 + rng.gaussian() * 2));
+    recordResult(a, b, level, level);
+    return;
+  }
+  // Most games go by a run or two; now and again somebody gets run out of the park.
+  const margin = rng.chance(0.34) ? 1 : rng.chance(0.52) ? 2 : rng.int(3, 9);
+  const loser = Math.max(0, Math.round(3.4 + rng.gaussian() * 2.2));
+  const winner = loser + margin;
+  if (rng.chance(winChance(a, b))) recordResult(a, b, winner, loser);
+  else recordResult(a, b, loser, winner);
+}
+
 /**
  * Advance the rest of the league on days the player also played. Teams already
  * credited with a result (the player's own opponent) are excluded.
@@ -525,15 +636,7 @@ export function simulateOtherTeams(
     const a = others[i];
     const b = others[i + 1];
     if (!b) break;
-    // Better clubs win more. A straight coin flip left every team within a
-    // game of .500, so the standings said nothing about anybody.
-    if (rng.chance(winChance(a, b))) {
-      a.wins++;
-      b.losses++;
-    } else {
-      b.wins++;
-      a.losses++;
-    }
+    simulateGame(a, b, rng);
   }
 }
 
@@ -569,10 +672,8 @@ export function winChance(a: { strength?: number }, b: { strength?: number }): n
   return clamp(0.5 + edge * 0.62, 0.24, 0.76);
 }
 
-const winPct = (t: Team): number => (t.wins + t.losses === 0 ? 0 : t.wins / (t.wins + t.losses));
-
 export function standings(league: LeagueState): Team[] {
-  return [...league.teams].sort((a, b) => winPct(b) - winPct(a));
+  return [...league.teams].sort((a, b) => winningPct(b) - winningPct(a));
 }
 
 /**
@@ -583,6 +684,9 @@ export function standings(league: LeagueState): Team[] {
 export function playoffSeedOrder(league: LeagueState): Team[] {
   return [...league.teams].sort(
     (a, b) =>
-      winPct(b) - winPct(a) || b.wins - a.wins || (b.strength ?? 50) - (a.strength ?? 50),
+      winningPct(b) - winningPct(a) ||
+      b.wins - a.wins ||
+      runDiff(b) - runDiff(a) ||
+      (b.strength ?? 50) - (a.strength ?? 50),
   );
 }

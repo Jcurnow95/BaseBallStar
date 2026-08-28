@@ -4,8 +4,15 @@
  * whole case. Shared so a tile can never drift between them.
  */
 import type { Trophy, UnlockedTrophy } from '../core/trophies';
+import { totalTrophyPoints, trophyPoints } from '../core/trophies';
 import { LEVELS } from '../core/league';
 import { esc } from './dom';
+
+/** What a trophy pays, in the shape both the case and the panel show it. */
+const ptsHtml = (trophy: Trophy): string => {
+  const points = trophyPoints(trophy);
+  return `<span class="ach-pts">+${points} pt${points === 1 ? '' : 's'}</span>`;
+};
 
 /** One row in the case, earned or not. */
 export function trophyRowHtml(
@@ -22,6 +29,7 @@ export function trophyRowHtml(
         <strong>${esc(trophy.name)}</strong>
         <i>${esc(trophy.blurb)}</i>
       </div>
+      ${ptsHtml(trophy)}
       <span class="ach-when">${when}</span>
     </div>`;
 }
@@ -33,6 +41,9 @@ export function trophyRowHtml(
 export function unlockedPanelHtml(unlocked: readonly Trophy[]): string {
   if (unlocked.length === 0) return '';
   const plural = unlocked.length === 1 ? '' : 's';
+  // The points are already in the bank by the time this renders — checkTrophies
+  // pays them out — so the panel says what you have, it doesn't offer it.
+  const points = totalTrophyPoints(unlocked);
   return `
     <div class="panel ach-new">
       <h2>Trophy case${plural ? ` · ${unlocked.length} new` : ''}</h2>
@@ -45,9 +56,16 @@ export function unlockedPanelHtml(unlocked: readonly Trophy[]): string {
             <strong>${esc(a.name)}</strong>
             <i>${esc(a.blurb)}</i>
           </div>
+          ${ptsHtml(a)}
           <span class="ach-when new">NEW</span>
         </div>`,
         )
         .join('')}
+      <div class="reward">
+        <span>Attribute points earned</span><b>+${points} pt${points === 1 ? '' : 's'}</b>
+      </div>
+      <p class="tiny muted" style="margin:8px 0 0; line-height:1.5">
+        Spend them in Player &amp; Development.
+      </p>
     </div>`;
 }

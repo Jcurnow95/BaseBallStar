@@ -1,7 +1,14 @@
 import type { Rng } from './rng';
 import { clamp } from './rng';
 import type { SaveData } from './save';
-import { LEVELS, generateLeagueNames, regularSeasonGames, winChance } from './league';
+import {
+  LEVELS,
+  gamesPlayed,
+  generateLeagueNames,
+  regularSeasonGames,
+  simulateGame,
+  winningPct,
+} from './league';
 import { TEAM_KITS } from './uniforms';
 
 /**
@@ -16,6 +23,12 @@ export interface FarmTeam {
   strength: number;
   wins: number;
   losses: number;
+  /** Games called level. Optional so saves from before ties were counted still load. */
+  ties?: number;
+  /** Runs scored. Optional so saves from before runs were counted still load. */
+  runsFor?: number;
+  /** Runs allowed. Optional so saves from before runs were counted still load. */
+  runsAgainst?: number;
 }
 
 /** One level's standings, for the levels the player is only watching. */
@@ -25,8 +38,8 @@ export interface LevelTable {
 }
 
 /** Everybody in a table plays every round, so any club's count is the table's. */
-const gamesPlayed = (table: LevelTable): number =>
-  table.teams[0] ? table.teams[0].wins + table.teams[0].losses : 0;
+const roundsPlayed = (table: LevelTable): number =>
+  table.teams[0] ? gamesPlayed(table.teams[0]) : 0;
 
 function createLevelTable(levelId: number, rng: Rng, taken: Set<string>): LevelTable {
   const kits = [...TEAM_KITS];
@@ -40,6 +53,9 @@ function createLevelTable(levelId: number, rng: Rng, taken: Set<string>): LevelT
       strength: clamp(50 + rng.gaussian() * 14, 20, 80),
       wins: 0,
       losses: 0,
+      ties: 0,
+      runsFor: 0,
+      runsAgainst: 0,
     };
   });
   return { levelId, teams };
@@ -51,13 +67,7 @@ function playRound(table: LevelTable, rng: Rng): void {
   while (pool.length >= 2) {
     const a = pool.splice(rng.int(0, pool.length - 1), 1)[0];
     const b = pool.splice(rng.int(0, pool.length - 1), 1)[0];
-    if (rng.chance(winChance(a, b))) {
-      a.wins++;
-      b.losses++;
-    } else {
-      b.wins++;
-      a.losses++;
-    }
+    simulateGame(a, b, rng);
   }
 }
 
@@ -87,13 +97,16 @@ export function syncOtherLevels(save: SaveData, rng: Rng): void {
   tables.sort((a, b) => a.levelId - b.levelId);
 
   for (const table of tables) {
-    if (gamesPlayed(table) > target) {
+    if (roundsPlayed(table) > target) {
       for (const team of table.teams) {
         team.wins = 0;
         team.losses = 0;
+        team.ties = 0;
+        team.runsFor = 0;
+        team.runsAgainst = 0;
       }
     }
-    while (gamesPlayed(table) < target) playRound(table, rng);
+    while (roundsPlayed(table) < target) playRound(table, rng);
   }
 
   save.otherLevels = tables;
@@ -101,9 +114,7 @@ export function syncOtherLevels(save: SaveData, rng: Rng): void {
 
 /** The table sorted for display: winning percentage, wins, then club strength. */
 export function tableStandings(table: LevelTable): FarmTeam[] {
-  const pct = (t: FarmTeam): number =>
-    t.wins + t.losses === 0 ? 0 : t.wins / (t.wins + t.losses);
   return [...table.teams].sort(
-    (a, b) => pct(b) - pct(a) || b.wins - a.wins || b.strength - a.strength,
+    (a, b) => winningPct(b) - winningPct(a) || b.wins - a.wins || b.strength - a.strength,
   );
 }

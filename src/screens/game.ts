@@ -27,9 +27,9 @@ import {
   cupPlayerTeam,
   cupTeam,
   groupOf,
+  nationOfTeam,
   recordCupGame,
 } from '../core/worldCup';
-import { nationOfTeam } from '../core/worldCup';
 import { describeWeather, windLabel, windMph } from '../core/weather';
 import { TEAM_KITS, kitFor, uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';

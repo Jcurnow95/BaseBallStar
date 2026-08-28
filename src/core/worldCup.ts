@@ -358,10 +358,20 @@ export function applyMatchResult(
   }
 }
 
-/** Who won a settled match. Group games can be drawn, so this is null there. */
+/**
+ * Who won a settled match. A group game can be drawn, so this is null there.
+ *
+ * A knockout game cannot be: simulated ones are rolled until somebody wins and
+ * the player's are played with `mustDecide`, so a level score should never
+ * reach here. Should one ever manage it, the better seed goes through rather
+ * than the bracket stalling — a round that can't name a winner never builds the
+ * next round, and the tournament would sit half-played in the save forever.
+ */
 export function matchWinner(match: CupMatch): string | null {
   if (!match.played || match.homeRuns == null || match.awayRuns == null) return null;
-  if (match.homeRuns === match.awayRuns) return null;
+  if (match.homeRuns === match.awayRuns) {
+    return match.round === 'group' ? null : match.homeId;
+  }
   return match.homeRuns > match.awayRuns ? match.homeId : match.awayId;
 }
 

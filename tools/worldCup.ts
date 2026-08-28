@@ -24,7 +24,7 @@ import {
   regularSeasonGames,
 } from '../src/core/league';
 import { ARCHETYPES, createPlayer, emptyBattingStats } from '../src/core/player';
-import { newSave } from '../src/core/save';
+import { newSave, serialiseSave } from '../src/core/save';
 import type { SaveData } from '../src/core/save';
 import { NATIONS } from '../src/core/nations';
 import {
@@ -33,8 +33,8 @@ import {
   GROUP_MATCHDAYS,
   KNOCKOUT_ROUNDS,
   KNOCKOUT_TEAMS,
-  cupTeam,
   groupStageDone,
+  groupTable,
   matchWinner,
   matchesIn,
   qualifiers,
@@ -73,18 +73,23 @@ function playCup(save: SaveData, rng: Rng): { games: number; days: number[] } {
     const game = nextGame(league);
     if (!game || !game.worldCup) break;
 
-    // A score with a winner in it, so knockout games can't stall.
-    const us = rng.int(0, 9);
-    const them = us + (rng.chance(0.5) ? 1 : -1) * rng.int(1, 4);
+    // A decided score, the way `mustDecide` guarantees one in a real knockout
+    // game. Built as loser + margin so it can never come out level, which is
+    // the mistake that hid a bracket deadlock the first time this was run.
+    const loser = rng.int(0, 6);
+    const winner = loser + rng.int(1, 4);
+    const weWin = rng.chance(0.5);
+    const us = weWin ? winner : loser;
+    const them = weWin ? loser : winner;
     game.played = true;
     game.playerTeamScore = us;
-    game.opponentScore = Math.max(0, them);
+    game.opponentScore = them;
     games.push(league.day);
 
     // Exactly the order `endGame` uses: the day rolls over, and only then does
     // the tournament schedule whatever comes next.
     advanceDay(league);
-    recordCupGame(save, game, us, Math.max(0, them), rng);
+    recordCupGame(save, game, us, them, rng);
 
     // Skip any off days the tournament inserted.
     while (league.day < league.calendar.length && league.calendar[league.day].gameIndex == null) {
@@ -118,14 +123,21 @@ function assertTournamentSound(save: SaveData, label: string): void {
     new Set(through.map((t) => t.id)).size === KNOCKOUT_TEAMS,
     `${label}: qualifiers are distinct`,
   );
-  // The eight group winners are all in.
-  const winners = cup.groups.map((g) => {
-    const table = [...g.teamIds].map((id) => cupTeam(cup, id));
-    return table.sort((a, b) => b.wins - a.wins)[0].id;
-  });
+  // The eight group winners are all in, and the eight wildcards really are the
+  // best of what was left — no non-qualifier out-records a qualifying wildcard.
+  const winnerIds = cup.groups.map((g) => groupTable(cup, g.id)[0].id);
   check(
-    winners.every((id) => through.some((t) => t.id === id)),
+    winnerIds.every((id) => through.some((t) => t.id === id)),
     `${label}: every group winner qualified`,
+  );
+  const wildcards = through.filter((t) => !winnerIds.includes(t.id));
+  check(wildcards.length === KNOCKOUT_TEAMS - GROUP_COUNT, `${label}: 8 wildcards`);
+  const missed = cup.teams.filter((t) => !through.some((q) => q.id === t.id));
+  const worstIn = Math.min(...wildcards.map((t) => t.wins));
+  const bestOut = Math.max(...missed.map((t) => t.wins));
+  check(
+    worstIn >= bestOut - 1,
+    `${label}: wildcards are the best of the rest (in ${worstIn}W, out ${bestOut}W)`,
   );
 
   const sizes = [8, 4, 2, 1];
@@ -268,10 +280,13 @@ console.log('\nfour-year cycle:');
     save.seasonYear = year;
     save.player.season = emptyBattingStats();
     if ((year - 1) % 4 === 0) {
+      // A fresh league every time, the way a season rollover hands one over.
       save.league = createLeague(CUP_ELIGIBLE_LEVEL, rng);
       startWorldCup(save, rng, 70);
+      playCup(save, rng);
       years.push(year);
       assertTournamentSound(save, `year ${year}`);
+      assertSeasonUntouched(save, `year ${year}`);
     }
   }
   check(
@@ -280,6 +295,23 @@ console.log('\nfour-year cycle:');
   );
   console.log(`  played in years ${years.join(', ')}`);
   check((save.cupHistory ?? []).length === years.length, 'every tournament filed in history');
+}
+
+// 5. A tournament carries 32 squads into the save. Three careers share one
+//    localStorage origin, so this is worth watching rather than discovering
+//    as a save that silently stops writing.
+console.log('\nsave size:');
+{
+  const save = newCareer(3, 'usa', 7);
+  const rng = new Rng(7);
+  const bare = serialiseSave(save).length;
+  startWorldCup(save, rng, 80);
+  playCup(save, rng);
+  const withCup = serialiseSave(save).length;
+  const kb = (n: number): string => `${(n / 1024).toFixed(0)} kB`;
+  console.log(`  career ${kb(bare)} · with a tournament ${kb(withCup)} · three slots ${kb(withCup * 3)}`);
+  check(withCup < 512 * 1024, `a saved tournament stays under 512 kB (was ${kb(withCup)})`);
+  check(withCup * 3 < 2 * 1024 * 1024, 'three full careers stay under 2 MB');
 }
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} CHECK(S) FAILED.`);

@@ -2919,3 +2919,115 @@ table.standings.fixtures tr.ahead td {
   background: rgba(255, 209, 102, 0.16);
   color: var(--gold);
 }
+
+/* ------------------------------------------- the Baseball World Trophy */
+
+/*
+ * Thirty-two flags have to fit on a phone, so the country picker is a dense
+ * grid of flag-over-code tiles rather than the wide chips the rest of the
+ * create screen uses. The detail panel underneath carries the full name and
+ * the squad bar, so nothing important depends on recognising a flag.
+ */
+.nation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: 6px;
+}
+
+.nation-chip {
+  padding: 7px 2px 5px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  text-align: center;
+  cursor: pointer;
+}
+
+.nation-chip b {
+  display: block;
+  font-size: 19px;
+  line-height: 1.15;
+}
+
+.nation-chip span {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.nation-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.nation-chip.on span {
+  color: #05210f;
+}
+
+.nation-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.nation-detail strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 15px;
+}
+
+.nation-detail p {
+  margin: 10px 0 0;
+  line-height: 1.55;
+}
+
+/*
+ * Tournament days on the calendar, in their own colour: the preseason is not
+ * the club season and the strip should not pretend otherwise.
+ */
+.cal-day.cup {
+  background: var(--blue);
+  opacity: 0.8;
+}
+
+.week-day.cup span {
+  color: var(--blue);
+}
+
+/*
+ * Eight group tables stack rather than sit side by side — four rows each is
+ * already the most a phone will take without shrinking the country names.
+ */
+.cup-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.cup-table {
+  font-variant-numeric: tabular-nums;
+}
+
+.cup-table th:first-child {
+  text-align: left;
+}
+
+/*
+ * A sixteen-team bracket drawn as a tree wants about four times the width a
+ * phone has. Rounds are stacked as labelled blocks instead, reusing the club
+ * postseason's cards, with the final's rail picked out in gold.
+ */
+.cup-bracket {
+  display: grid;
+  gap: 14px;
+}
+
+.cup-bracket .bracket-round {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+}
+
+.cup-bracket .bracket-round:last-child {
+  border-left-color: var(--gold);
+}

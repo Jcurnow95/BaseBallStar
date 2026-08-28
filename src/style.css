@@ -2792,6 +2792,30 @@ table.standings.ballot td:nth-child(3) {
   line-height: 1.4;
 }
 
+/* What a trophy pays. Sits between the name and the date, quiet while the
+   trophy is locked and lit once it's been banked. */
+.ach-pts {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.ach-row.earned .ach-pts {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.ach-row.headline .ach-pts {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
 .ach-when {
   flex: 0 0 auto;
   font-size: 10px;

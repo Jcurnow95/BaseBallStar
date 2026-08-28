@@ -15,6 +15,7 @@ import {
   slugging,
 } from '../core/player';
 import { checkPromotion, offseasonAgePoints } from '../core/progression';
+import { isCupYear, startWorldCup } from '../core/worldCup';
 import { esc, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
@@ -183,6 +184,15 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     if (champion) player.money += RING_BONUS;
     if (mvp) player.money += MVP_BONUS;
 
+    // Every fourth year the world tournament comes round, and it is played
+    // before opening day — so it is seeded here, on the new league, after the
+    // player has had their birthday and their offseason points but before they
+    // report to camp. `startWorldCup` puts the group games on the front of the
+    // calendar if they're picked, and plays the whole thing out if they're not.
+    const cupIntro = isCupYear(save.seasonYear)
+      ? startWorldCup(save, app.rng, overallRating(player.attributes))
+      : null;
+
     app.lastGame = null;
     app.persist();
 
@@ -201,6 +211,13 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
         newsText,
       confirmLabel: 'Report to camp',
     });
+    if (cupIntro) {
+      await showDialog({
+        title: `Baseball World Trophy · Year ${save.seasonYear}`,
+        body: cupIntro.lines.join('\n\n'),
+        confirmLabel: cupIntro.selection === 'in' ? 'Report to the squad' : 'Back to work',
+      });
+    }
     app.go('hub');
   });
 }

@@ -5,6 +5,7 @@ import type { BattingStats } from './core/types';
 import type { Earnings } from './core/gear';
 import type { GameScore } from './core/gameSim';
 import type { PlayoffGameOutcome } from './core/playoffs';
+import type { CupGameOutcome } from './core/worldCup';
 import type { Trophy, GameFeats } from './core/trophies';
 
 export type Route =
@@ -21,6 +22,7 @@ export type Route =
   | 'fixtures'
   | 'store'
   | 'achievements'
+  | 'worldCup'
   | 'howto'
   | 'tutorial'
   | 'derby'
@@ -46,6 +48,8 @@ export interface PostGameSummary {
   newAchievements: string[];
   /** Where the series stands after this game, when it was a playoff game. */
   playoff?: PlayoffGameOutcome;
+  /** Where the tournament stands, when it was a Baseball World Trophy game. */
+  cup?: CupGameOutcome;
   /** The moments the sim spotted, so the recap can call them out every time. */
   feats: GameFeats;
   /** Anything the game just added to the trophy case, in display order. */

@@ -9,7 +9,13 @@
  * have to know that, so the case shows both.
  */
 import type { App } from '../app';
-import { TROPHIES, TIER_LABEL, TIER_ORDER, trophyProgress } from '../core/trophies';
+import {
+  TROPHIES,
+  TIER_LABEL,
+  TIER_ORDER,
+  totalTrophyPoints,
+  trophyProgress,
+} from '../core/trophies';
 import { mvpSeasons } from '../core/awards';
 import { LEVELS } from '../core/league';
 import { trophyRowHtml } from '../ui/trophyList';
@@ -21,6 +27,9 @@ export function renderTrophies(app: App, mount: HTMLElement): void {
   const { earned: count, total } = trophyProgress(save.trophies);
   const mvps = mvpSeasons(save.awards);
   const pct = total === 0 ? 0 : Math.round((count / total) * 100);
+  // What the case has already paid, and what the rest of it is still holding.
+  const paid = totalTrophyPoints(TROPHIES.filter((t) => earned.has(t.id)));
+  const outstanding = totalTrophyPoints(TROPHIES) - paid;
 
   const tiers = TIER_ORDER.map((tier) => {
     const rows = TROPHIES.filter((a) => a.tier === tier);
@@ -37,6 +46,11 @@ export function renderTrophies(app: App, mount: HTMLElement): void {
       <div class="panel result-hero">
         <div class="verdict ${count === total ? 'champ' : 'tie'}">TROPHY CASE</div>
         <div class="score">${count} of ${total} earned · ${pct}%</div>
+        <div class="tiny muted" style="margin-top:6px">
+          ${paid} attribute point${paid === 1 ? '' : 's'} paid out${
+            outstanding > 0 ? ` · ${outstanding} still out there` : ''
+          }
+        </div>
       </div>
 
       <div class="panel">

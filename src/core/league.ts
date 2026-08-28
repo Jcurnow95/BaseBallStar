@@ -195,6 +195,12 @@ export interface ScheduledGame {
   weather?: Weather;
   /** Set on postseason games: which series this is game `gameNo` of. */
   playoff?: { seriesId: string; gameNo: number };
+  /**
+   * Set on Baseball World Trophy games: which tournament match this is. These
+   * sit on the *front* of the calendar, before opening day, and are kept off
+   * the club table entirely. See `core/worldCup.ts`.
+   */
+  worldCup?: { matchId: string; round: string };
 }
 
 export interface LeagueState {
@@ -453,9 +459,13 @@ export const today = (league: LeagueState): CalendarDay | null =>
 
 export const isGameDay = (league: LeagueState): boolean => today(league)?.gameIndex != null;
 
-/** The regular-season games, leaving out any postseason games tacked on. */
+/**
+ * The regular-season games: the ones that decide the table. Leaves out the
+ * postseason games tacked on the end and the world tournament games pinned to
+ * the front, neither of which is the club's season.
+ */
 export const regularSeasonGames = (league: LeagueState): ScheduledGame[] =>
-  league.schedule.filter((g) => !g.playoff);
+  league.schedule.filter((g) => !g.playoff && !g.worldCup);
 
 /**
  * The regular season is done when the calendar runs out, or when every

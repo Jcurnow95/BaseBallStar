@@ -11,9 +11,12 @@ import { renderPostGame } from './screens/postgame';
 import { renderAwards } from './screens/awards';
 import { renderTrophies } from './screens/trophies';
 import { renderSeasonEnd } from './screens/seasonEnd';
+import { renderStandings } from './screens/standings';
 import { renderStore } from './screens/store';
+import { renderAchievements } from './screens/achievements';
 import { renderHowto } from './screens/howto';
 import { renderTutorial } from './screens/tutorial';
+import { renderDerby } from './screens/derby';
 import { devMenuEnabled, renderDev } from './screens/dev';
 
 const root = document.getElementById('app');
@@ -29,9 +32,12 @@ app.register('postgame', renderPostGame);
 app.register('awards', renderAwards);
 app.register('trophies', renderTrophies);
 app.register('seasonEnd', renderSeasonEnd);
+app.register('standings', renderStandings);
 app.register('store', renderStore);
+app.register('achievements', renderAchievements);
 app.register('howto', renderHowto);
 app.register('tutorial', renderTutorial);
+app.register('derby', renderDerby);
 if (devMenuEnabled()) app.register('dev', renderDev);
 app.start();
 

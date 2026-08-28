@@ -1,5 +1,5 @@
 import type { App, PostGameSummary } from '../app';
-import type { LogTone, SimEvent } from '../core/gameSim';
+import type { LogTone, SimEvent, StealJump } from '../core/gameSim';
 import { GameSim } from '../core/gameSim';
 import type { Count } from '../core/pitching';
 import {
@@ -22,7 +22,8 @@ import { describeWeather, windLabel, windMph } from '../core/weather';
 import { uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
 import { addStats } from '../core/player';
-import { checkAchievements } from '../core/achievements';
+import { checkTrophies } from '../core/trophies';
+import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
 import { clamp } from '../core/rng';
 import type { BattedBall } from '../core/types';
@@ -36,13 +37,13 @@ import { esc, q } from '../ui/dom';
 import type { FeedIcon } from '../ui/feedIcons';
 import { feedIconFor, feedIconSvg } from '../ui/feedIcons';
 import {
-  isMuted,
+  isChannelMuted,
   playSound,
   resumeAmbience,
   startAmbience,
   stopAmbience,
   suspendAmbience,
-  toggleMuted,
+  toggleChannel,
 } from '../ui/audio';
 
 const NORMAL_DELAY = 850;
@@ -130,10 +131,12 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
           <button class="skip-btn" id="skipAtBat">MY AT-BAT »</button>
           <button class="skip-btn" id="skipInning">END INNING »</button>
         </div>
+        <button class="steal-btn" id="steal" style="display:none"></button>
       </div>
       <div id="host"></div>
       <button class="speed-toggle" id="speed">FAST ▸</button>
-      <button class="sound-toggle" id="sound" aria-label="Toggle sound"></button>
+      <button class="sound-toggle" id="soundSfx" aria-label="Toggle effect sounds"></button>
+      <button class="sound-toggle crowd" id="soundCrowd" aria-label="Toggle crowd and music"></button>
       <button class="pause-toggle" id="pause" aria-label="Pause">❚❚</button>
       <div class="pause-overlay" id="paused">
         <div class="pause-card">
@@ -151,7 +154,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const host = q(mount, '#host');
   const feed = q(mount, '#feed');
   const speedBtn = q<HTMLButtonElement>(mount, '#speed');
-  const soundBtn = q<HTMLButtonElement>(mount, '#sound');
+  const stealBtn = q<HTMLButtonElement>(mount, '#steal');
+  const soundSfxBtn = q<HTMLButtonElement>(mount, '#soundSfx');
+  const soundCrowdBtn = q<HTMLButtonElement>(mount, '#soundCrowd');
 
   /* ------------------------------------------------------------ rendering */
 
@@ -317,6 +322,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   let pendingAt = 0;
   let pendingLeft = 0;
   let paused = false;
+  let pausedAt = 0;
 
   const schedule = (fn: () => void, ms = delay): void => {
     if (disposed) return;
@@ -351,10 +357,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       clearTimeout(timer);
       // Freeze what's left on the clock; wall time keeps going while paused.
       pendingLeft = Math.max(0, pendingAt - performance.now());
+      pausedAt = performance.now();
       suspendAmbience();
       q(mount, '#pauseSub').textContent = `${sim.inningLabel} · ${sim.outs} out`;
     } else {
       resumeAmbience();
+      // A pause during the GO! window shouldn't count against the jump.
+      if (stealPhase === 'go') goAt += performance.now() - pausedAt;
       if (pendingFn) schedule(pendingFn, pendingLeft);
     }
   };
@@ -374,8 +383,79 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     addFeed(`${n} run${n === 1 ? '' : 's'} score.`, ours ? 'good' : 'bad', 'run');
   };
 
+  /** The steal window is one tick long; whatever happens next, the button goes. */
+  const hideSteal = (): void => {
+    stealBtn.style.display = 'none';
+    stealBtn.classList.remove('set', 'go');
+    stealPhase = 'idle';
+  };
+
+  /* ------------------------------------------------------- the steal jump */
+
+  // Pressing STEAL doesn't roll the dice — it starts a read. The pitcher
+  // comes set (WAIT FOR IT…), holds a random beat, then moves (GO!). Your
+  // tap against that cue is the jump: before it and you're picked off, on
+  // it and the posted odds get a bonus, after it and they shrink, never and
+  // you dive back in. Both beats run on the single-slot game clock, so the
+  // pause button freezes the pitcher too.
+  let stealPhase: 'idle' | 'set' | 'go' = 'idle';
+  let goAt = 0;
+
+  function beginStealJump(): void {
+    clearTimeout(timer);
+    pendingFn = null;
+    stealPhase = 'set';
+    stealBtn.textContent = 'WAIT FOR IT…';
+    stealBtn.classList.add('set');
+    setIdle('The pitcher comes set. Go on his first move — break too soon and he has you.', sim.inningLabel);
+    schedule(fireGo, 700 + app.rng.next() * 1100);
+  }
+
+  function fireGo(): void {
+    stealPhase = 'go';
+    goAt = performance.now();
+    stealBtn.textContent = 'GO!';
+    stealBtn.classList.remove('set');
+    stealBtn.classList.add('go');
+    // Freeze past this and you never went: the bail path fires.
+    schedule(missStealJump, 900);
+  }
+
+  function resolveStealTap(): void {
+    if (stealPhase === 'set') {
+      finishSteal('early');
+      return;
+    }
+    const reaction = performance.now() - goAt;
+    const windows = sim.stealJumpWindows();
+    finishSteal(reaction <= windows.great ? 'great' : reaction <= windows.good ? 'good' : 'late');
+  }
+
+  function finishSteal(jump: StealJump): void {
+    hideSteal();
+    const result = sim.attemptSteal(jump);
+    if (!result) return;
+    if (result.success) playSound('cheerShort');
+    addFeed(result.text, result.tone);
+    setIdle(result.text, sim.inningLabel, result.tone);
+    update();
+    schedule(tick, delay + 350);
+  }
+
+  function missStealJump(): void {
+    hideSteal();
+    const result = sim.bailSteal();
+    if (result) {
+      addFeed(result.text, result.tone);
+      setIdle(result.text, sim.inningLabel);
+    }
+    update();
+    schedule(tick, delay + 350);
+  }
+
   const tick = (): void => {
     if (disposed) return;
+    hideSteal();
     const event = sim.step();
     update();
 
@@ -400,6 +480,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       case 'fielding':
         beginFielding(event);
         break;
+      case 'stealChance': {
+        // You're aboard with the next bag open. The button hangs there for one
+        // beat; ignore it and your teammate just hits.
+        stealBtn.textContent = `STEAL ${event.fromBase === 0 ? '2ND' : '3RD'} · ${Math.round(event.chance * 100)}%`;
+        stealBtn.style.display = '';
+        setIdle(
+          `You're on ${event.fromBase === 0 ? 'first' : 'second'} — hit STEAL to read the pitcher.`,
+          sim.inningLabel,
+        );
+        schedule(tick, delay + 1400);
+        break;
+      }
       case 'gameOver':
         endGame();
         break;
@@ -412,7 +504,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
    * still gets every line, so nothing is lost — just the waiting.
    */
   const skipTo = (target: 'atbat' | 'inning'): void => {
-    if (disposed || paused || view) return;
+    if (disposed || paused || view || stealPhase !== 'idle') return;
+    hideSteal();
     clearTimeout(timer);
     pendingFn = null;
 
@@ -433,6 +526,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         case 'log':
           addFeed(event.text, event.tone);
           if (event.runs) addRunsFeed(event.runs.count, event.runs.ours);
+          break;
+        case 'stealChance':
+          // Skipping past the window declines the jump.
           break;
         case 'atBat':
           update();
@@ -650,11 +746,21 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       simulateOtherTeams(league, app.rng, [opponent.id]);
     }
 
+    // Career totals are still pre-game here; snapshot which achievements were
+    // already met so the postgame screen can call out the ones this game earned.
+    const metBefore = new Set(
+      ACHIEVEMENTS.filter((a) => isAchievementMet(a, player)).map((a) => a.id),
+    );
+
     addStats(player.season, sim.gameStats);
     addStats(player.career, sim.gameStats);
     player.fielding.chances += sim.putouts + sim.errors;
     player.fielding.putouts += sim.putouts;
     player.fielding.errors += sim.errors;
+
+    const newAchievements = ACHIEVEMENTS.filter(
+      (a) => !metBefore.has(a.id) && isAchievementMet(a, player),
+    ).map((a) => a.name);
 
     const xp = gameXp(sim.gameStats, sim.putouts);
     const report = grantXp(player, xp);
@@ -678,7 +784,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     // The trophy case, checked against the game that just ended. The season
     // and career lines were folded in above, so a career milestone fires on
     // the game it actually landed in rather than the next one.
-    const unlocked = checkAchievements(save.achievements, {
+    const unlocked = checkTrophies(save.trophies, {
       player,
       levelId: league.levelId,
       seasonYear: save.seasonYear,
@@ -715,6 +821,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       wornOut,
       levelsGained: report.levelsGained,
       pointsGained: report.pointsGained,
+      newAchievements,
       playoff: playoff ?? undefined,
       feats: { ...sim.feats },
       unlocked,
@@ -747,19 +854,32 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   q(mount, '#skipAtBat').addEventListener('click', () => skipTo('atbat'));
   q(mount, '#skipInning').addEventListener('click', () => skipTo('inning'));
 
-  const syncSoundBtn = (): void => {
-    soundBtn.textContent = isMuted() ? '🔇' : '🔊';
-    soundBtn.classList.toggle('off', isMuted());
+  stealBtn.addEventListener('click', () => {
+    if (disposed || paused) return;
+    if (stealPhase === 'idle') beginStealJump();
+    else resolveStealTap();
+  });
+
+  const syncSoundBtns = (): void => {
+    soundSfxBtn.textContent = isChannelMuted('sfx') ? '🔇' : '🔊';
+    soundSfxBtn.classList.toggle('off', isChannelMuted('sfx'));
+    soundCrowdBtn.textContent = '🎵';
+    soundCrowdBtn.classList.toggle('off', isChannelMuted('crowd'));
   };
 
-  soundBtn.addEventListener('click', () => {
-    toggleMuted();
-    syncSoundBtn();
+  soundSfxBtn.addEventListener('click', () => {
+    toggleChannel('sfx');
+    syncSoundBtns();
+  });
+
+  soundCrowdBtn.addEventListener('click', () => {
+    toggleChannel('crowd');
+    syncSoundBtns();
   });
 
   showIdle();
   update();
-  syncSoundBtn();
+  syncSoundBtns();
   if (playoffTag) addFeed(`Postseason baseball: ${playoffTag}.`, 'good');
   addFeed(`${myTeam.name} ${scheduled.home ? 'host' : 'visit'} the ${opponent.name}.`, 'neutral');
   startAmbience();

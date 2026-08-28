@@ -4,7 +4,10 @@ import {
   SEASON_GAMES,
   ensureRosters,
   isRegularSeasonOver,
+  FORCED_RETIREMENT_AGE,
+  RETIREMENT_WATCH_AGE,
   isSeasonOver,
+  nearingRetirement,
   nextGame,
   parkForGame,
   playerTeam,
@@ -22,7 +25,7 @@ import {
   seriesOpponent,
   startPlayoffs,
 } from '../core/playoffs';
-import { achievementProgress } from '../core/achievements';
+import { trophyProgress } from '../core/trophies';
 import { bracketHtml } from '../ui/bracket';
 import { ballparkById } from '../core/ballpark';
 import { describeWeather } from '../core/weather';
@@ -36,15 +39,18 @@ import {
   ATTRIBUTE_LABELS,
   ATTRIBUTE_KEYS,
   battingAverage,
+  careerPhase,
   onBasePct,
   overallRating,
   slugging,
 } from '../core/player';
 import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
+import { unclaimedAchievements } from '../core/achievements';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 import { devMenuEnabled } from './dev';
+import { openDerby } from './derby';
 import { howtoSeen, openHowto } from './howto';
 import { openTutorial } from './tutorial';
 
@@ -89,7 +95,10 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const series = playerSeries(league);
   const ovr = overallRating(player.attributes);
   const homePark = ballparkById(team.parkId);
-  const trophies = mvpSeasons(save.awards);
+  const mvps = mvpSeasons(save.awards);
+  // Teammates on the way out, so the clubhouse table warns you before names
+  // start disappearing over the winter.
+  const vets = (team.roster ?? []).filter(nearingRetirement).length;
 
   // What kind of day a calendar slot is, for the week strip and season strip.
   const dayKind = (index: number): 'game' | 'off' | 'playoff' | 'end' => {
@@ -153,8 +162,11 @@ export function renderHub(app: App, mount: HTMLElement): void {
   ).length;
   // The case wears its own progress, so the clubhouse always says how much of
   // it is still out there to go and get.
-  const caseProgress = achievementProgress(save.achievements);
+  const caseProgress = trophyProgress(save.trophies);
   const caseBadge = `<span class="btn-badge">${caseProgress.earned}/${caseProgress.total}</span>`;
+  // Milestones sit one tap away, and the badge nags until the points are
+  // collected — an earned reward should never rot unseen.
+  const toClaim = unclaimedAchievements(player).length;
   const storeButton = `
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
@@ -162,8 +174,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
     <button class="btn ghost" id="trophies" style="margin-top:8px">
       Trophy Case${caseBadge}
     </button>
+    <button class="btn ghost" id="achievements" style="margin-top:8px">
+      Achievements${toClaim > 0 ? `<span class="btn-badge">${toClaim} to claim</span>` : ''}
+    </button>
     <button class="link-btn" id="howto">How to Play</button>
-    <button class="link-btn" id="tutorial">Practice Drills — Playable Tutorial</button>`;
+    <button class="link-btn" id="tutorial">Practice Drills — Playable Tutorial</button>
+    <button class="link-btn" id="derby">Home Run Derby — Free Play</button>`;
 
   // What the postseason meant for you, once it's settled.
   const wrapUp = ((): string => {
@@ -262,6 +278,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
             <div class="id-chips">
               <span class="id-chip">${esc(level.name)}</span>
               <span class="id-chip">${esc(team.name)}</span>
+              <span class="id-chip" title="${esc(careerPhase(player.age))}">Age ${player.age}</span>
               <span class="id-chip">Bats ${player.bats}</span>
               <span class="id-chip">Lv ${player.level}</span>
               <span class="id-chip">Home · ${esc(homePark.name)}</span>
@@ -369,24 +386,35 @@ export function renderHub(app: App, mount: HTMLElement): void {
         <div class="tiny muted" style="margin-top:8px">
           Squares are club colours${playoffs ? '' : ` · Top ${PLAYOFF_TEAMS} make the playoffs · x = clinched`}
         </div>
+        <button class="link-btn" id="allStandings">Standings Around the Leagues</button>
       </div>
 
       <div class="panel">
         <h2>Clubhouse</h2>
         <table class="standings">
           <tr><th>Player</th><th>Age</th><th>Rating</th></tr>
+          <tr class="me">
+            <td>${esc(player.name)}<span class="you-tag">You</span></td>
+            <td>${player.age}</td><td>${ovr}</td>
+          </tr>
           ${(team.roster ?? [])
             .map(
               (p) => `
             <tr>
               <td>${esc(p.name)}${p.role === 'pitcher' ? ' <span class="tiny muted">P</span>' : ''}</td>
-              <td>${p.age}</td><td>${p.rating}</td>
+              <td class="${nearingRetirement(p) ? 'vet' : ''}" ${
+                nearingRetirement(p) ? 'title="Playing out the end of his career"' : ''
+              }>${p.age}</td><td>${p.rating}</td>
             </tr>`,
             )
             .join('')}
         </table>
         <div class="tiny muted" style="margin-top:10px; text-align:center">
-          Your teammates, for as long as the front office keeps them together.
+          Your teammates, for as long as the front office keeps them together.${
+            vets > 0
+              ? ` <span class="vet">${vets} in gold ${vets === 1 ? 'is' : 'are'} near the end — expect ${vets === 1 ? 'a retirement' : 'retirements'} this winter.</span>`
+              : ''
+          }
         </div>
       </div>
 
@@ -399,8 +427,8 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div><b>${player.career.rbi}</b><span>RBI</span></div>
         </div>
         ${
-          trophies.length > 0
-            ? `<div style="margin-top:12px">${trophies
+          mvps.length > 0
+            ? `<div style="margin-top:12px">${mvps
                 .map(
                   (t) =>
                     `<div class="reward"><span>🏆 Season ${t.year} · ${esc(LEVELS[t.levelId].name)}</span><b>MVP</b></div>`,
@@ -408,7 +436,19 @@ export function renderHub(app: App, mount: HTMLElement): void {
                 .join('')}</div>`
             : ''
         }
-        <button class="btn ghost tiny" id="reset" style="margin-top:14px">Retire &amp; start over</button>
+        ${
+          player.age >= RETIREMENT_WATCH_AGE
+            ? `<div class="tiny muted" style="margin-top:12px; line-height:1.55">
+                 You're ${player.age}. The players you came up with are done by
+                 ${FORCED_RETIREMENT_AGE} — you can keep going as long as you like, and hang
+                 them up whenever you say so.
+               </div>`
+            : ''
+        }
+        <div class="btn-row" style="margin-top:14px">
+          <button class="btn ghost tiny" id="mainmenu">Switch Player</button>
+          <button class="btn ghost tiny" id="reset">Retire &amp; start over</button>
+        </div>
       </div>
     </div>
   `;
@@ -422,12 +462,19 @@ export function renderHub(app: App, mount: HTMLElement): void {
   }
 
   q(mount, '#train').addEventListener('click', () => app.go('training'));
+  q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
   q(mount, '#trophies').addEventListener('click', () => app.go('trophies'));
+  q(mount, '#achievements').addEventListener('click', () => app.go('achievements'));
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));
+  q(mount, '#derby').addEventListener('click', () => openDerby(app, 'hub'));
 
   if (devEnabled) q(mount, '#devmenu').addEventListener('click', () => app.go('dev'));
+
+  // Everything is already persisted as it happens; switching characters is
+  // just a walk back to the title screen.
+  q(mount, '#mainmenu').addEventListener('click', () => app.go('title'));
 
   q(mount, '#reset').addEventListener('click', async () => {
     const ok = await showDialog({

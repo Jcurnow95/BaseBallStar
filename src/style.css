@@ -309,6 +309,35 @@ select {
   letter-spacing: 0.04em;
 }
 
+/* ---------------------------------------------------- title: player slots */
+
+.slot-card {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.slot-card + .slot-card {
+  margin-top: 8px;
+}
+
+.slot-card.empty .who strong {
+  color: var(--muted);
+}
+
+.slot-card.empty .who span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* An open spot's badge is an outline, not a position. */
+.badge.open {
+  background: none;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
+
 /* --------------------------------------------------------------- hub bits */
 
 .hub-head {
@@ -847,8 +876,23 @@ table.standings tr.me td {
   vertical-align: middle;
 }
 
+/* Full-standings screen: a level's name and its tag share the heading line. */
+.standings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 table.standings tr.cut td {
   border-bottom: 1px dashed var(--gold);
+}
+
+/* Clubhouse: a teammate old enough that this could be his last season. */
+.vet,
+table.standings td.vet {
+  color: var(--gold);
+  font-weight: 700;
 }
 
 table.standings tr.clinched td:first-child::after {
@@ -1529,7 +1573,7 @@ table.standings tr.clinched td:first-child::after {
 }
 
 /* Skip controls: the sim exists to be fast-forwarded. Bottom-left, mirroring
-   the speed toggle on the right, so the whole control row reads together. */
+   the steal button on the right, so the whole control row reads together. */
 .sim-skips {
   position: absolute;
   left: 8px;
@@ -1549,6 +1593,63 @@ table.standings tr.clinched td:first-child::after {
   letter-spacing: 0.1em;
   cursor: pointer;
   width: auto;
+}
+
+/* The steal window: bottom-right opposite the skips, gold and pulsing because
+   it's live for one beat and gone. The odds ride on the label. */
+.steal-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  background: linear-gradient(180deg, #ffd166, #eda92c);
+  border: none;
+  color: #2a1d00;
+  border-radius: 99px;
+  padding: 9px 16px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  width: auto;
+  box-shadow: 0 4px 16px rgba(255, 209, 102, 0.4);
+  animation: steal-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes steal-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+/* The jump read. Set: the pitcher is holding — the button goes cold and
+   still, because tapping now is a pickoff. Go: his first move — everything
+   turns green and loud for the beat you have to react in. */
+.steal-btn.set {
+  background: linear-gradient(180deg, #93a5bb, #5d7089);
+  color: #0e1622;
+  animation: none;
+  box-shadow: none;
+}
+
+.steal-btn.go {
+  background: linear-gradient(180deg, #7bf59b, #23c552);
+  color: #04240e;
+  box-shadow: 0 4px 20px rgba(46, 220, 100, 0.55);
+  animation: steal-go 0.4s ease-in-out infinite;
+}
+
+@keyframes steal-go {
+  0%,
+  100% {
+    transform: scale(1.05);
+  }
+  50% {
+    transform: scale(1.18);
+  }
 }
 
 /* Each result punches in rather than swapping silently. */
@@ -1679,11 +1780,14 @@ table.standings tr.clinched td:first-child::after {
   }
 }
 
+/* Top-left beside the pause button, clear of the steal button that owns the
+   bottom-right corner during the sim. */
 .speed-toggle {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
+  left: 50px;
+  top: 8px;
   z-index: 5;
+  height: 34px;
   background: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.18);
   color: #fff;
@@ -1716,8 +1820,16 @@ table.standings tr.clinched td:first-child::after {
   cursor: pointer;
 }
 
+/* The crowd/music toggle sits directly under the effects toggle. */
+.sound-toggle.crowd {
+  top: 48px;
+}
+
+/* Grayscale as well as dimming — the 🎵 button keeps the same glyph either
+   way, so opacity alone is too subtle a difference. */
 .sound-toggle.off {
-  opacity: 0.55;
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 
 /* Top-left, mirroring the sound toggle, for the same reason: clear of the

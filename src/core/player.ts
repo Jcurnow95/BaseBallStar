@@ -30,7 +30,7 @@ export const ATTRIBUTE_LABELS: Record<AttributeKey, string> = {
 export const ATTRIBUTE_BLURBS: Record<AttributeKey, string> = {
   power: 'Exit velocity ceiling. Turns good contact into extra bases.',
   contact: 'Widens the sweet spot on the ball. The most forgiving stat.',
-  vision: 'Reads pitch type out of the hand and holds the strike-zone view longer.',
+  vision: 'Reads pitch type out of the hand and holds the strike-zone view longer. At 65, tells you ball from strike.',
   speed: 'Beats out grounders, stretches gaps, steals bases.',
   fielding: 'Widens your glove window on catch events.',
   arm: 'Throw strength on fielding plays. Keeps runners honest.',
@@ -71,6 +71,32 @@ export const ARCHETYPES: Archetype[] = [
 ];
 
 export const POSITIONS: Position[] = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'];
+
+/** Every career starts here: eighteen, signing your first professional deal. */
+export const ROOKIE_AGE = 18;
+
+/**
+ * Where a player stands in their career, read off their age alone. Flavour
+ * for the clubhouse — nothing mechanical hangs off the label itself.
+ */
+export function careerPhase(age: number): string {
+  if (age <= 21) return 'Prospect';
+  if (age <= 25) return 'On the rise';
+  if (age <= 31) return 'In his prime';
+  if (age <= 35) return 'Veteran';
+  return 'Old pro';
+}
+
+export const POSITION_LABELS: Record<Position, string> = {
+  C: 'Catcher',
+  '1B': 'First Base',
+  '2B': 'Second Base',
+  '3B': 'Third Base',
+  SS: 'Shortstop',
+  LF: 'Left Field',
+  CF: 'Center Field',
+  RF: 'Right Field',
+};
 
 export const emptyBattingStats = (): BattingStats => ({
   pa: 0,
@@ -113,6 +139,7 @@ export function createPlayer(
     position,
     bats,
     archetype: archetype.name,
+    age: ROOKIE_AGE,
     attributes,
     // A signing cheque, so the store is worth a look before the first game.
     money: 500,
@@ -123,6 +150,7 @@ export function createPlayer(
     level: 1,
     xp: 0,
     attributePoints: 3,
+    achievements: [],
     season: emptyBattingStats(),
     career: emptyBattingStats(),
     fielding: { chances: 0, putouts: 0, errors: 0 },

@@ -2,7 +2,7 @@ import type { App } from '../app';
 import { battingAverage } from '../core/player';
 import { contractById, formatMoney } from '../core/gear';
 import { ROUND_LABEL } from '../core/playoffs';
-import { unlockedPanelHtml } from '../ui/achievementList';
+import { unlockedPanelHtml } from '../ui/trophyList';
 import { esc, q } from '../ui/dom';
 
 export function renderPostGame(app: App, mount: HTMLElement): void {
@@ -52,7 +52,7 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
   })();
 
   // The moments worth saying out loud, whether or not they were new. An
-  // achievement fires once in a career; a walk-off is a walk-off every time.
+  // trophy fires once in a career; a walk-off is a walk-off every time.
   const moments = [
     summary.feats.walkOffHomeRun
       ? 'Walk-off home run. You ended it with one swing.'
@@ -71,6 +71,8 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     stats.homeRuns > 0 ? `${stats.homeRuns} HR` : '',
     stats.rbi > 0 ? `${stats.rbi} RBI` : '',
     stats.walks > 0 ? `${stats.walks} BB` : '',
+    stats.stolenBases > 0 ? `${stats.stolenBases} SB` : '',
+    stats.runs > 0 ? `${stats.runs} R` : '',
     stats.strikeouts > 0 ? `${stats.strikeouts} K` : '',
   ]
     .filter(Boolean)
@@ -142,6 +144,15 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
         <div class="reward"><span>Stamina</span><b>${Math.round(save.player.stamina)}%</b></div>
       </div>
 
+      ${
+        summary.newAchievements.length > 0
+          ? `<div class="notice">
+               Achievement${summary.newAchievements.length === 1 ? '' : 's'} unlocked:
+               <b>${summary.newAchievements.map((name) => esc(name)).join('</b>, <b>')}</b>.
+               Claim your points from the Achievements menu in the clubhouse.
+             </div>`
+          : ''
+      }
       ${
         summary.levelsGained > 0
           ? `<div class="notice">You leveled up. Spend your points in Training &amp; Development before the next game.</div>`

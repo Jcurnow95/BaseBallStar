@@ -4,6 +4,7 @@ import {
   ATTRIBUTE_LABELS,
   POSITIONS,
   battingAverage,
+  careerPhase,
   emptyBattingStats,
   onBasePct,
   overallRating,
@@ -147,6 +148,9 @@ export function renderDev(app: App, mount: HTMLElement): void {
             <label class="dev-num"><span>Money</span>
               <input type="number" min="0" step="1" inputmode="numeric"
                      data-prog="money" value="${Math.round(player.money)}" /></label>
+            <label class="dev-num"><span>Age <i class="tiny muted">${esc(careerPhase(player.age))}</i></span>
+              <input type="number" min="14" max="60" step="1" inputmode="numeric"
+                     data-prog="age" value="${player.age}" /></label>
           </div>
           <div class="btn-row" style="margin-top:10px">
             <button class="btn ghost tiny" id="refill">Refill STA / EN</button>
@@ -304,10 +308,10 @@ export function renderDev(app: App, mount: HTMLElement): void {
     }
 
     for (const input of qa<HTMLInputElement>(mount, '[data-prog]')) {
-      const key = input.dataset.prog as 'level' | 'xp' | 'attributePoints' | 'money';
+      const key = input.dataset.prog as 'level' | 'xp' | 'attributePoints' | 'money' | 'age';
       input.addEventListener('change', () => {
-        const min = key === 'level' ? 1 : 0;
-        const max = key === 'money' ? 9_999_999 : 9999;
+        const min = key === 'level' ? 1 : key === 'age' ? 14 : 0;
+        const max = key === 'money' ? 9_999_999 : key === 'age' ? 60 : 9999;
         player[key] = clamp(Math.round(readNumber(input, player[key])), min, max);
         app.persist();
         draw(); // the XP label carries the level's threshold

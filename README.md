@@ -194,6 +194,14 @@ late**. You tap it. Where inside the ball you land decides everything:
 Don't swing and the umpire calls it: pitches outside the zone are balls, so taking a good
 at-bat and drawing a walk is a real option.
 
+**The batting eye.** A timing ring closes on the ball through every pitch and locks onto
+it as it reaches the plate — that's your tap moment. Once your Vision reaches **65** the
+ring also tells you ball from strike: on a pitch over the plate it locks gold and the ball
+glows gold; on one off the plate the gold never comes and the ring washes out — no gold, no
+swing. Below 65 the ring locks white on every pitch, so the timing is there to learn but
+whether it's a strike is your own read of the dashed zone. Progress is tracked in Player
+&amp; Development.
+
 After every swing the game freezes for a moment and draws your tap point (gold X) against
 the ideal contact point (green circle). That circle *is* your Contact attribute — it grows
 as you develop, and shrinks when you're worn down.
@@ -396,7 +404,7 @@ themselves, since those are what burn the day.
 | --- | --- |
 | Power | Raises your exit-velocity ceiling. This is what unlocks home runs. |
 | Contact | Widens the forgiveness circle around the ideal contact point. |
-| Vision | Reads pitch type out of the hand; keeps the strike-zone guide visible. |
+| Vision | Reads pitch type out of the hand; keeps the strike-zone guide visible. At 65, unlocks the batting eye (gold = strike). |
 | Speed | How fast you cover 90 feet. Beats out grounders, takes the extra base. |
 | Fielding | Widens your glove window on catch attempts. |
 | Arm | Throw velocity. Decides whether you can beat a runner to the bag. |
@@ -445,7 +453,7 @@ ordinary one about one year in eight, and a bad one never.
 
 An MVP is the one thing a season *votes* on, but most of a career is made of afternoons
 nobody votes on: the ball you hit with the bases loaded, the one that ended a game in the
-bottom of the ninth, the hundredth hit that arrived on a Tuesday. **34 achievements** name
+bottom of the ninth, the hundredth hit that arrived on a Tuesday. **34 trophies** name
 those, and the **Trophy Case** button in the clubhouse shows all of them — the ones you
 have and the ones you don't, with what each takes, because a locked row that hides its
 requirement is a row nobody chases.
@@ -464,11 +472,11 @@ They come in four tiers:
 Some of these can't be read off a box score. A grand slam is only a grand slam because of
 what was on the bases *before* the swing, and a walk-off is only a walk-off because of what
 the scoreboard said before it and after it — so `core/gameSim.ts` watches for them as the
-game runs and hands the flags over afterwards. `core/achievements.ts` never sees the sim,
+game runs and hands the flags over afterwards. `core/trophies.ts` never sees the sim,
 only a snapshot, and everything else falls out of the season and career lines that already
 exist.
 
-An achievement is checked once and kept forever, stamped with the year and level it
+A trophy is checked once and kept forever, stamped with the year and level it
 happened at. Nothing re-evaluates a locked one against old numbers, so a season that has
 already been banked can never retroactively earn or lose one. A save from before the case
 existed starts empty rather than back-filled — a slam hit two seasons ago left no record to
@@ -476,13 +484,13 @@ find. And because the trophy case fires on the game a milestone actually lands i
 postgame screen is where you find out, in a gold panel above your line.
 
 Thresholds are tuned for a **24-game season**, which is about a hundred plate appearances
-and twenty-five hits — a forty-homer target would be unreachable here. `tools/achievements.ts`
+and twenty-five hits — a forty-homer target would be unreachable here. `tools/trophies.ts`
 measures where they sit by playing twelve-season careers through the real hitting model:
-star play ends up holding 12 of the 15 numeric achievements, an ordinary career 7, and a
+star play ends up holding 12 of the 15 numeric trophies, an ordinary career 7, and a
 bad one 2.
 
-The postgame also calls out a slam or a walk-off **every** time, not just the first — an
-achievement fires once in a career, but a walk-off is a walk-off whenever it happens.
+The postgame also calls out a slam or a walk-off **every** time, not just the first — a
+trophy fires once in a career, but a walk-off is a walk-off whenever it happens.
 
 ## Project layout
 
@@ -503,7 +511,8 @@ src/
     league.ts        Levels, teams, home parks, schedule, calendar, standings
     playoffs.ts      The postseason bracket, series and the trophy
     awards.ts        Award season: the MVP ballot in every league
-    achievements.ts  The trophy case: what a career earns and when it earned it
+    achievements.ts  Career milestones you claim for attribute points
+    trophies.ts      The trophy case: what a career earns and when it earned it
     progression.ts   XP, attribute points, training, promotion checks
   game/            Canvas views: atBatView (catcher POV), playView (top-down field),
                    catchOverlay (the stretch-catch minigame), coachTips (one-time hints),
@@ -571,6 +580,15 @@ once, at the end. It exists because of a real bug: "is the season over?" was ans
 after two or three games. Exits non-zero on failure.
 
 ```bash
+npx tsx tools/aging.ts
+```
+
+Walks a career through twenty winters and checks that everyone gets older properly: the
+player ages a year a season from 18, nobody in the league plays past
+`FORCED_RETIREMENT_AGE`, and the opening-day clubhouse has fully turned over by the end.
+Guards against a league that never renews. Exits non-zero on failure.
+
+```bash
 npx tsx tools/parks.ts
 ```
 
@@ -602,7 +620,7 @@ winner: no MVP more than 12% off the best OPS on his own ballot, which is what s
 club-record term handing the trophy to a .225 hitter on a good team.
 
 ```bash
-npx tsx tools/achievements.ts
+npx tsx tools/trophies.ts
 ```
 
 Checks the trophy case, in the same two halves. **Correctness** drives a real `GameSim`
@@ -651,10 +669,12 @@ A playable vertical slice, not a finished game. What's real:
 - Six ballparks with distinct dimensions and wall heights, and balls that play off the wall
 - Solid outfield walls, and crowds that fill up as you climb the levels
 - Per-team home and away uniforms, so the two sides on the field are always distinct
+- Batting eye (ball/strike read at the plate) unlocked at 65 Vision
 - Perfect hit zone unlocked at 120 combined Contact and Vision
 - Nine-inning games with play-by-play, extra innings, standings, four-level promotion
 - Per-game pay off the contract you signed, and a gear store selling equipment that wears out
 - Day-by-day season calendar with off days for training, and a localStorage save
+- Careers start at 18 and age a winter at a time; teammates grow, fade and retire around you
 
 Deliberately simplified in the live play — worth knowing before you build on it:
 

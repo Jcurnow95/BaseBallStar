@@ -1,4 +1,5 @@
 import { Rng, clamp } from './rng';
+import { ROOKIE_AGE } from './player';
 import type { Ballpark } from './ballpark';
 import { BALLPARKS, ballparkById } from './ballpark';
 import type { TeamKit } from './uniforms';
@@ -110,6 +111,34 @@ export interface RosterPlayer {
   role: 'batter' | 'pitcher';
 }
 
+/* --------------------------------------------------------- growing old */
+
+/** Nobody plays past this. Reach it and the winter is your last. */
+export const FORCED_RETIREMENT_AGE = 38;
+
+/** From here on, every winter is one a player might not come back from. */
+export const RETIREMENT_WATCH_AGE = 33;
+
+/**
+ * Old enough that the clubhouse should say so. Purely a display test — the
+ * roll that actually ends a career is `retiresThisWinter`.
+ */
+export const nearingRetirement = (p: RosterPlayer): boolean =>
+  p.age >= RETIREMENT_WATCH_AGE;
+
+/**
+ * Does this player hang them up over the winter? The odds climb steeply from
+ * 33 (14%) to 37 (70%) and become certain at 38 — and a veteran the league has
+ * already passed by goes early, because a 36-year-old carrying a 25 rating is
+ * a roster spot a kid should have.
+ */
+export function retiresThisWinter(p: RosterPlayer, rng: Rng): boolean {
+  if (p.age >= FORCED_RETIREMENT_AGE) return true;
+  if (p.age < RETIREMENT_WATCH_AGE) return false;
+  if (p.rating < 28) return true;
+  return rng.chance((p.age - (RETIREMENT_WATCH_AGE - 1)) * 0.14);
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -197,7 +226,9 @@ function newRosterPlayer(
 ): RosterPlayer {
   return {
     name: randomName(rng),
-    age: rookie ? rng.int(20, 23) : rng.int(21, 34),
+    // Kids come up around the age you signed at; an established squad is
+    // spread across the working years of a career.
+    age: rookie ? rng.int(ROOKIE_AGE, ROOKIE_AGE + 4) : rng.int(21, 34),
     rating: Math.round(clamp(ratingCentre + rng.gaussian() * 8, 10, 99)),
     role,
   };
@@ -295,6 +326,7 @@ function buildSchedule(teams: Team[], playerTeamId: string, rng: Rng): Scheduled
  */
 export function rolloverSeason(league: LeagueState, rng: Rng): string[] {
   const news: string[] = [];
+  const retiredElsewhere: RosterPlayer[] = [];
   ensureRosters(league, rng);
 
   for (const team of league.teams) {
@@ -307,10 +339,13 @@ export function rolloverSeason(league: LeagueState, rng: Rng): string[] {
       const p = roster[i];
       p.age++;
 
-      if (p.age >= 38 || (p.age >= 33 && rng.chance((p.age - 32) * 0.14))) {
+      if (retiresThisWinter(p, rng)) {
         const rookie = newRosterPlayer(rng, p.role, ratingCentreFor(league, team, p.role) - 4, true);
         roster[i] = rookie;
         if (mine) news.push(`${p.name} retired at ${p.age}. ${rookie.name}, ${rookie.age}, takes the spot.`);
+        // A name good enough to have been worth knowing is worth a line even
+        // when it belonged to somebody else's clubhouse.
+        else if (p.rating >= 70) retiredElsewhere.push(p);
         continue;
       }
 
@@ -330,6 +365,15 @@ export function rolloverSeason(league: LeagueState, rng: Rng): string[] {
     // The league table should follow the talent.
     const batters = teamBatters(team);
     team.strength = clamp(batters.reduce((s, p) => s + p.rating, 0) / Math.max(1, batters.length), 20, 80);
+  }
+
+  if (retiredElsewhere.length > 0) {
+    const best = retiredElsewhere.sort((a, b) => b.rating - a.rating)[0];
+    const others = retiredElsewhere.length - 1;
+    news.push(
+      `Around the league: ${best.name} retired at ${best.age}` +
+        (others > 0 ? `, one of ${retiredElsewhere.length} names to go this winter.` : '.'),
+    );
   }
 
   league.schedule = buildSchedule(league.teams, league.playerTeamId, rng);
@@ -493,8 +537,34 @@ export function simulateOtherTeams(
   }
 }
 
+/**
+ * Six fresh club names for a league the player isn't in. Cities and nicknames
+ * are unique within the six, and no full name repeats one in `taken` — so two
+ * levels of the ladder never both field a Riverside Rapids.
+ */
+export function generateLeagueNames(rng: Rng, taken: ReadonlySet<string>): string[] {
+  const cities = [...CITY_NAMES];
+  const nicks = [...TEAM_NICKS];
+  const names: string[] = [];
+
+  for (let i = 0; i < 6; i++) {
+    const city = cities.splice(rng.int(0, cities.length - 1), 1)[0];
+    let pickAt = rng.int(0, nicks.length - 1);
+    for (let tries = 0; tries < nicks.length; tries++) {
+      const at = (pickAt + tries) % nicks.length;
+      if (!taken.has(`${city} ${nicks[at]}`)) {
+        pickAt = at;
+        break;
+      }
+    }
+    names.push(`${city} ${nicks.splice(pickAt, 1)[0]}`);
+  }
+
+  return names;
+}
+
 /** Chance `a` beats `b`, damped so even the worst club wins its share. */
-export function winChance(a: Team, b: Team): number {
+export function winChance(a: { strength?: number }, b: { strength?: number }): number {
   const edge = ((a.strength ?? 50) - (b.strength ?? 50)) / 100;
   return clamp(0.5 + edge * 0.62, 0.24, 0.76);
 }

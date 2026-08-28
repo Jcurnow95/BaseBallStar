@@ -3,7 +3,7 @@
  *
  * Two jobs, the same two `tools/awards.ts` has.
  *
- * First, correctness. The moment achievements are the ones that can silently
+ * First, correctness. The moment trophies are the ones that can silently
  * stop working: a grand slam is only a grand slam because of what was on the
  * bases *before* the swing, and a walk-off is only a walk-off because of what
  * the scoreboard said before it and after it. Both are read from state the sim
@@ -11,20 +11,20 @@
  * with the situation forced, including the near-misses that must NOT fire: the
  * same home run in the third, and the same home run on the road.
  *
- * Second, reach. An achievement nobody can earn is dead weight on the list, and
+ * Second, reach. A trophy nobody can earn is dead weight on the list, and
  * one everybody earns in week one is noise. The season and career tiers are
  * swept against real, played-out seasons at every level and reported, so the
  * thresholds can be argued with numbers instead of guesses.
  *
- * Run: npx tsx tools/achievements.ts
+ * Run: npx tsx tools/trophies.ts
  */
 import {
-  ACHIEVEMENTS,
-  achievementProgress,
-  checkAchievements,
+  TROPHIES,
+  trophyProgress,
+  checkTrophies,
   emptyGameFeats,
-} from '../src/core/achievements';
-import type { AchievementContext, UnlockedAchievement } from '../src/core/achievements';
+} from '../src/core/trophies';
+import type { TrophyContext, UnlockedTrophy } from '../src/core/trophies';
 import { GameSim } from '../src/core/gameSim';
 import { LEVELS, createLeague, playerTeam, teamById } from '../src/core/league';
 import type { PlayOutcome } from '../src/core/playSim';
@@ -225,22 +225,22 @@ function freshPlayer(): PlayerProfile {
   return createPlayer('Case', 'CF', 'R', ARCHETYPES[0]);
 }
 
-function ctx(over: Partial<AchievementContext> = {}): AchievementContext {
+function ctx(over: Partial<TrophyContext> = {}): TrophyContext {
   return { player: freshPlayer(), levelId: 0, seasonYear: 1, ...over };
 }
 
 console.log('\n=== The case ===\n');
 {
-  const ids = ACHIEVEMENTS.map((a) => a.id);
+  const ids = TROPHIES.map((a) => a.id);
   check('every id is unique', new Set(ids).size === ids.length);
   check(
-    'every achievement is named and explained',
-    ACHIEVEMENTS.every((a) => a.name.trim() && a.blurb.trim() && a.icon.trim()),
+    'every trophy is named and explained',
+    TROPHIES.every((a) => a.name.trim() && a.blurb.trim() && a.icon.trim()),
   );
 
   // The one that matters most on day one: a brand-new career owns nothing.
-  const empty: UnlockedAchievement[] = [];
-  const onCreate = checkAchievements(empty, ctx());
+  const empty: UnlockedTrophy[] = [];
+  const onCreate = checkTrophies(empty, ctx());
   check(
     'a new career starts with an empty case',
     onCreate.length === 0,
@@ -248,8 +248,8 @@ console.log('\n=== The case ===\n');
   );
 
   // ...and a new career in the majors still owns exactly one: being there.
-  const debut: UnlockedAchievement[] = [];
-  const inTheShow = checkAchievements(debut, ctx({ levelId: 3 }));
+  const debut: UnlockedTrophy[] = [];
+  const inTheShow = checkTrophies(debut, ctx({ levelId: 3 }));
   check(
     'starting in the majors earns The Show and nothing else',
     inTheShow.length === 1 && inTheShow[0].id === 'the-show',
@@ -257,12 +257,12 @@ console.log('\n=== The case ===\n');
   );
 
   // Unlocks are once and for all, however many times a screen re-renders.
-  const held: UnlockedAchievement[] = [];
+  const held: UnlockedTrophy[] = [];
   const player = freshPlayer();
   player.career.hits = 1;
   player.season.hits = 1;
-  const first = checkAchievements(held, ctx({ player }));
-  const again = checkAchievements(held, ctx({ player }));
+  const first = checkTrophies(held, ctx({ player }));
+  const again = checkTrophies(held, ctx({ player }));
   check('the first hit unlocks once', first.some((a) => a.id === 'first-hit'));
   check('re-checking awards nothing twice', again.length === 0);
   check('the case holds one record per id', held.length === new Set(held.map((h) => h.id)).size);
@@ -270,7 +270,7 @@ console.log('\n=== The case ===\n');
   const stamped = held.find((h) => h.id === 'first-hit');
   check('an unlock records the year and level', stamped?.seasonYear === 1 && stamped.levelId === 0);
 
-  /* --------------------------------------------------- box-score achievements */
+  /* --------------------------------------------------- box-score trophies */
 
   const game = (over: Partial<BattingStats>): BattingStats => ({ ...emptyBattingStats(), ...over });
 
@@ -284,7 +284,7 @@ console.log('\n=== The case ===\n');
       playoff: false,
     },
   });
-  const cycleUnlocks = checkAchievements([], cycleCtx).map((a) => a.id);
+  const cycleUnlocks = checkTrophies([], cycleCtx).map((a) => a.id);
   check('the cycle is spotted', cycleUnlocks.includes('cycle'));
   check('a four-hit game comes with it', cycleUnlocks.includes('four-hit-game'));
   check('one homer is not a two-homer game', !cycleUnlocks.includes('multi-homer'));
@@ -302,7 +302,7 @@ console.log('\n=== The case ===\n');
   });
   check(
     'three hits in four trips is not a perfect day',
-    !checkAchievements([], blemished).some((a) => a.id === 'perfect-day'),
+    !checkTrophies([], blemished).some((a) => a.id === 'perfect-day'),
   );
 
   const walked = ctx({
@@ -317,7 +317,7 @@ console.log('\n=== The case ===\n');
   });
   check(
     'three hits and a walk is a perfect day',
-    checkAchievements([], walked).some((a) => a.id === 'perfect-day'),
+    checkTrophies([], walked).some((a) => a.id === 'perfect-day'),
   );
 
   const clean = ctx({
@@ -332,7 +332,7 @@ console.log('\n=== The case ===\n');
   });
   check(
     'three putouts and no errors flashes leather',
-    checkAchievements([], clean).some((a) => a.id === 'leather'),
+    checkTrophies([], clean).some((a) => a.id === 'leather'),
   );
 
   const muffed = ctx({
@@ -347,7 +347,7 @@ console.log('\n=== The case ===\n');
   });
   check(
     'an error takes the leather away',
-    !checkAchievements([], muffed).some((a) => a.id === 'leather'),
+    !checkTrophies([], muffed).some((a) => a.id === 'leather'),
   );
 
   const october = ctx({
@@ -360,7 +360,7 @@ console.log('\n=== The case ===\n');
       playoff: true,
     },
   });
-  const octoberIds = checkAchievements([], october).map((a) => a.id);
+  const octoberIds = checkTrophies([], october).map((a) => a.id);
   check('a playoff homer is October power', octoberIds.includes('october-homer'));
 
   const regular = ctx({
@@ -375,7 +375,7 @@ console.log('\n=== The case ===\n');
   });
   check(
     'a July homer is not',
-    !checkAchievements([], regular).some((a) => a.id === 'october-homer'),
+    !checkTrophies([], regular).some((a) => a.id === 'october-homer'),
   );
 
   /* -------------------------------------------------------------- the honors */
@@ -384,7 +384,7 @@ console.log('\n=== The case ===\n');
     levelId: 2,
     honors: { champion: true, mvp: true, promoted: true, nextLevelId: 3 },
   });
-  const honorIds = checkAchievements([], honored).map((a) => a.id);
+  const honorIds = checkTrophies([], honored).map((a) => a.id);
   check('a ring is banked', honorIds.includes('ring'));
   check('an MVP is banked', honorIds.includes('mvp'));
   check('the call-up is banked', honorIds.includes('call-up'));
@@ -396,15 +396,15 @@ console.log('\n=== The case ===\n');
   });
   check(
     'a call-up to Triple-A is not The Show',
-    !checkAchievements([], stuck).some((a) => a.id === 'the-show'),
+    !checkTrophies([], stuck).some((a) => a.id === 'the-show'),
   );
 
-  const progress = achievementProgress([{ id: 'ring', seasonYear: 1, levelId: 0 }]);
-  check('progress counts against the live list', progress.total === ACHIEVEMENTS.length);
+  const progress = trophyProgress([{ id: 'ring', seasonYear: 1, levelId: 0 }]);
+  check('progress counts against the live list', progress.total === TROPHIES.length);
   check('progress counts what is held', progress.earned === 1);
   check(
     'a retired id cannot inflate the count',
-    achievementProgress([{ id: 'gone-in-a-later-build', seasonYear: 1, levelId: 0 }]).earned === 0,
+    trophyProgress([{ id: 'gone-in-a-later-build', seasonYear: 1, levelId: 0 }]).earned === 0,
   );
 }
 
@@ -431,7 +431,7 @@ console.log('\n=== Reach, over a twelve-season career ===\n');
 
   for (const skill of SKILLS) {
     const rng = new Rng(4242);
-    const unlocked: UnlockedAchievement[] = [];
+    const unlocked: UnlockedTrophy[] = [];
     const career = emptyBattingStats();
     let bestSeason = '';
     let bestHr = -1;
@@ -450,12 +450,12 @@ console.log('\n=== Reach, over a twelve-season career ===\n');
           `${player.season.rbi} RBI · ${player.season.hits} H`;
       }
 
-      checkAchievements(unlocked, { player, levelId, seasonYear: year });
+      checkTrophies(unlocked, { player, levelId, seasonYear: year });
     }
 
     const held = new Set(unlocked.map((u) => u.id));
     const byTier = (['season', 'career'] as const).map((tier) => {
-      const rows = ACHIEVEMENTS.filter((a) => a.tier === tier);
+      const rows = TROPHIES.filter((a) => a.tier === tier);
       return `${tier} ${rows.filter((a) => held.has(a.id)).length}/${rows.length}`;
     });
 
@@ -465,18 +465,18 @@ console.log('\n=== Reach, over a twelve-season career ===\n');
       `    career          ${career.hits} H · ${career.homeRuns} HR · ${career.rbi} RBI · ${career.walks} BB`,
     );
     console.log(`    earned          ${byTier.join('  ·  ')}`);
-    const missed = ACHIEVEMENTS.filter(
+    const missed = TROPHIES.filter(
       (a) => (a.tier === 'season' || a.tier === 'career') && !held.has(a.id),
     ).map((a) => a.name);
     console.log(`    still out there ${missed.length ? missed.join(', ') : '— nothing'}\n`);
 
-    const seasonTier = ACHIEVEMENTS.filter((a) => a.tier === 'season');
-    const careerTier = ACHIEVEMENTS.filter((a) => a.tier === 'career');
-    const got = (rows: typeof ACHIEVEMENTS): number => rows.filter((a) => held.has(a.id)).length;
+    const seasonTier = TROPHIES.filter((a) => a.tier === 'season');
+    const careerTier = TROPHIES.filter((a) => a.tier === 'career');
+    const got = (rows: typeof TROPHIES): number => rows.filter((a) => held.has(a.id)).length;
 
     if (skill.name === 'star') {
       // A dozen years of star play has to clear most of both tiers, or the
-      // numbers on the list are aspirations rather than achievements.
+      // numbers on the list are aspirations rather than trophies.
       check(
         'a star career clears most of the season tier',
         got(seasonTier) >= seasonTier.length / 2,

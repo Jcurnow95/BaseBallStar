@@ -11,6 +11,7 @@ import {
   nextGame,
   parkForGame,
   playerTeam,
+  recordResult,
   simulateOtherTeams,
   teamById,
   teamKit,
@@ -732,17 +733,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     scheduled.played = true;
     scheduled.playerTeamScore = sim.score.us;
     scheduled.opponentScore = sim.score.them;
+    scheduled.innings = sim.inningsPlayed;
 
     // Only the regular season counts on the table. A playoff game lives on
-    // its series instead.
+    // its series instead. A game called level after twelve innings goes on as
+    // a tie rather than nowhere, which is where it used to go.
     if (!scheduled.playoff) {
-      if (sim.score.us > sim.score.them) {
-        myTeam.wins++;
-        opponent.losses++;
-      } else if (sim.score.us < sim.score.them) {
-        myTeam.losses++;
-        opponent.wins++;
-      }
+      recordResult(myTeam, opponent, sim.score.us, sim.score.them);
       simulateOtherTeams(league, app.rng, [opponent.id]);
     }
 

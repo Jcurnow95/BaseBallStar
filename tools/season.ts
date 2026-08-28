@@ -19,6 +19,8 @@ import {
   parkForGame,
   playoffSeedOrder,
   regularSeasonGames,
+  gamesPlayed as clubGames,
+  recordResult,
   simulateOtherTeams,
   teamById,
 } from '../src/core/league';
@@ -71,13 +73,7 @@ for (const seed of [1, 7, 99, 2024, 555]) {
       if (game.playoff) {
         playoffGames++;
       } else {
-        if (won) {
-          teamById(league, league.playerTeamId).wins++;
-          opponent.losses++;
-        } else {
-          teamById(league, league.playerTeamId).losses++;
-          opponent.wins++;
-        }
+        recordResult(teamById(league, league.playerTeamId), opponent, won ? 5 : 2, won ? 2 : 5);
         simulateOtherTeams(league, rng, [opponent.id]);
         gamesPlayed++;
       }
@@ -155,7 +151,7 @@ for (const seed of [1, 7, 99, 2024, 555]) {
   check(
     `${label}: regular-season table untouched by the postseason`,
     regularSeasonGames(league).length === SEASON_GAMES &&
-      league.teams.every((t) => t.wins + t.losses === SEASON_GAMES),
+      league.teams.every((t) => clubGames(t) === SEASON_GAMES),
   );
   check(
     `${label}: every playoff game sits on exactly one calendar day`,

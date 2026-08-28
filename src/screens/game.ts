@@ -19,8 +19,19 @@ import {
 } from '../core/league';
 import type { PlayoffGameOutcome } from '../core/playoffs';
 import { ROUND_LABEL, playerSeries, recordPlayoffGame, seriesLine, startPlayoffs } from '../core/playoffs';
+import type { CupGameOutcome } from '../core/worldCup';
+import {
+  ROUND_LABEL as CUP_ROUND_LABEL,
+  cupLevel,
+  cupPark,
+  cupPlayerTeam,
+  cupTeam,
+  groupOf,
+  recordCupGame,
+} from '../core/worldCup';
+import { nationOfTeam } from '../core/worldCup';
 import { describeWeather, windLabel, windMph } from '../core/weather';
-import { uniformFor } from '../core/uniforms';
+import { TEAM_KITS, kitFor, uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
 import { addStats } from '../core/player';
 import { checkTrophies } from '../core/trophies';
@@ -64,20 +75,56 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const scheduled = upcoming;
   // Saves from before named rosters get theirs generated on the way in.
   ensureRosters(league, app.rng);
-  const opponent = teamById(league, scheduled.opponentId);
-  const myTeam = playerTeam(league);
-  const park = parkForGame(league, scheduled);
+
+  // A world tournament game is played for your country, against a country, at
+  // a neutral venue, on a difficulty read off the opponent rather than the
+  // rung of the ladder you happen to be on. Everything past this block is the
+  // same game either way.
+  const cup = scheduled.worldCup ? (save.worldCup ?? null) : null;
+  const opponent = cup
+    ? cupTeam(cup, scheduled.opponentId)
+    : teamById(league, scheduled.opponentId);
+  const myTeam = cup ? cupPlayerTeam(cup) : playerTeam(league);
+  const park = cup ? cupPark(cup, scheduled) : parkForGame(league, scheduled);
   const weather = weatherForGame(scheduled, app.rng);
+  const gameLevel = cup ? cupLevel(opponent) : level;
 
-  // Home team wears its home kit, the visitor its road kit.
-  const myKit = uniformFor(teamKit(league, myTeam.id), scheduled.home);
-  const theirKit = uniformFor(teamKit(league, opponent.id), !scheduled.home);
-  // A postseason game plays until somebody wins.
-  const sim = new GameSim(player, level, myTeam, opponent, scheduled.home, app.rng, weather, !!scheduled.playoff);
+  // Home team wears its home kit, the visitor its road kit. Nations outnumber
+  // the kits, so two countries can draw the same colours; nudge the visitor
+  // along one rather than putting two identical sides on the same field.
+  const myKitId = cup ? myTeam.kitId : teamKit(league, myTeam.id).id;
+  const rawTheirs = cup ? opponent.kitId : teamKit(league, opponent.id).id;
+  const theirKitId =
+    cup && rawTheirs === myKitId
+      ? TEAM_KITS[(TEAM_KITS.findIndex((k) => k.id === myKitId) + 1) % TEAM_KITS.length].id
+      : rawTheirs;
+  const myKit = uniformFor(kitFor(myKitId, 0), scheduled.home);
+  const theirKit = uniformFor(kitFor(theirKitId, 1), !scheduled.home);
+  // A postseason game plays until somebody wins, and so does a knockout game:
+  // single elimination has nowhere to put a tie.
+  const mustDecide =
+    !!scheduled.playoff || (!!cup && scheduled.worldCup?.round !== 'group');
+  const sim = new GameSim(
+    player,
+    gameLevel,
+    myTeam,
+    opponent,
+    scheduled.home,
+    app.rng,
+    weather,
+    mustDecide,
+  );
 
-  // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night.
+  // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night, or
+  // "Baseball World Trophy · Group C" on a night you're playing for a country.
   const series = scheduled.playoff ? playerSeries(league) : null;
   const playoffTag = (() => {
+    if (cup) {
+      const round = (scheduled.worldCup?.round ?? 'group') as keyof typeof CUP_ROUND_LABEL;
+      const group = groupOf(cup, cup.nationId);
+      const where = round === 'group' && group ? `Group ${group.id}` : CUP_ROUND_LABEL[round];
+      return `Baseball World Trophy · ${where}`;
+    }
     if (!scheduled.playoff || !series) return '';
     const line = seriesLine(league, series);
     const tally =
@@ -129,7 +176,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         <div class="sim-matchup" id="simMatchup"></div>
         <div class="sim-linescore" id="simLinescore"></div>
         <div class="sim-skips">
-          <button class="skip-btn" id="skipAtBat">MY AT-BAT »</button>
+          <button class="skip-btn" id="skipAtBat">MY NEXT PLAY »</button>
           <button class="skip-btn" id="skipInning">END INNING »</button>
         </div>
         <button class="steal-btn" id="steal" style="display:none"></button>
@@ -736,9 +783,11 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     scheduled.innings = sim.inningsPlayed;
 
     // Only the regular season counts on the table. A playoff game lives on
-    // its series instead. A game called level after twelve innings goes on as
-    // a tie rather than nowhere, which is where it used to go.
-    if (!scheduled.playoff) {
+    // its series instead, and a world tournament game on its own group table —
+    // the club standings must never learn that the tournament happened. A game
+    // called level after twelve innings goes on as a tie rather than nowhere,
+    // which is where it used to go.
+    if (!scheduled.playoff && !cup) {
       recordResult(myTeam, opponent, sim.score.us, sim.score.them);
       simulateOtherTeams(league, app.rng, [opponent.id]);
     }
@@ -749,8 +798,21 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       ACHIEVEMENTS.filter((a) => isAchievementMet(a, player)).map((a) => a.id),
     );
 
-    addStats(player.season, sim.gameStats);
+    // A tournament game counts on your career line and on your country's, but
+    // never on the club season: the world tournament is played before opening
+    // day, and letting it into `season` would put international at-bats on the
+    // scout grade, the MVP ballot and every season trophy.
+    if (!cup) addStats(player.season, sim.gameStats);
     addStats(player.career, sim.gameStats);
+    if (cup) {
+      const line = cup.playerStats;
+      line.games++;
+      line.ab += sim.gameStats.ab;
+      line.hits += sim.gameStats.hits;
+      line.homeRuns += sim.gameStats.homeRuns;
+      line.rbi += sim.gameStats.rbi;
+      line.walks += sim.gameStats.walks;
+    }
     player.fielding.chances += sim.putouts + sim.errors;
     player.fielding.putouts += sim.putouts;
     player.fielding.errors += sim.errors;
@@ -762,9 +824,11 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     const xp = gameXp(sim.gameStats, sim.putouts);
     const report = grantXp(player, xp);
 
-    // Payday, then a game's worth of wear on everything in the bag.
+    // Payday, then a game's worth of wear on everything in the bag. The world
+    // stage pays the top rate whatever rung you were called up from — it is
+    // most of what makes a tournament worth chasing out of Triple-A.
     const earnings = gameEarnings(
-      league.levelId,
+      cup ? LEVELS.length - 1 : league.levelId,
       player.contract,
       sim.gameStats,
       sim.putouts,
@@ -774,9 +838,24 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     const wornOut = wearGear(player).map((g) => g.name);
 
     // A game takes a real bite out of conditioning, then the day rolls over.
+    // No front-office churn during the tournament: you are on the other side
+    // of the world, and a trade rumour has nothing to do with tonight.
     player.stamina = clamp(player.stamina - (6 + Math.round(app.rng.next() * 4)), 0, 100);
-    advanceDay(league, app.rng);
+    advanceDay(league, cup ? undefined : app.rng);
     recoverOvernight(player);
+
+    // Move the tournament along first, so the trophy case can see a final
+    // reached or a Trough won on the game that actually did it.
+    let cupOutcome: CupGameOutcome | null = null;
+    if (cup) {
+      cupOutcome = recordCupGame(save, scheduled, sim.score.us, sim.score.them, app.rng);
+      // The tournament is preseason; you report to camp rested however far the
+      // run went, rather than opening the club year on an empty tank.
+      if (cupOutcome?.cupComplete) {
+        player.stamina = 100;
+        player.energy = 100;
+      }
+    }
 
     // The trophy case, checked against the game that just ended. The season
     // and career lines were folded in above, so a career milestone fires on
@@ -792,6 +871,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         errors: sim.errors,
         win: sim.score.us > sim.score.them,
         playoff: !!scheduled.playoff,
+        worldCup: cupOutcome
+          ? {
+              round: cupOutcome.round,
+              finalist: cupOutcome.finalist,
+              champion: cupOutcome.status === 'champion',
+            }
+          : undefined,
       },
     });
 
@@ -800,7 +886,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     let playoff: PlayoffGameOutcome | null = null;
     if (scheduled.playoff) {
       playoff = recordPlayoffGame(league, scheduled, sim.score.us > sim.score.them, app.rng);
-    } else if (isRegularSeasonOver(league)) {
+    } else if (!cup && isRegularSeasonOver(league)) {
       startPlayoffs(league, app.rng);
     }
 
@@ -808,7 +894,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       win: sim.score.us > sim.score.them,
       tie: sim.score.us === sim.score.them,
       score: { ...sim.score },
-      opponent: opponent.name,
+      // Countries are named by their flag on the tournament stage.
+      opponent: cup ? `${nationOfTeam(opponent.id).flag} ${opponent.name}` : opponent.name,
       home: sim.playerIsHome,
       stats: { ...sim.gameStats },
       putouts: sim.putouts,
@@ -820,6 +907,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       pointsGained: report.pointsGained,
       newAchievements,
       playoff: playoff ?? undefined,
+      cup: cupOutcome ?? undefined,
       feats: { ...sim.feats },
       unlocked,
       // Not `nextGame(league) === null` — that's also true on an ordinary off

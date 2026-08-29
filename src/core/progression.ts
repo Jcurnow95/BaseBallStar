@@ -30,6 +30,21 @@ export function grantXp(player: PlayerProfile, amount: number): LevelUpReport {
 }
 
 /**
+ * Extra offseason attribute points a player's age is worth. A body still
+ * filling out gains fastest, and the curve flattens through the twenties.
+ *
+ * Note what this deliberately isn't: an age *penalty*. Simulated players fade
+ * in their thirties because the league needs somewhere for rookies to come
+ * from, but taking a career's hard-won attributes back off the player is the
+ * opposite of fun. Your number never goes down — it just stops climbing free.
+ */
+export function offseasonAgePoints(age: number): number {
+  if (age <= 21) return 2;
+  if (age <= 25) return 1;
+  return 0;
+}
+
+/**
  * Attribute points needed for the next +1. Later points cost more, but the
  * old curve doubled at 50 — right where a second-season player was — so
  * development stalled exactly when the league was getting harder.
@@ -51,6 +66,20 @@ export function upgradeAttribute(player: PlayerProfile, key: AttributeKey): bool
   player.attributes[key] = clamp(player.attributes[key] + 1, 5, 99);
   return true;
 }
+
+/* ---------------------------------------------------------- batting eye */
+
+/**
+ * Vision needed before the game tells you ball from strike at the plate: the
+ * gold glow and the timing ring's gold lock on a pitch over the plate, and
+ * the ring washing out on one off it. Below this the ring still closes on
+ * every pitch — timing stays learnable — but it locks white on balls and
+ * strikes alike, so whether to swing is your read of the zone, not the aid's.
+ */
+export const BATTING_EYE_THRESHOLD = 65;
+
+export const hasBattingEye = (attributes: Attributes): boolean =>
+  clamp(attributes.vision, 1, 99) >= BATTING_EYE_THRESHOLD;
 
 /* ------------------------------------------------------ perfect hit zone */
 

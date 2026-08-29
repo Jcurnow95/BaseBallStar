@@ -24,10 +24,10 @@ import { Rng, clamp } from './rng';
  * the infield and nobody is running. DOM-free: the view layer just renders
  * this and feeds it input.
  *
- * Deliberately simplified: a throw to a base is a force play against anyone
- * running into it and a tag against anyone scrambling back to it; there are no
- * tag-ups, rundowns or relay men, and runners make one advancement decision
- * rather than reading the play continuously.
+ * Deliberately simplified: a throw to a base is a force play against a runner
+ * who has to take it, a tag against anyone else arriving at it or scrambling
+ * back to it; there are no tag-ups, rundowns or relay men, and runners make
+ * one advancement decision rather than reading the play continuously.
  */
 
 export type PlayPhase = 'live' | 'held' | 'throw' | 'catch' | 'dead';
@@ -85,6 +85,11 @@ export interface PlayOutcome {
   userError: boolean;
   /** The batter reached because of a misplay — an at-bat, but not a hit. */
   reachedOnError: boolean;
+  /**
+   * A home run the batter had to run out: the ball stayed in the park and he
+   * beat it home. Only ever true alongside `kind: 'homeRun'`.
+   */
+  insideThePark: boolean;
 }
 
 export interface PlaySetup {
@@ -409,13 +414,16 @@ export class PlaySim {
   }
 
   /**
-   * Bags with a force play still on while the user holds the ball: get the
-   * ball there — by throw or on foot — before the runner does and he's out.
-   * Empty when nobody is forced anywhere.
+   * Bags with a play on while the user holds the ball: get the ball there —
+   * by throw or on foot — ahead of the runner heading for it. On a force
+   * that's the out on arrival; otherwise you hold it there and tag him as he
+   * comes in. Empty when nobody is running anywhere.
    */
   get forcePlayBases(): BaseId[] {
     if (!this.userHasBall || this.deadTimer > 0) return [];
-    return ([1, 2, 3, 0] as BaseId[]).filter((base) => this.forcedRunnerAt(base) !== null);
+    return ([1, 2, 3, 0] as BaseId[]).filter(
+      (base) => this.arrivingRunnerAt(base, Infinity) !== null,
+    );
   }
 
   runnerPosition(runner: RunnerState): Vec2 {
@@ -1256,8 +1264,15 @@ export class PlaySim {
     if (!carrier?.hasBall || this.deadTimer > 0) return;
     for (const base of [1, 2, 3, 0] as BaseId[]) {
       if (distance(carrier, BASES[base]) > RECEIVE_RADIUS) continue;
-      // A force any time he's short; a tag only as he arrives back at it.
-      if (!this.forcedRunnerAt(base) && !this.retreatingRunnerAt(base, TAG_REACH)) continue;
+      // A force any time he's short; a tag only as he reaches the bag, coming
+      // or going. Standing on it while an unforced runner is still 60 feet
+      // out does nothing — wait for him.
+      if (
+        !this.forcedRunnerAt(base) &&
+        !this.retreatingRunnerAt(base, TAG_REACH) &&
+        !this.arrivingRunnerAt(base, TAG_REACH)
+      )
+        continue;
       this.resolveForceAt(base, carrier, true);
       return;
     }
@@ -1592,6 +1607,13 @@ export class PlaySim {
       victim = this.retreatingRunnerAt(base);
       tagged = victim !== null;
     }
+    // Running in without a force on him: out only once he's close enough to
+    // be tagged with it. Beating him to the bag by a mile is no longer an out
+    // on its own — hold it there and he has to come to you, or turn round.
+    if (!victim) {
+      victim = this.arrivingRunnerAt(base, TAG_REACH);
+      tagged = victim !== null;
+    }
 
     if (victim) {
       victim.out = true;
@@ -1660,7 +1682,45 @@ export class PlaySim {
       if (runner.progress <= 0 && runner.done) continue;
       if (runner.intent <= runner.at) continue;
       if ((runner.at + 1) % 4 !== base) continue;
+      if (!this.isForcedInto(runner, base)) continue;
       // Whoever is closest to the bag is the one the force is against.
+      if (!victim || runner.progress > victim.progress) victim = runner;
+    }
+    return victim;
+  }
+
+  /**
+   * A force is only ever on at the one bag a runner has no choice about: the
+   * base in front of the one he started the play on. Anything past that he
+   * takes at his own risk, and the defense has to tag him for it.
+   *
+   * This is what stops a lone runner being rung up on a force that isn't
+   * there. `isForced` answers "does this man have to move", and the batter
+   * always does — but that was being read as "he can be forced at whatever
+   * bag he happens to be running into", so a batter who singled and then took
+   * off for second was out the moment the ball beat him there, with nobody
+   * behind him and no tag applied. Second is a tag play now, and he gets the
+   * length of the basepath to think better of it and hit BACK.
+   */
+  private isForcedInto(runner: RunnerState, base: BaseId): boolean {
+    if (!this.isForced(runner)) return false;
+    return (runner.startBase + 1) % 4 === base;
+  }
+
+  /**
+   * The runner a fielder holding the ball on `base` could tag as he arrives:
+   * one running into that bag with no force on him, within `within` of it as
+   * a fraction of the basepath. Any further out and he still has time to turn
+   * round, so he isn't out yet.
+   */
+  private arrivingRunnerAt(base: BaseId, within: number): RunnerState | null {
+    let victim: RunnerState | null = null;
+    for (const runner of this.runners) {
+      if (runner.out || runner.at >= 4) continue;
+      if (runner.progress <= 0 && runner.done) continue;
+      if (runner.intent <= runner.at) continue;
+      if ((runner.at + 1) % 4 !== base) continue;
+      if (1 - runner.progress > within) continue;
       if (!victim || runner.progress > victim.progress) victim = runner;
     }
     return victim;
@@ -1770,6 +1830,9 @@ export class PlaySim {
       userPutout: this.userPutout,
       userError: this.userError,
       reachedOnError: this.errorOnPlay && !batter.out && batterBase >= 1,
+      // `this.homeRun` is the ball over the fence. A batter who got all the way
+      // round without it is the other kind, and the rarer one.
+      insideThePark: !this.homeRun && !this.foul && !batter.out && batterBase >= 4,
     };
   }
 

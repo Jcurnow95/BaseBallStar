@@ -8,6 +8,9 @@ import { launchBall, predictLanding } from './ballFlight';
 import type { PositionId } from './fieldGeometry';
 import { ALL_POSITIONS, FIELDER_HOME, distance, isFair, toPositionId } from './fieldGeometry';
 import type { PlayOutcome } from './playSim';
+import type { GameFeats } from './trophies';
+import { emptyGameFeats } from './trophies';
+import { effectiveAttributes } from './gear';
 import { fieldFor, infielderFor } from './outcome';
 import type { AirConditions, Weather } from './weather';
 import { CALM, airFor } from './weather';
@@ -24,6 +27,7 @@ export type SimEvent =
   | { kind: 'inning'; text: string }
   | { kind: 'atBat'; pitcher: PitcherAI; outs: number; bases: boolean[] }
   | { kind: 'fielding'; hitter: string; battedBall: BattedBall }
+  | { kind: 'stealChance'; fromBase: 0 | 1; chance: number }
   | { kind: 'gameOver'; win: boolean; tie: boolean };
 
 /**
@@ -44,7 +48,52 @@ const REGULATION_INNINGS = 9;
  * the end of an inning.
  */
 const MAX_INNINGS = 12;
+/** Where "late in the game" starts, for the sake of a clutch hit. */
+const CLUTCH_INNING = 7;
 
+/** The state of a game at the moment before a pitch. See `recordFeats`. */
+interface Situation {
+  bases: boolean[];
+  us: number;
+  them: number;
+  inning: number;
+  half: 'top' | 'bottom';
+}
+
+/**
+ * What a steal attempt takes out of you, safe or not — the sprint happens
+ * either way. Energy is the daily tank shared with training, so a running
+ * game today is a lighter session tomorrow; stamina is the season-long tank
+ * the swing already leans on.
+ */
+export const STEAL_ENERGY_COST = 6;
+export const STEAL_STAMINA_COST = 2;
+
+/**
+ * How the timing minigame graded the break: 'early' is before the pitcher
+ * ever moved (a pickoff waiting to happen), 'great' beat the reaction
+ * window fatigue allows, 'good' is an ordinary clean jump, 'late' left
+ * with the catcher already loading up.
+ */
+export type StealJump = 'early' | 'great' | 'good' | 'late';
+
+
+/**
+ * How often a ball in play beats the simulated defense.
+ *
+ * Every ball in play that ISN'T hit at the player used to be an automatic out,
+ * while the ones hit at the player were handed to the live field — where about
+ * a fifth of them drop in. That made the player's own position the only hole
+ * in an otherwise flawless defense. Measured over a few hundred games it cost
+ * the club about two thirds of a run a night, which was enough on its own to
+ * turn a .545 side into a .467 one: the game was quietly punishing you for the
+ * one defensive job it gives you.
+ *
+ * Letting the simulated fielders miss at the same rate closes that hole, and
+ * fixes the thing that made these games 2-1 slogs — nine innings where every
+ * ball not hit at you was a guaranteed out.
+ */
+const BIP_HIT_CHANCE = 0.2;
 
 /** Only reachable if a save has a team with no roster at all. */
 const FILL_IN: RosterPlayer = { name: 'the utility man', age: 27, rating: 50, role: 'batter' };
@@ -58,6 +107,15 @@ function nextBatter(order: RosterPlayer[], index: number): RosterPlayer {
  * known, so the line may as well match it — every out reading "flies out to
  * center" is most of what a spectator sees over nine innings.
  */
+function describeHit(bb: BattedBall, bases: number): string {
+  const field = fieldFor(bb.spray, 'R');
+  if (bases >= 4) return `drives one out to ${field} — home run`;
+  if (bases === 2) return `doubles into the ${field}-field gap`;
+  if (bb.launchAngle < 8) return `sneaks a ground ball through the ${field} side`;
+  if (bb.launchAngle > 32) return `bloops one into shallow ${field}`;
+  return `lines a single to ${field}`;
+}
+
 function describeOut(bb: BattedBall): string {
   const field = fieldFor(bb.spray, 'R');
   if (bb.launchAngle < 8) return `grounds out to ${infielderFor(bb.spray, 'R')}`;
@@ -82,6 +140,12 @@ export class GameSim {
   readonly mustDecide: boolean;
 
   inning = 1;
+  /**
+   * The last inning play actually reached — nine for a regulation game, more
+   * when it went to extras. `inning` runs on past the finish as halves close
+   * out, so this is the number the season log records.
+   */
+  inningsPlayed = 1;
   half: 'top' | 'bottom' = 'top';
   outs = 0;
   bases: boolean[] = [false, false, false];
@@ -93,6 +157,13 @@ export class GameSim {
   putouts = 0;
   errors = 0;
 
+  /**
+   * The moments a box score can't hold: what was on the bases, and what the
+   * scoreboard said, when the player put a ball in play. Read after the game
+   * by `core/trophies.ts` — nothing in the sim acts on them.
+   */
+  readonly feats: GameFeats = emptyGameFeats();
+
   /** Runs per inning (index 0 = 1st), for the linescore grid. */
   readonly lineScore = { us: [] as number[], them: [] as number[] };
   /** Team hit totals — the H column. */
@@ -103,7 +174,15 @@ export class GameSim {
    */
   readonly teamErrors: GameScore = { us: 0, them: 0 };
 
-  /** Our starter. Cosmetic — the sim of their half never consults him. */
+  /**
+   * Our starter. He works their half the way their starter works ours: the
+   * strikeouts he gets and the contact he gives up both come off his rating.
+   *
+   * He used to be decorative — their half was pitched by `level.pitcherRating`,
+   * the league average, while our at-bats faced the opposition's real arm. So
+   * their good starter made our night harder and ours did nothing for us, and
+   * the club's whole pitching staff was a name on a screen.
+   */
   readonly ourPitcher: PitcherAI;
 
   /** The day's air, so "is this ball mine?" is judged on the same flight the field plays. */
@@ -112,6 +191,16 @@ export class GameSim {
   private opponentLineupIndex = 0;
   private pending: SimEvent | null = null;
   private inningAnnounced = false;
+
+  /**
+   * Which base the player himself is standing on (0 = first), or null when
+   * he isn't aboard. The bases array stays anonymous booleans; this is the
+   * one runner the game follows by name, so he can steal and be credited
+   * with the runs he scores.
+   */
+  private playerBase: 0 | 1 | 2 | null = null;
+  /** A steal window is open: the UI has been offered the jump this PA. */
+  private stealWindow = false;
 
   /** The named clubs, batting in a fixed order so the same men come up all game. */
   private readonly teammates: RosterPlayer[];
@@ -208,6 +297,7 @@ export class GameSim {
       return { kind: 'gameOver', ...this.gameResult() };
     }
 
+    this.inningsPlayed = Math.max(this.inningsPlayed, this.inning);
     return this.weAreBatting ? this.stepOurHalf() : this.stepTheirHalf();
   }
 
@@ -225,9 +315,113 @@ export class GameSim {
       return event;
     }
 
+    // With the player aboard and the next bag open, offer the jump before the
+    // teammate's PA resolves. The window lasts one tick: if the UI comes back
+    // without an attempt, the at-bat just happens.
+    if (this.stealWindow) {
+      this.stealWindow = false;
+    } else if (this.playerBase !== null && this.playerBase < 2 && !this.bases[this.playerBase + 1]) {
+      this.stealWindow = true;
+      const fromBase = this.playerBase as 0 | 1;
+      return { kind: 'stealChance', fromBase, chance: this.stealChance(fromBase) };
+    }
+
     const batter = nextBatter(this.teammates, this.lineupIndex);
     this.lineupIndex++;
     return this.simulateGenericPA(batter, true);
+  }
+
+  /**
+   * Odds of making it if the player takes off right now. Speed is the engine;
+   * the two condition bars are the tuning: a season-worn body (stamina) never
+   * gets its full jump, and a day spent burning energy leaves nothing for the
+   * sprint. Deliberately generous at full freshness — stealing should feel
+   * like a weapon you manage, not a coin flip.
+   */
+  stealChance(fromBase: 0 | 1): number {
+    const speed = effectiveAttributes(this.player).speed;
+    let chance = 0.38 + speed * 0.005;
+    chance *= 0.8 + (this.player.stamina / 100) * 0.2;
+    if (this.player.energy < 35) chance *= 0.72 + (this.player.energy / 35) * 0.28;
+    chance -= (this.level.defenseRating - 50) * 0.002;
+    // Third is a shorter throw for the catcher.
+    if (fromBase === 1) chance -= 0.1;
+    return clamp(chance, 0.08, 0.95);
+  }
+
+  /**
+   * How sharp a tap has to be to count as each jump, in milliseconds after
+   * the pitcher's first move. The great-jump window is where fatigue lives
+   * in your fingers: fresh legs get a third of a second, a body running on
+   * fumes barely half that — the elite jump stops being reachable before
+   * stealing itself does.
+   */
+  stealJumpWindows(): { great: number; good: number } {
+    const freshness =
+      (this.player.stamina / 100) * 0.5 + (Math.min(this.player.energy, 50) / 50) * 0.5;
+    return { great: 160 + Math.round(freshness * 180), good: 650 };
+  }
+
+  /**
+   * The player takes off. Costs come out whether he makes it or not; the
+   * result comes back as a feed line. The jump quality comes from the timing
+   * minigame: break before the pitcher moves and he has you dead to rights,
+   * go on his first flinch and the posted odds get a bonus, leave late and
+   * the catcher gets a head start. Null when no window is open (the UI
+   * raced a resolved play).
+   */
+  attemptSteal(jump: StealJump = 'good'): { text: string; tone: LogTone; success: boolean } | null {
+    if (!this.stealWindow || this.playerBase === null || this.playerBase > 1) return null;
+    this.stealWindow = false;
+    const from = this.playerBase as 0 | 1;
+    const target = from + 1;
+    const bag = target === 1 ? 'second' : 'third';
+    let chance = this.stealChance(from);
+    if (jump === 'early') chance *= 0.4;
+    else if (jump === 'great') chance = clamp(chance + 0.12, 0.08, 0.97);
+    else if (jump === 'late') chance = clamp(chance - 0.18, 0.05, 0.95);
+
+    this.player.energy = clamp(this.player.energy - STEAL_ENERGY_COST, 0, 100);
+    this.player.stamina = clamp(this.player.stamina - STEAL_STAMINA_COST, 0, 100);
+
+    if (this.rng.next() < chance) {
+      this.bases[from] = false;
+      this.bases[target] = true;
+      this.playerBase = target as 1 | 2;
+      this.gameStats.stolenBases++;
+      const text =
+        jump === 'early'
+          ? `You gamble on the first flinch and he never gets a play off — stolen ${bag}!`
+          : jump === 'great'
+            ? `Huge jump — you're into ${bag} standing up. Stolen base!`
+            : jump === 'late'
+              ? `Slow out of the blocks, but you sneak in under the tag — stolen ${bag}!`
+              : `You take off and slide in ahead of the tag — stolen ${bag}!`;
+      return { text, tone: 'good', success: true };
+    }
+
+    this.bases[from] = false;
+    this.playerBase = null;
+    this.recordOut();
+    const text =
+      jump === 'early'
+        ? 'You break too soon — he steps off and runs you down. Picked off.'
+        : jump === 'late'
+          ? `Late jump, and the throw beats you to ${bag} by a mile — caught stealing.`
+          : `The throw beats you to ${bag} — caught stealing.`;
+    return { text, tone: 'bad', success: false };
+  }
+
+  /**
+   * The player showed steal but never went — froze past the pitcher's move
+   * and had to dive back in. No attempt, no real cost beyond a little
+   * wasted adrenaline; the window closes and the at-bat goes on.
+   */
+  bailSteal(): { text: string; tone: LogTone } | null {
+    if (!this.stealWindow) return null;
+    this.stealWindow = false;
+    this.player.energy = clamp(this.player.energy - 2, 0, 100);
+    return { text: 'You bluff the break, then dive back in ahead of the pickoff.', tone: 'neutral' };
   }
 
   /**
@@ -237,6 +431,9 @@ export class GameSim {
     this.pending = null;
     this.lineupIndex++;
 
+    // Taken before anything moves: the swing is judged against the game as it
+    // stood when the pitch was thrown, not the one it leaves behind.
+    const before = this.situation();
     const stats = this.gameStats;
     stats.pa++;
 
@@ -247,6 +444,7 @@ export class GameSim {
       case 'walk':
         stats.walks++;
         runs = this.walkRunners();
+        this.playerBase = 0;
         tone = 'good';
         break;
       case 'strikeout':
@@ -269,6 +467,7 @@ export class GameSim {
         runs = this.advanceOnHit(outcome.basesAdvanced);
         stats.rbi += runs;
         if (outcome.result === 'homeRun') stats.runs++;
+        else this.playerBase = Math.min(outcome.basesAdvanced - 1, 2) as 0 | 1 | 2;
         tone = outcome.result === 'homeRun' ? 'big' : 'hit';
         break;
       }
@@ -282,6 +481,11 @@ export class GameSim {
     }
 
     this.addRuns('us', runs);
+    this.recordFeats(before, {
+      homeRun: outcome.result === 'homeRun',
+      insideThePark: false,
+      runs,
+    });
     return { text: outcome.description, tone, runs };
   }
 
@@ -294,7 +498,7 @@ export class GameSim {
     const name = batter.name;
     this.opponentLineupIndex++;
     const roll = this.rng.next();
-    const quality = this.level.pitcherRating / 100;
+    const quality = clamp(this.ourPitcher.rating, 10, 99) / 100;
     // Their better hitters strike out a touch less and hit a touch more.
     const skill = (batter.rating - 50) / 100;
 
@@ -328,8 +532,47 @@ export class GameSim {
       return event;
     }
 
+    if (this.ballInPlayFalls(battedBall.quality)) {
+      const bases = this.hitBasesFor(battedBall);
+      const runs = this.advanceOnHitOpponent(bases);
+      this.addRuns('them', runs);
+      this.teamHits.them++;
+      return this.log(`${name} ${describeHit(battedBall, bases)}.`, 'hit', runs, false);
+    }
+
     this.recordOut();
     return this.log(`${name} ${describeOut(battedBall)}.`, 'good');
+  }
+
+  /**
+   * Did a ball in play beat the defense behind the pitcher? Better contact
+   * falls in more often, and a better league turns more of it into outs. See
+   * `BIP_HIT_CHANCE` for why this is not simply "no".
+   */
+  private ballInPlayFalls(quality?: ContactQuality): boolean {
+    const defense = clamp(this.level.defenseRating, 10, 99) / 100;
+    const contact =
+      quality === 'barrel'
+        ? 1.7
+        : quality === 'solid'
+          ? 1.25
+          : quality === 'flare'
+            ? 0.9
+            : quality === 'weak'
+              ? 0.55
+              : // A simulated plate appearance has no batted ball behind it.
+                0.95;
+    return this.rng.chance(clamp(BIP_HIT_CHANCE * contact * (1.25 - defense * 0.5), 0.03, 0.6));
+  }
+
+  /** How far a ball that fell in goes. Most of them are singles. */
+  private hitBasesFor(bb?: BattedBall): number {
+    if (bb?.quality === 'barrel') {
+      if (this.rng.chance(0.14)) return 4;
+      return this.rng.chance(0.42) ? 2 : 1;
+    }
+    if (bb?.quality === 'solid') return this.rng.chance(0.26) ? 2 : 1;
+    return this.rng.chance(0.14) ? 2 : 1;
   }
 
   /** A plausible batted ball off an opposing hitter at this level. */
@@ -384,6 +627,7 @@ export class GameSim {
     }
 
     const runs = result.runs;
+    const before = this.situation();
     if (batting === 'us') {
       this.lineupIndex++;
       const stats = this.gameStats;
@@ -392,11 +636,15 @@ export class GameSim {
       // Reaching on a misplay is an at-bat, but never a hit.
       if (result.reachedOnError) {
         this.bases = [...result.basesAfter];
+        this.trackBatterAfterPlay(result);
         this.addRuns('us', runs);
         this.teamErrors.them++;
         stats.rbi += runs;
         const room = Math.max(0, 3 - this.outs);
         for (let i = 0; i < Math.min(result.outs, room); i++) this.recordOut();
+        // A game can end on a misplay, and it still counts as a walk-off — the
+        // run came home on your ball. It just isn't a home run.
+        this.recordFeats(before, { homeRun: false, insideThePark: false, runs });
         return { text: result.description, tone: 'neutral' };
       }
       if (result.kind === 'homeRun') {
@@ -427,11 +675,20 @@ export class GameSim {
     }
 
     this.bases = [...result.basesAfter];
+    if (batting === 'us') this.trackBatterAfterPlay(result);
 
     // Never record more outs than the half-inning has room for, or the extras
     // would leak into the next inning.
     const room = Math.max(0, 3 - this.outs);
     for (let i = 0; i < Math.min(result.outs, room); i++) this.recordOut();
+
+    if (batting === 'us') {
+      this.recordFeats(before, {
+        homeRun: result.kind === 'homeRun',
+        insideThePark: result.insideThePark,
+        runs,
+      });
+    }
 
     // Ours: gold for hits, big gold for the homer, red for the out. Theirs:
     // green when we got them out; their hit is gold like any hit — the runs
@@ -448,6 +705,20 @@ export class GameSim {
           : 'hit';
 
     return { text: result.description, tone };
+  }
+
+  /**
+   * After the player's own live ball, remember which bag he pulled up on so
+   * the steal game can pick him up from there. Scoring on the play (any way
+   * other than the homer, which is already credited) counts on his line.
+   */
+  private trackBatterAfterPlay(result: PlayOutcome): void {
+    if (result.batterBase >= 1 && result.batterBase <= 3) {
+      this.playerBase = (result.batterBase - 1) as 0 | 1 | 2;
+    } else {
+      if (result.batterBase >= 4 && result.kind !== 'homeRun') this.gameStats.runs++;
+      this.playerBase = null;
+    }
   }
 
   /* ----------------------------------------------------- generic sim PAs */
@@ -476,6 +747,26 @@ export class GameSim {
       const label = bases === 1 ? 'singles' : bases === 2 ? 'doubles' : 'homers';
       return this.log(`${name} ${label}.`, 'hit', runs, ours);
     }
+    // A ball in play the defense didn't get to. Symmetric with their half, so
+    // closing the hole at the player's position doesn't hand the opposition a
+    // scoring edge instead.
+    if (this.ballInPlayFalls()) {
+      const bases = this.hitBasesFor();
+      const runs = ours ? this.advanceOnHit(bases) : this.advanceOnHitOpponent(bases);
+      this.addRuns(ours ? 'us' : 'them', runs);
+      this.teamHits[ours ? 'us' : 'them']++;
+      const label =
+        bases === 2
+          ? this.rng.pick(['doubles down the line', 'doubles into the gap'])
+          : this.rng.pick([
+              'singles through the right side',
+              'lines a single to left',
+              'bloops one into center',
+              'beats out an infield single',
+            ]);
+      return this.log(`${name} ${label}.`, 'hit', runs, ours);
+    }
+
     this.recordOut();
     // No batted ball behind a simulated PA, so vary the line directly — half of
     // these otherwise read "grounds out" every time.
@@ -491,6 +782,67 @@ export class GameSim {
     return this.log(`${name} ${out}.`, ours ? 'bad' : 'good');
   }
 
+  /* --------------------------------------------------------------- feats */
+
+  /** The game as it stood before a pitch: what a feat is measured against. */
+  private situation(): Situation {
+    return {
+      bases: [...this.bases],
+      us: this.score.us,
+      them: this.score.them,
+      inning: this.inning,
+      half: this.half,
+    };
+  }
+
+  /**
+   * Fold one of the player's completed plate appearances into `feats`.
+   *
+   * Called *after* the runs are on the board and the bases have moved, with
+   * the pre-pitch situation passed back in — that pairing is the whole trick.
+   * A grand slam is "three men on, then the ball left the yard"; a walk-off is
+   * "batting last, ninth or later, behind or level, and now ahead". Neither
+   * question can be answered from one side of the swing alone.
+   */
+  private recordFeats(
+    before: Situation,
+    play: { homeRun: boolean; insideThePark: boolean; runs: number },
+  ): void {
+    const feats = this.feats;
+
+    if (play.homeRun && before.bases[0] && before.bases[1] && before.bases[2]) {
+      feats.grandSlam = true;
+    }
+    if (play.insideThePark) feats.insideThePark = true;
+    if (play.runs > feats.bestRbiPa) feats.bestRbiPa = play.runs;
+
+    // Late and behind, and you fixed it — level or better. The seventh is
+    // where a nine-inning game starts counting outs.
+    if (
+      play.runs > 0 &&
+      before.inning >= CLUTCH_INNING &&
+      before.us < before.them &&
+      this.score.us >= this.score.them
+    ) {
+      feats.clutchHit = true;
+    }
+
+    // A walk-off needs the home half of the ninth or later, and a score that
+    // crossed over on this swing. `mustDecide` games run past twelve; the
+    // condition doesn't care how deep it got, only that this ended it.
+    const battingLast = this.playerIsHome && before.half === 'bottom';
+    if (
+      battingLast &&
+      before.inning >= REGULATION_INNINGS &&
+      play.runs > 0 &&
+      before.us <= before.them &&
+      this.score.us > this.score.them
+    ) {
+      feats.walkOff = true;
+      if (play.homeRun) feats.walkOffHomeRun = true;
+    }
+  }
+
   /* ------------------------------------------------------------- helpers */
 
   private log(text: string, tone: LogTone, runs = 0, ours = false): SimEvent {
@@ -504,9 +856,17 @@ export class GameSim {
     if (this.outs >= 3) this.endHalfInning();
   }
 
+  /** The tracked runner crosses the plate: off the bases, onto his line. */
+  private scorePlayerRunner(): void {
+    this.playerBase = null;
+    this.gameStats.runs++;
+  }
+
   private endHalfInning(): void {
     this.outs = 0;
     this.bases = [false, false, false];
+    this.playerBase = null;
+    this.stealWindow = false;
     this.inningAnnounced = false;
     if (this.half === 'top') {
       this.half = 'bottom';
@@ -518,6 +878,12 @@ export class GameSim {
 
   /** Runners forced ahead by a walk. Returns runs scored. */
   private walkRunners(): number {
+    // If the player is aboard and every bag behind him is full, he's forced
+    // along with the rest. Judged before the bases move.
+    if (this.playerBase !== null && this.bases.slice(0, this.playerBase + 1).every(Boolean)) {
+      if (this.playerBase === 2) this.scorePlayerRunner();
+      else this.playerBase++;
+    }
     let runs = 0;
     if (this.bases[0] && this.bases[1] && this.bases[2]) runs = 1;
     else if (this.bases[0] && this.bases[1]) this.bases[2] = true;
@@ -532,6 +898,11 @@ export class GameSim {
 
   /** Move everyone up `bases` and put the batter on. Returns runs scored. */
   private advanceOnHit(bases: number): number {
+    if (this.playerBase !== null) {
+      const target = this.playerBase + bases;
+      if (target >= 3) this.scorePlayerRunner();
+      else this.playerBase = target as 0 | 1 | 2;
+    }
     let runs = 0;
     const next: boolean[] = [false, false, false];
 

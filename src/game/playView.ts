@@ -474,6 +474,19 @@ export class PlayView {
     );
     const desiredScale = clamp(fit, MIN_SCALE, MAX_SCALE);
 
+    // When the view can't zoom out far enough to hold every focus point
+    // (small screens), lean the camera toward the ball: it is the thing the
+    // player must see, and the other points can fall off the edge instead.
+    const ball = points[0];
+    const overflow = Math.max(
+      (spanX + 90) / (W / desiredScale),
+      (spanY + 120) / (H / desiredScale),
+      1,
+    );
+    const ballBias = clamp((overflow - 1) * 2, 0, 1);
+    target.x += (ball.x - target.x) * ballBias;
+    target.y += (ball.y - target.y) * ballBias;
+
     // Ease toward the target so the camera never snaps.
     const follow = 1 - Math.exp(-dt * 6);
     this.camera.x += (target.x - this.camera.x) * follow;
@@ -483,6 +496,29 @@ export class PlayView {
     // Keep the camera roughly over the field.
     this.camera.x = clamp(this.camera.x, -300, 300);
     this.camera.y = clamp(this.camera.y, -30, 380);
+
+    // Hard guarantee: the ball (including its drawn height) never leaves the
+    // inner part of the screen, whatever the easing or clamps above did.
+    this.keepBallOnScreen();
+  }
+
+  private keepBallOnScreen(): void {
+    const sim = this.sim;
+    const W = this.surface.width;
+    const H = this.surface.height;
+    const marginX = Math.max(40, W * 0.18);
+    const marginY = Math.max(40, H * 0.18);
+    const air = this.toScreen({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
+    const ground = this.toScreen({ x: sim.ball.x, y: sim.ball.y });
+
+    if (air.x < marginX) this.camera.x -= (marginX - air.x) / this.scale;
+    else if (air.x > W - marginX) this.camera.x += (air.x - (W - marginX)) / this.scale;
+
+    // Keep both the airborne ball and its shadow inside the vertical band.
+    const top = Math.min(air.y, ground.y);
+    const bottom = Math.max(air.y, ground.y);
+    if (top < marginY) this.camera.y += (marginY - top) / this.scale;
+    else if (bottom > H - marginY) this.camera.y -= (bottom - (H - marginY)) / this.scale;
   }
 
   private toScreen(p: Vec2, z = 0): Vec2 {

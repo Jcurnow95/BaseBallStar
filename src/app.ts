@@ -5,6 +5,8 @@ import type { BattingStats } from './core/types';
 import type { Earnings } from './core/gear';
 import type { GameScore } from './core/gameSim';
 import type { PlayoffGameOutcome } from './core/playoffs';
+import type { CupGameOutcome } from './core/worldCup';
+import type { Trophy, GameFeats } from './core/trophies';
 
 export type Route =
   | 'title'
@@ -14,10 +16,16 @@ export type Route =
   | 'game'
   | 'postgame'
   | 'awards'
+  | 'trophies'
   | 'seasonEnd'
+  | 'standings'
+  | 'fixtures'
   | 'store'
+  | 'achievements'
+  | 'worldCup'
   | 'howto'
   | 'tutorial'
+  | 'derby'
   | 'dev';
 
 export interface PostGameSummary {
@@ -36,8 +44,16 @@ export interface PostGameSummary {
   wornOut: string[];
   levelsGained: number;
   pointsGained: number;
+  /** Career achievements this game pushed over the line, by name. */
+  newAchievements: string[];
   /** Where the series stands after this game, when it was a playoff game. */
   playoff?: PlayoffGameOutcome;
+  /** Where the tournament stands, when it was a Baseball World Trophy game. */
+  cup?: CupGameOutcome;
+  /** The moments the sim spotted, so the recap can call them out every time. */
+  feats: GameFeats;
+  /** Anything the game just added to the trophy case, in display order. */
+  unlocked: Trophy[];
   seasonComplete: boolean;
 }
 
@@ -45,7 +61,9 @@ export type ScreenRenderer = (app: App, mount: HTMLElement) => (() => void) | vo
 
 export class App {
   readonly root: HTMLElement;
-  save: SaveData | null;
+  save: SaveData | null = null;
+  /** Which of the three career slots `save` and `persist()` point at. */
+  slot = 0;
   rng = new Rng();
   lastGame: PostGameSummary | null = null;
 
@@ -55,7 +73,6 @@ export class App {
 
   constructor(root: HTMLElement) {
     this.root = root;
-    this.save = loadSave();
   }
 
   register(route: Route, renderer: ScreenRenderer): void {
@@ -63,7 +80,16 @@ export class App {
   }
 
   start(): void {
-    this.go(this.save ? 'hub' : 'title');
+    // Always the title screen: it's the character select, and which of the
+    // three careers to pick up is the player's call, not a guess.
+    this.go('title');
+  }
+
+  /** Point the app at one of the three career slots. */
+  selectSlot(slot: number): void {
+    this.slot = slot;
+    this.save = loadSave(slot);
+    this.lastGame = null;
   }
 
   go(route: Route): void {
@@ -91,16 +117,19 @@ export class App {
   /**
    * Where Android's hardware back button goes from the current screen.
    *
-   * Returns 'exit' only from the two screens where leaving is what the player
-   * meant. A game in progress swallows it outright: there's no way to resume a
-   * half-finished game, so letting a stray back press throw one away would be
-   * a worse bug than the button appearing to do nothing.
+   * Returns 'exit' only from the title screen, the one place where leaving is
+   * what the player meant; the clubhouse backs out to character select. A game
+   * in progress swallows it outright: there's no way to resume a half-finished
+   * game, so letting a stray back press throw one away would be a worse bug
+   * than the button appearing to do nothing.
    */
   back(): 'exit' | 'handled' {
     switch (this.current) {
       case 'title':
-      case 'hub':
         return 'exit';
+      case 'hub':
+        this.go('title');
+        return 'handled';
       case 'game':
         return 'handled';
       default:
@@ -116,11 +145,11 @@ export class App {
   }
 
   persist(): void {
-    if (this.save) writeSave(this.save);
+    if (this.save) writeSave(this.slot, this.save);
   }
 
   resetCareer(): void {
-    clearSave();
+    clearSave(this.slot);
     this.save = null;
     this.lastGame = null;
     this.go('title');

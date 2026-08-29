@@ -194,6 +194,14 @@ late**. You tap it. Where inside the ball you land decides everything:
 Don't swing and the umpire calls it: pitches outside the zone are balls, so taking a good
 at-bat and drawing a walk is a real option.
 
+**The batting eye.** A timing ring closes on the ball through every pitch and locks onto
+it as it reaches the plate — that's your tap moment. Once your Vision reaches **65** the
+ring also tells you ball from strike: on a pitch over the plate it locks gold and the ball
+glows gold; on one off the plate the gold never comes and the ring washes out — no gold, no
+swing. Below 65 the ring locks white on every pitch, so the timing is there to learn but
+whether it's a strike is your own read of the dashed zone. Progress is tracked in Player
+&amp; Development.
+
 After every swing the game freezes for a moment and draws your tap point (gold X) against
 the ideal contact point (green circle). That circle *is* your Contact attribute — it grows
 as you develop, and shrinks when you're worn down.
@@ -390,13 +398,57 @@ and plan whether to burn yourself down before it.
 the attribute reference are always reachable — the calendar only gates the training drills
 themselves, since those are what burn the day.
 
+## The Baseball World Trophy
+
+Every fourth year — the year your career starts, then years 5, 9, 13 and on — the world
+stops for a tournament. Thirty-two countries. Everybody calls the trophy **the Trough**.
+
+It runs in the **preseason**, before opening day, and the club season cannot tell it
+happened: tournament games stay off the league table and out of your season line, so they
+can't touch your scout grade or the MVP ballot. They do count on your **career** line,
+which is the point of playing.
+
+**Picking a country.** You choose one when you create your player, and it never changes.
+Each country wants a minimum overall rating before it will pick you, and the deeper the
+country the steeper the ask — Japan wants a 73, the United States a 71, Great Britain a
+53, India a 44. Choosing a powerhouse means a better team to win it with and a real chance
+of never being called at all. The create screen shows every country's bar before you sign.
+
+**Getting picked** takes two things: Triple-A or better, and a case that clears your
+country's bar. Your case is your overall rating, plus 8 for playing in the majors, plus up
+to 6 for MVPs already on the shelf. Miss on either and you are told why, in the clubhouse
+and on the tournament screen — the tournament is played out without you and you read the
+result like everyone else.
+
+**The format.**
+
+- **Group stage** — eight groups of four, drawn from four pots by strength so no group is
+  stacked and none is a walkover. Round robin, three matchdays, a rest day between each.
+- **Qualifying** — the eight group winners go through, plus the **eight best records among
+  everyone else**. A wildcard round, so a brutal group doesn't end your tournament on its
+  own.
+- **Knockout** — sixteen teams, single elimination, one game a round: last sixteen,
+  quarter-final, semi-final, final. Seeded 1v16 / 8v9 / 5v12 / 4v13 and so on, so the two
+  best records can only meet in the final. Knockout games play until somebody wins.
+
+You play your own country's games; every other match in the round is simulated the moment
+yours is done, so the group tables and the bracket are always current. Difficulty comes off
+the *opponent*, not your rung of the ladder — the weakest countries pitch about like
+Triple-A, the strongest a shade above the majors. Tournament games pay the top rate
+whatever level you were called up from, and you report to camp rested however far the run
+went.
+
+Four trophies live here: **First Cap** for playing at all, **For the Flag** for a home run
+in the tournament, **On the World Stage** for reaching the final, and **The Trough** for
+winning it.
+
 ## Attributes
 
 | Attribute | What it actually does |
 | --- | --- |
 | Power | Raises your exit-velocity ceiling. This is what unlocks home runs. |
 | Contact | Widens the forgiveness circle around the ideal contact point. |
-| Vision | Reads pitch type out of the hand; keeps the strike-zone guide visible. |
+| Vision | Reads pitch type out of the hand; keeps the strike-zone guide visible. At 65, unlocks the batting eye (gold = strike). |
 | Speed | How fast you cover 90 feet. Beats out grounders, takes the extra base. |
 | Fielding | Widens your glove window on catch attempts. |
 | Arm | Throw velocity. Decides whether you can beat a runner to the bag. |
@@ -441,6 +493,49 @@ Where the bar sits is what makes it worth chasing. `tools/awards.ts` measures it
 season wins MVP roughly half to three quarters of the time depending on the level, an
 ordinary one about one year in eight, and a bad one never.
 
+## The trophy case
+
+An MVP is the one thing a season *votes* on, but most of a career is made of afternoons
+nobody votes on: the ball you hit with the bases loaded, the one that ended a game in the
+bottom of the ninth, the hundredth hit that arrived on a Tuesday. **34 trophies** name
+those, and the **Trophy Case** button in the clubhouse shows all of them — the ones you
+have and the ones you don't, with what each takes, because a locked row that hides its
+requirement is a row nobody chases.
+
+They come in four tiers:
+
+- **Moments** (15) — one game, one swing. Your first hit and first home run, a grand slam,
+  a walk-off, a walk-off homer, an inside-the-park home run, coming back late, the cycle, a
+  two- or three-homer game, a four-hit game, a perfect day at the plate, five RBI, three
+  putouts without an error, and a home run in October.
+- **Season** (8) — 3 / 6 / 10 home runs, 20 RBI, 30 hits, 12 walks, and hitting .350 or .400
+  over a season (minimum 60 at-bats).
+- **Career** (7) — 100 / 250 / 500 hits, 10 / 25 / 50 home runs, 150 RBI.
+- **Honors** (4) — a ring, an MVP, your first call-up, and reaching the Majors.
+
+Some of these can't be read off a box score. A grand slam is only a grand slam because of
+what was on the bases *before* the swing, and a walk-off is only a walk-off because of what
+the scoreboard said before it and after it — so `core/gameSim.ts` watches for them as the
+game runs and hands the flags over afterwards. `core/trophies.ts` never sees the sim,
+only a snapshot, and everything else falls out of the season and career lines that already
+exist.
+
+A trophy is checked once and kept forever, stamped with the year and level it
+happened at. Nothing re-evaluates a locked one against old numbers, so a season that has
+already been banked can never retroactively earn or lose one. A save from before the case
+existed starts empty rather than back-filled — a slam hit two seasons ago left no record to
+find. And because the trophy case fires on the game a milestone actually lands in, the
+postgame screen is where you find out, in a gold panel above your line.
+
+Thresholds are tuned for a **24-game season**, which is about a hundred plate appearances
+and twenty-five hits — a forty-homer target would be unreachable here. `tools/trophies.ts`
+measures where they sit by playing twelve-season careers through the real hitting model:
+star play ends up holding 12 of the 15 numeric trophies, an ordinary career 7, and a
+bad one 2.
+
+The postgame also calls out a slam or a walk-off **every** time, not just the first — a
+trophy fires once in a career, but a walk-off is a walk-off whenever it happens.
+
 ## Project layout
 
 ```
@@ -459,15 +554,20 @@ src/
     gameSim.ts       Nine-inning game loop; surfaces your moments as events
     league.ts        Levels, teams, home parks, schedule, calendar, standings
     playoffs.ts      The postseason bracket, series and the trophy
+    nations.ts       The 32 countries that contest the Baseball World Trophy
+    worldCup.ts      The world tournament: the draw, the groups, the bracket
     awards.ts        Award season: the MVP ballot in every league
+    achievements.ts  Career milestones you claim for attribute points
+    trophies.ts      The trophy case: what a career earns and when it earned it
     progression.ts   XP, attribute points, training, promotion checks
   game/            Canvas views: atBatView (catcher POV), playView (top-down field),
                    catchOverlay (the stretch-catch minigame), coachTips (one-time hints),
                    weatherFx (rain streaks and the wind flag)
   screens/         Title, create player, hub, how-to-play, training, gear store, game day,
-                   results, awards night, season review
+                   results, awards night, season review, trophy case
   ui/              Canvas helpers, DOM helpers, modal, sprites (animated players)
 tools/             Headless harnesses — see below
+                   (humanBat.ts is the shared "play a real season" model they measure with)
 ```
 
 `core/` deliberately has zero DOM dependencies. If you later want the simulation in Rust
@@ -493,6 +593,22 @@ device, set `baseball-star:dev` to `1` in localStorage.
 ## Headless harnesses
 
 The models are tuned against measurements, not by feel. All of these run without a browser.
+
+```bash
+npx tsx tools/worldCup.ts
+```
+
+Walks Baseball World Trophy tournaments through the same calls the screens make, on forty
+seeds, and asserts what would be miserable to find by hand: all 48 group matches played
+once each, sixteen qualifiers made of the eight group winners and the eight best records
+behind them, the bracket burning down 8-4-2-1 to a single champion, the player's run
+landing on distinct increasing calendar days, and the club season still sitting at 24
+unplayed games with an empty table. It also checks the four-year cycle lands on years 1, 5,
+9, 13, 17 and that a saved tournament stays inside a sane size — 32 squads go into
+localStorage alongside three careers.
+
+It earned its keep on the first run: a knockout match recorded level had no winner, so the
+next round was never built and the tournament sat half-played in the save forever.
 
 ```bash
 npx tsx tools/fitFlight.ts
@@ -526,6 +642,15 @@ once, at the end. It exists because of a real bug: "is the season over?" was ans
 after two or three games. Exits non-zero on failure.
 
 ```bash
+npx tsx tools/aging.ts
+```
+
+Walks a career through twenty winters and checks that everyone gets older properly: the
+player ages a year a season from 18, nobody in the league plays past
+`FORCED_RETIREMENT_AGE`, and the opening-day clubhouse has fully turned over by the end.
+Guards against a league that never renews. Exits non-zero on failure.
+
+```bash
 npx tsx tools/parks.ts
 ```
 
@@ -555,6 +680,24 @@ reports how often each takes the award. A star season should win about half the 
 better, an ordinary one rarely, a bad one never. It also asserts the winner *looks* like a
 winner: no MVP more than 12% off the best OPS on his own ballot, which is what stops the
 club-record term handing the trophy to a .225 hitter on a good team.
+
+```bash
+npx tsx tools/trophies.ts
+```
+
+Checks the trophy case, in the same two halves. **Correctness** drives a real `GameSim`
+with the situation forced — bases loaded in the fourth, tied in the bottom of the ninth,
+the same home run on the road — and asserts both what must fire and what must not: a homer
+in the third isn't a walk-off, two men on isn't a slam, a ball in the seats isn't an
+inside-the-parker, and the opponent's grand slam is never yours. It also asserts a brand-new
+career unlocks nothing, and that re-checking never awards the same thing twice.
+
+**Reach** plays twelve-season careers through the hitting model at three standards of play,
+walking up a level every three years, and prints what each one ends up holding. A star
+career should clear most of the season and career tiers but never empty the case; a bad one
+should earn almost nothing on the numbers. Both harnesses share `tools/humanBat.ts`, which
+is the "play a real season" model `tools/awards.ts` also measures with — the answer to *is
+this reachable?* has to come from one place.
 
 ## Building for Android and iOS
 
@@ -588,10 +731,12 @@ A playable vertical slice, not a finished game. What's real:
 - Six ballparks with distinct dimensions and wall heights, and balls that play off the wall
 - Solid outfield walls, and crowds that fill up as you climb the levels
 - Per-team home and away uniforms, so the two sides on the field are always distinct
+- Batting eye (ball/strike read at the plate) unlocked at 65 Vision
 - Perfect hit zone unlocked at 120 combined Contact and Vision
 - Nine-inning games with play-by-play, extra innings, standings, four-level promotion
 - Per-game pay off the contract you signed, and a gear store selling equipment that wears out
 - Day-by-day season calendar with off days for training, and a localStorage save
+- Careers start at 18 and age a winter at a time; teammates grow, fade and retire around you
 
 Deliberately simplified in the live play — worth knowing before you build on it:
 

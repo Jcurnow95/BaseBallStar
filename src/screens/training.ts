@@ -3,13 +3,18 @@ import {
   ATTRIBUTE_BLURBS,
   ATTRIBUTE_KEYS,
   ATTRIBUTE_LABELS,
+  POSITIONS,
+  POSITION_LABELS,
   overallRating,
 } from '../core/player';
+import type { Position } from '../core/types';
 import {
   TRAINING_OPTIONS,
   applyTraining,
+  BATTING_EYE_THRESHOLD,
   PERFECT_ZONE_THRESHOLD,
   canUpgrade,
+  hasBattingEye,
   hasPerfectZone,
   perfectZoneProgress,
   recoverOvernight,
@@ -35,6 +40,9 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
   let activeDrill: (() => void) | null = null;
 
   const draw = (): void => {
+    // Redrawing replaces the scroll container, so carry its position over —
+    // spending a point shouldn't bounce the menu back to the top.
+    const scrollTop = mount.querySelector('.scroll')?.scrollTop ?? 0;
     mount.innerHTML = `
       <div class="scroll">
         <div class="panel">
@@ -51,6 +59,22 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
           ${meterHtml('Stamina', player.stamina)}
           ${meterHtml('Energy', player.energy, 100, 'xp')}
           ${meterHtml('XP', player.xp, xpForLevel(player.level), 'xp')}
+        </div>
+
+        <div class="panel">
+          <h2>Batting eye</h2>
+          ${
+            hasBattingEye(player.attributes)
+              ? `<div class="notice" style="margin:0">
+                   <b>Unlocked.</b> You read ball from strike: a pitch over the plate glows
+                   gold as it arrives, and one off the plate never does.
+                 </div>`
+              : `<p class="tiny muted" style="margin:0 0 8px">
+                   Reach ${BATTING_EYE_THRESHOLD} Vision and the game will show you which
+                   pitches are strikes — gold means swing. Until then the zone is your call.
+                 </p>
+                 ${meterHtml('Vision', player.attributes.vision, BATTING_EYE_THRESHOLD, 'xp')}`
+          }
         </div>
 
         <div class="panel">
@@ -90,6 +114,23 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
           }).join('')}
           <p class="tiny muted" style="margin:10px 0 0">
             ${esc(ATTRIBUTE_BLURBS.contact)}
+          </p>
+        </div>
+
+        <div class="panel">
+          <h2>Position</h2>
+          <p class="tiny muted" style="margin:0 0 8px">
+            Where you play decides which balls are yours to chase in the field.
+            Switch whenever you like — it takes effect from your next game.
+          </p>
+          <div class="chip-row">
+            ${POSITIONS.map(
+              (pos) =>
+                `<button class="chip ${pos === player.position ? 'on' : ''}" data-pos="${pos}">${pos}</button>`,
+            ).join('')}
+          </div>
+          <p class="tiny muted" style="margin:8px 0 0">
+            Now playing: <b style="color:var(--text)">${POSITION_LABELS[player.position]}</b>
           </p>
         </div>
 
@@ -158,15 +199,27 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
         offDay ? 'style="margin-top:8px"' : ''
       }>Back to Clubhouse</button>
     `;
+    q(mount, '.scroll').scrollTop = scrollTop;
 
     for (const button of qa<HTMLButtonElement>(mount, '.up')) {
       button.addEventListener('click', async () => {
         const hadZone = hasPerfectZone(player.attributes);
+        const hadEye = hasBattingEye(player.attributes);
         if (!upgradeAttribute(player, button.dataset.attr as (typeof ATTRIBUTE_KEYS)[number])) {
           return;
         }
         app.persist();
         draw();
+
+        if (!hadEye && hasBattingEye(player.attributes)) {
+          await showDialog({
+            title: 'Batting eye unlocked',
+            body:
+              'You see the zone now. From the next pitch on, a strike glows gold as it ' +
+              'reaches the plate and a ball never does — no gold, no swing.',
+            confirmLabel: 'Let me at it',
+          });
+        }
 
         if (!hadZone && hasPerfectZone(player.attributes)) {
           await showDialog({
@@ -178,6 +231,26 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
             confirmLabel: 'Let me at it',
           });
         }
+      });
+    }
+
+    for (const chip of qa<HTMLButtonElement>(mount, '[data-pos]')) {
+      chip.addEventListener('click', async () => {
+        const pos = chip.dataset.pos as Position;
+        if (pos === player.position) return;
+        const ok = await showDialog({
+          title: `Move to ${POSITION_LABELS[pos]}?`,
+          body:
+            `You'll take the field at ${POSITION_LABELS[pos].toLowerCase()} instead of ` +
+            `${POSITION_LABELS[player.position].toLowerCase()}, starting with your next game. ` +
+            'You can switch back any time.',
+          confirmLabel: 'Make the move',
+          cancelLabel: 'Stay put',
+        });
+        if (!ok) return;
+        player.position = pos;
+        app.persist();
+        draw();
       });
     }
 

@@ -2,16 +2,20 @@ import type { App } from '../app';
 import { LEVELS, createLeague, playerTeam, rolloverSeason, standings, teamById } from '../core/league';
 import { ROUND_LABEL } from '../core/playoffs';
 import { ensureSeasonAwards, mvpBonus, playerMvp } from '../core/awards';
+import { checkTrophies } from '../core/trophies';
+import { unlockedPanelHtml } from '../ui/trophyList';
 import { bracketHtml } from '../ui/bracket';
 import { formatMoney } from '../core/gear';
 import {
   battingAverage,
+  careerPhase,
   emptyBattingStats,
   onBasePct,
   overallRating,
   slugging,
 } from '../core/player';
-import { checkPromotion } from '../core/progression';
+import { checkPromotion, offseasonAgePoints } from '../core/progression';
+import { isCupYear, startWorldCup } from '../core/worldCup';
 import { esc, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
@@ -33,10 +37,25 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
   // save that was parked at the end of a year comes back in, so vote them here
   // if nobody has. Idempotent either way — the ballot is kept in the save.
   const awards = ensureSeasonAwards(save.awards, player, league, save.seasonYear, app.rng);
-  // Pin them now rather than on the way out: a player who reads the review and
-  // closes the app should come back to the same ballot, not a fresh vote.
-  app.persist();
   const mvp = playerMvp(awards);
+
+  // The honors the trophy case can only learn about tonight: a ring, an MVP,
+  // and the call upstairs. Everything else was banked game by game.
+  const unlocked = checkTrophies(save.trophies, {
+    player,
+    levelId: league.levelId,
+    seasonYear: save.seasonYear,
+    honors: {
+      champion,
+      mvp: mvp !== null,
+      promoted: check.promoted,
+      nextLevelId: check.nextLevelId,
+    },
+  });
+
+  // Pin all of it now rather than on the way out: a player who reads the review
+  // and closes the app should come back to the same ballot and the same case.
+  app.persist();
   const MVP_BONUS = mvpBonus(league.levelId);
   const leagueMvp = awards.mvps[awards.playerLevelId];
   const postseasonLine = ((): string => {
@@ -95,6 +114,8 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
         }
       </div>
 
+      ${unlockedPanelHtml(unlocked)}
+
       <div class="panel">
         <h2>Final line</h2>
         <div class="statline">
@@ -115,6 +136,7 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
         <h2>Front office report</h2>
         <div class="reward"><span>Scout grade</span><b>${check.score}</b></div>
         <div class="reward"><span>Overall rating</span><b>${check.overall}</b></div>
+        <div class="reward"><span>Age</span><b>${player.age} · ${esc(careerPhase(player.age))}</b></div>
         <div class="reward"><span>Team finish</span><b>${finish}${suffix} · ${team.wins}-${team.losses}</b></div>
         <div class="reward"><span>Postseason</span><b>${esc(postseasonLine)}</b></div>
         <p class="tiny" style="margin:12px 0 0; line-height:1.55">${esc(check.reason)}</p>
@@ -150,12 +172,26 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     player.season = emptyBattingStats();
     player.stamina = 100;
     player.energy = 100;
+    // A winter passes, so you have a birthday whether you earned it or not.
+    player.age++;
+    const agePoints = offseasonAgePoints(player.age);
     // An offseason of work is worth a couple of free points; a ring, a bit
-    // more; an MVP trophy, more again — it's the one thing you can win on your
-    // own numbers rather than the club's.
-    player.attributePoints += 2 + (check.promoted ? 2 : 0) + (champion ? 1 : 0) + (mvp ? 1 : 0);
+    // more; a body still filling out, more again; and an MVP trophy, more
+    // again — it's the one thing you can win on your own numbers rather than
+    // the club's.
+    player.attributePoints +=
+      2 + agePoints + (check.promoted ? 2 : 0) + (champion ? 1 : 0) + (mvp ? 1 : 0);
     if (champion) player.money += RING_BONUS;
     if (mvp) player.money += MVP_BONUS;
+
+    // Every fourth year the world tournament comes round, and it is played
+    // before opening day — so it is seeded here, on the new league, after the
+    // player has had their birthday and their offseason points but before they
+    // report to camp. `startWorldCup` puts the group games on the front of the
+    // calendar if they're picked, and plays the whole thing out if they're not.
+    const cupIntro = isCupYear(save.seasonYear)
+      ? startWorldCup(save, app.rng, overallRating(player.attributes))
+      : null;
 
     app.lastGame = null;
     app.persist();
@@ -166,12 +202,22 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     await showDialog({
       title: `Season ${save.seasonYear} — ${LEVELS[save.league.levelId].name}`,
       body:
-        `You report to the ${playerTeam(save.league).name}.\n` +
+        `You report to the ${playerTeam(save.league).name} at ${player.age}. ${careerPhase(player.age)}.\n` +
         `Overall ${overallRating(player.attributes)} · ${player.attributePoints} attribute points to spend.` +
         (mvp ? `\nYou arrive as the reigning ${LEVELS[mvp.levelId].name} MVP.` : '') +
+        (agePoints > 0
+          ? `\n${agePoints} of them came free — you're still growing into your frame.`
+          : '') +
         newsText,
       confirmLabel: 'Report to camp',
     });
+    if (cupIntro) {
+      await showDialog({
+        title: `Baseball World Trophy · Year ${save.seasonYear}`,
+        body: cupIntro.lines.join('\n\n'),
+        confirmLabel: cupIntro.selection === 'in' ? 'Report to the squad' : 'Back to work',
+      });
+    }
     app.go('hub');
   });
 }

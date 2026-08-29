@@ -1,5 +1,5 @@
 import type { App, PostGameSummary } from '../app';
-import type { LogTone, SimEvent } from '../core/gameSim';
+import type { LogTone, SimEvent, StealJump } from '../core/gameSim';
 import { GameSim } from '../core/gameSim';
 import type { Count } from '../core/pitching';
 import {
@@ -11,6 +11,7 @@ import {
   nextGame,
   parkForGame,
   playerTeam,
+  recordResult,
   simulateOtherTeams,
   teamById,
   teamKit,
@@ -18,10 +19,23 @@ import {
 } from '../core/league';
 import type { PlayoffGameOutcome } from '../core/playoffs';
 import { ROUND_LABEL, playerSeries, recordPlayoffGame, seriesLine, startPlayoffs } from '../core/playoffs';
+import type { CupGameOutcome } from '../core/worldCup';
+import {
+  ROUND_LABEL as CUP_ROUND_LABEL,
+  cupLevel,
+  cupPark,
+  cupPlayerTeam,
+  cupTeam,
+  groupOf,
+  nationOfTeam,
+  recordCupGame,
+} from '../core/worldCup';
 import { describeWeather, windLabel, windMph } from '../core/weather';
-import { uniformFor } from '../core/uniforms';
+import { TEAM_KITS, kitFor, uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
 import { addStats } from '../core/player';
+import { checkTrophies } from '../core/trophies';
+import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
 import { clamp } from '../core/rng';
 import type { BattedBall } from '../core/types';
@@ -35,13 +49,13 @@ import { esc, q } from '../ui/dom';
 import type { FeedIcon } from '../ui/feedIcons';
 import { feedIconFor, feedIconSvg } from '../ui/feedIcons';
 import {
-  isMuted,
+  isChannelMuted,
   playSound,
   resumeAmbience,
   startAmbience,
   stopAmbience,
   suspendAmbience,
-  toggleMuted,
+  toggleChannel,
 } from '../ui/audio';
 
 const NORMAL_DELAY = 850;
@@ -61,20 +75,56 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const scheduled = upcoming;
   // Saves from before named rosters get theirs generated on the way in.
   ensureRosters(league, app.rng);
-  const opponent = teamById(league, scheduled.opponentId);
-  const myTeam = playerTeam(league);
-  const park = parkForGame(league, scheduled);
+
+  // A world tournament game is played for your country, against a country, at
+  // a neutral venue, on a difficulty read off the opponent rather than the
+  // rung of the ladder you happen to be on. Everything past this block is the
+  // same game either way.
+  const cup = scheduled.worldCup ? (save.worldCup ?? null) : null;
+  const opponent = cup
+    ? cupTeam(cup, scheduled.opponentId)
+    : teamById(league, scheduled.opponentId);
+  const myTeam = cup ? cupPlayerTeam(cup) : playerTeam(league);
+  const park = cup ? cupPark(cup, scheduled) : parkForGame(league, scheduled);
   const weather = weatherForGame(scheduled, app.rng);
+  const gameLevel = cup ? cupLevel(opponent) : level;
 
-  // Home team wears its home kit, the visitor its road kit.
-  const myKit = uniformFor(teamKit(league, myTeam.id), scheduled.home);
-  const theirKit = uniformFor(teamKit(league, opponent.id), !scheduled.home);
-  // A postseason game plays until somebody wins.
-  const sim = new GameSim(player, level, myTeam, opponent, scheduled.home, app.rng, weather, !!scheduled.playoff);
+  // Home team wears its home kit, the visitor its road kit. Nations outnumber
+  // the kits, so two countries can draw the same colours; nudge the visitor
+  // along one rather than putting two identical sides on the same field.
+  const myKitId = cup ? myTeam.kitId : teamKit(league, myTeam.id).id;
+  const rawTheirs = cup ? opponent.kitId : teamKit(league, opponent.id).id;
+  const theirKitId =
+    cup && rawTheirs === myKitId
+      ? TEAM_KITS[(TEAM_KITS.findIndex((k) => k.id === myKitId) + 1) % TEAM_KITS.length].id
+      : rawTheirs;
+  const myKit = uniformFor(kitFor(myKitId, 0), scheduled.home);
+  const theirKit = uniformFor(kitFor(theirKitId, 1), !scheduled.home);
+  // A postseason game plays until somebody wins, and so does a knockout game:
+  // single elimination has nowhere to put a tie.
+  const mustDecide =
+    !!scheduled.playoff || (!!cup && scheduled.worldCup?.round !== 'group');
+  const sim = new GameSim(
+    player,
+    gameLevel,
+    myTeam,
+    opponent,
+    scheduled.home,
+    app.rng,
+    weather,
+    mustDecide,
+  );
 
-  // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night.
+  // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night, or
+  // "Baseball World Trophy · Group C" on a night you're playing for a country.
   const series = scheduled.playoff ? playerSeries(league) : null;
   const playoffTag = (() => {
+    if (cup) {
+      const round = (scheduled.worldCup?.round ?? 'group') as keyof typeof CUP_ROUND_LABEL;
+      const group = groupOf(cup, cup.nationId);
+      const where = round === 'group' && group ? `Group ${group.id}` : CUP_ROUND_LABEL[round];
+      return `Baseball World Trophy · ${where}`;
+    }
     if (!scheduled.playoff || !series) return '';
     const line = seriesLine(league, series);
     const tally =
@@ -126,13 +176,15 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         <div class="sim-matchup" id="simMatchup"></div>
         <div class="sim-linescore" id="simLinescore"></div>
         <div class="sim-skips">
-          <button class="skip-btn" id="skipAtBat">MY AT-BAT »</button>
+          <button class="skip-btn" id="skipAtBat">MY NEXT PLAY »</button>
           <button class="skip-btn" id="skipInning">END INNING »</button>
         </div>
+        <button class="steal-btn" id="steal" style="display:none"></button>
       </div>
       <div id="host"></div>
       <button class="speed-toggle" id="speed">FAST ▸</button>
-      <button class="sound-toggle" id="sound" aria-label="Toggle sound"></button>
+      <button class="sound-toggle" id="soundSfx" aria-label="Toggle effect sounds"></button>
+      <button class="sound-toggle crowd" id="soundCrowd" aria-label="Toggle crowd and music"></button>
       <button class="pause-toggle" id="pause" aria-label="Pause">❚❚</button>
       <div class="pause-overlay" id="paused">
         <div class="pause-card">
@@ -150,7 +202,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const host = q(mount, '#host');
   const feed = q(mount, '#feed');
   const speedBtn = q<HTMLButtonElement>(mount, '#speed');
-  const soundBtn = q<HTMLButtonElement>(mount, '#sound');
+  const stealBtn = q<HTMLButtonElement>(mount, '#steal');
+  const soundSfxBtn = q<HTMLButtonElement>(mount, '#soundSfx');
+  const soundCrowdBtn = q<HTMLButtonElement>(mount, '#soundCrowd');
 
   /* ------------------------------------------------------------ rendering */
 
@@ -316,6 +370,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   let pendingAt = 0;
   let pendingLeft = 0;
   let paused = false;
+  let pausedAt = 0;
 
   const schedule = (fn: () => void, ms = delay): void => {
     if (disposed) return;
@@ -350,10 +405,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       clearTimeout(timer);
       // Freeze what's left on the clock; wall time keeps going while paused.
       pendingLeft = Math.max(0, pendingAt - performance.now());
+      pausedAt = performance.now();
       suspendAmbience();
       q(mount, '#pauseSub').textContent = `${sim.inningLabel} · ${sim.outs} out`;
     } else {
       resumeAmbience();
+      // A pause during the GO! window shouldn't count against the jump.
+      if (stealPhase === 'go') goAt += performance.now() - pausedAt;
       if (pendingFn) schedule(pendingFn, pendingLeft);
     }
   };
@@ -373,8 +431,79 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     addFeed(`${n} run${n === 1 ? '' : 's'} score.`, ours ? 'good' : 'bad', 'run');
   };
 
+  /** The steal window is one tick long; whatever happens next, the button goes. */
+  const hideSteal = (): void => {
+    stealBtn.style.display = 'none';
+    stealBtn.classList.remove('set', 'go');
+    stealPhase = 'idle';
+  };
+
+  /* ------------------------------------------------------- the steal jump */
+
+  // Pressing STEAL doesn't roll the dice — it starts a read. The pitcher
+  // comes set (WAIT FOR IT…), holds a random beat, then moves (GO!). Your
+  // tap against that cue is the jump: before it and you're picked off, on
+  // it and the posted odds get a bonus, after it and they shrink, never and
+  // you dive back in. Both beats run on the single-slot game clock, so the
+  // pause button freezes the pitcher too.
+  let stealPhase: 'idle' | 'set' | 'go' = 'idle';
+  let goAt = 0;
+
+  function beginStealJump(): void {
+    clearTimeout(timer);
+    pendingFn = null;
+    stealPhase = 'set';
+    stealBtn.textContent = 'WAIT FOR IT…';
+    stealBtn.classList.add('set');
+    setIdle('The pitcher comes set. Go on his first move — break too soon and he has you.', sim.inningLabel);
+    schedule(fireGo, 700 + app.rng.next() * 1100);
+  }
+
+  function fireGo(): void {
+    stealPhase = 'go';
+    goAt = performance.now();
+    stealBtn.textContent = 'GO!';
+    stealBtn.classList.remove('set');
+    stealBtn.classList.add('go');
+    // Freeze past this and you never went: the bail path fires.
+    schedule(missStealJump, 900);
+  }
+
+  function resolveStealTap(): void {
+    if (stealPhase === 'set') {
+      finishSteal('early');
+      return;
+    }
+    const reaction = performance.now() - goAt;
+    const windows = sim.stealJumpWindows();
+    finishSteal(reaction <= windows.great ? 'great' : reaction <= windows.good ? 'good' : 'late');
+  }
+
+  function finishSteal(jump: StealJump): void {
+    hideSteal();
+    const result = sim.attemptSteal(jump);
+    if (!result) return;
+    if (result.success) playSound('cheerShort');
+    addFeed(result.text, result.tone);
+    setIdle(result.text, sim.inningLabel, result.tone);
+    update();
+    schedule(tick, delay + 350);
+  }
+
+  function missStealJump(): void {
+    hideSteal();
+    const result = sim.bailSteal();
+    if (result) {
+      addFeed(result.text, result.tone);
+      setIdle(result.text, sim.inningLabel);
+    }
+    update();
+    schedule(tick, delay + 350);
+  }
+
   const tick = (): void => {
     if (disposed) return;
+    hideSteal();
     const event = sim.step();
     update();
 
@@ -399,6 +528,18 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       case 'fielding':
         beginFielding(event);
         break;
+      case 'stealChance': {
+        // You're aboard with the next bag open. The button hangs there for one
+        // beat; ignore it and your teammate just hits.
+        stealBtn.textContent = `STEAL ${event.fromBase === 0 ? '2ND' : '3RD'} · ${Math.round(event.chance * 100)}%`;
+        stealBtn.style.display = '';
+        setIdle(
+          `You're on ${event.fromBase === 0 ? 'first' : 'second'} — hit STEAL to read the pitcher.`,
+          sim.inningLabel,
+        );
+        schedule(tick, delay + 1400);
+        break;
+      }
       case 'gameOver':
         endGame();
         break;
@@ -411,7 +552,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
    * still gets every line, so nothing is lost — just the waiting.
    */
   const skipTo = (target: 'atbat' | 'inning'): void => {
-    if (disposed || paused || view) return;
+    if (disposed || paused || view || stealPhase !== 'idle') return;
+    hideSteal();
     clearTimeout(timer);
     pendingFn = null;
 
@@ -432,6 +574,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
         case 'log':
           addFeed(event.text, event.tone);
           if (event.runs) addRunsFeed(event.runs.count, event.runs.ours);
+          break;
+        case 'stealChance':
+          // Skipping past the window declines the jump.
           break;
         case 'atBat':
           update();
@@ -635,32 +780,55 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     scheduled.played = true;
     scheduled.playerTeamScore = sim.score.us;
     scheduled.opponentScore = sim.score.them;
+    scheduled.innings = sim.inningsPlayed;
 
     // Only the regular season counts on the table. A playoff game lives on
-    // its series instead.
-    if (!scheduled.playoff) {
-      if (sim.score.us > sim.score.them) {
-        myTeam.wins++;
-        opponent.losses++;
-      } else if (sim.score.us < sim.score.them) {
-        myTeam.losses++;
-        opponent.wins++;
-      }
+    // its series instead, and a world tournament game on its own group table —
+    // the club standings must never learn that the tournament happened. A game
+    // called level after twelve innings goes on as a tie rather than nowhere,
+    // which is where it used to go.
+    if (!scheduled.playoff && !cup) {
+      recordResult(myTeam, opponent, sim.score.us, sim.score.them);
       simulateOtherTeams(league, app.rng, [opponent.id]);
     }
 
-    addStats(player.season, sim.gameStats);
+    // Career totals are still pre-game here; snapshot which achievements were
+    // already met so the postgame screen can call out the ones this game earned.
+    const metBefore = new Set(
+      ACHIEVEMENTS.filter((a) => isAchievementMet(a, player)).map((a) => a.id),
+    );
+
+    // A tournament game counts on your career line and on your country's, but
+    // never on the club season: the world tournament is played before opening
+    // day, and letting it into `season` would put international at-bats on the
+    // scout grade, the MVP ballot and every season trophy.
+    if (!cup) addStats(player.season, sim.gameStats);
     addStats(player.career, sim.gameStats);
+    if (cup) {
+      const line = cup.playerStats;
+      line.games++;
+      line.ab += sim.gameStats.ab;
+      line.hits += sim.gameStats.hits;
+      line.homeRuns += sim.gameStats.homeRuns;
+      line.rbi += sim.gameStats.rbi;
+      line.walks += sim.gameStats.walks;
+    }
     player.fielding.chances += sim.putouts + sim.errors;
     player.fielding.putouts += sim.putouts;
     player.fielding.errors += sim.errors;
 
+    const newAchievements = ACHIEVEMENTS.filter(
+      (a) => !metBefore.has(a.id) && isAchievementMet(a, player),
+    ).map((a) => a.name);
+
     const xp = gameXp(sim.gameStats, sim.putouts);
     const report = grantXp(player, xp);
 
-    // Payday, then a game's worth of wear on everything in the bag.
+    // Payday, then a game's worth of wear on everything in the bag. The world
+    // stage pays the top rate whatever rung you were called up from — it is
+    // most of what makes a tournament worth chasing out of Triple-A.
     const earnings = gameEarnings(
-      league.levelId,
+      cup ? LEVELS.length - 1 : league.levelId,
       player.contract,
       sim.gameStats,
       sim.putouts,
@@ -670,16 +838,55 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     const wornOut = wearGear(player).map((g) => g.name);
 
     // A game takes a real bite out of conditioning, then the day rolls over.
+    // No front-office churn during the tournament: you are on the other side
+    // of the world, and a trade rumour has nothing to do with tonight.
     player.stamina = clamp(player.stamina - (6 + Math.round(app.rng.next() * 4)), 0, 100);
-    advanceDay(league, app.rng);
+    advanceDay(league, cup ? undefined : app.rng);
     recoverOvernight(player);
+
+    // Move the tournament along first, so the trophy case can see a final
+    // reached or a Trough won on the game that actually did it.
+    let cupOutcome: CupGameOutcome | null = null;
+    if (cup) {
+      cupOutcome = recordCupGame(save, scheduled, sim.score.us, sim.score.them, app.rng);
+      // The tournament is preseason; you report to camp rested however far the
+      // run went, rather than opening the club year on an empty tank.
+      if (cupOutcome?.cupComplete) {
+        player.stamina = 100;
+        player.energy = 100;
+      }
+    }
+
+    // The trophy case, checked against the game that just ended. The season
+    // and career lines were folded in above, so a career milestone fires on
+    // the game it actually landed in rather than the next one.
+    const unlocked = checkTrophies(save.trophies, {
+      player,
+      levelId: league.levelId,
+      seasonYear: save.seasonYear,
+      game: {
+        stats: sim.gameStats,
+        feats: sim.feats,
+        putouts: sim.putouts,
+        errors: sim.errors,
+        win: sim.score.us > sim.score.them,
+        playoff: !!scheduled.playoff,
+        worldCup: cupOutcome
+          ? {
+              round: cupOutcome.round,
+              finalist: cupOutcome.finalist,
+              champion: cupOutcome.status === 'champion',
+            }
+          : undefined,
+      },
+    });
 
     // Move the postseason along: record a series game, or seed the bracket
     // the moment the regular season is done.
     let playoff: PlayoffGameOutcome | null = null;
     if (scheduled.playoff) {
       playoff = recordPlayoffGame(league, scheduled, sim.score.us > sim.score.them, app.rng);
-    } else if (isRegularSeasonOver(league)) {
+    } else if (!cup && isRegularSeasonOver(league)) {
       startPlayoffs(league, app.rng);
     }
 
@@ -687,7 +894,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       win: sim.score.us > sim.score.them,
       tie: sim.score.us === sim.score.them,
       score: { ...sim.score },
-      opponent: opponent.name,
+      // Countries are named by their flag on the tournament stage.
+      opponent: cup ? `${nationOfTeam(opponent.id).flag} ${opponent.name}` : opponent.name,
       home: sim.playerIsHome,
       stats: { ...sim.gameStats },
       putouts: sim.putouts,
@@ -697,7 +905,11 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       wornOut,
       levelsGained: report.levelsGained,
       pointsGained: report.pointsGained,
+      newAchievements,
       playoff: playoff ?? undefined,
+      cup: cupOutcome ?? undefined,
+      feats: { ...sim.feats },
+      unlocked,
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.
       seasonComplete: isSeasonOver(league),
@@ -727,19 +939,32 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   q(mount, '#skipAtBat').addEventListener('click', () => skipTo('atbat'));
   q(mount, '#skipInning').addEventListener('click', () => skipTo('inning'));
 
-  const syncSoundBtn = (): void => {
-    soundBtn.textContent = isMuted() ? '🔇' : '🔊';
-    soundBtn.classList.toggle('off', isMuted());
+  stealBtn.addEventListener('click', () => {
+    if (disposed || paused) return;
+    if (stealPhase === 'idle') beginStealJump();
+    else resolveStealTap();
+  });
+
+  const syncSoundBtns = (): void => {
+    soundSfxBtn.textContent = isChannelMuted('sfx') ? '🔇' : '🔊';
+    soundSfxBtn.classList.toggle('off', isChannelMuted('sfx'));
+    soundCrowdBtn.textContent = '🎵';
+    soundCrowdBtn.classList.toggle('off', isChannelMuted('crowd'));
   };
 
-  soundBtn.addEventListener('click', () => {
-    toggleMuted();
-    syncSoundBtn();
+  soundSfxBtn.addEventListener('click', () => {
+    toggleChannel('sfx');
+    syncSoundBtns();
+  });
+
+  soundCrowdBtn.addEventListener('click', () => {
+    toggleChannel('crowd');
+    syncSoundBtns();
   });
 
   showIdle();
   update();
-  syncSoundBtn();
+  syncSoundBtns();
   if (playoffTag) addFeed(`Postseason baseball: ${playoffTag}.`, 'good');
   addFeed(`${myTeam.name} ${scheduled.home ? 'host' : 'visit'} the ${opponent.name}.`, 'neutral');
   startAmbience();

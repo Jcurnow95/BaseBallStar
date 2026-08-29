@@ -45,6 +45,17 @@ export interface PlayerProfile {
   position: Position;
   bats: Handedness;
   archetype: string;
+  /**
+   * Years old. A career starts at 18 and ages a year every offseason, so a
+   * long playthrough reads as an arc: prospect, prime, veteran.
+   */
+  age: number;
+  /**
+   * Nation id — the flag you play under in the Baseball World Trophy. Chosen
+   * once, when the player is created, and never changed: it decides how hard
+   * you have to be to get picked. See `core/nations.ts`.
+   */
+  country: string;
   /** Base attributes, before equipment. See `core/gear.ts`. */
   attributes: Attributes;
   /** Dollars in the bank, spent in the gear store. */
@@ -60,6 +71,8 @@ export interface PlayerProfile {
   level: number;
   xp: number;
   attributePoints: number;
+  /** Ids of career achievements already claimed for points. See `core/achievements.ts`. */
+  achievements: string[];
   season: BattingStats;
   career: BattingStats;
   fielding: FieldingStats;

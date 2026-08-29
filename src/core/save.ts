@@ -1,6 +1,11 @@
 import type { PlayerProfile } from './types';
 import type { LeagueState } from './league';
+import type { SeasonAwards } from './awards';
+import type { UnlockedTrophy } from './trophies';
 import type { LevelTable } from './otherLeagues';
+import type { CupRecord, WorldCup } from './worldCup';
+import { DEFAULT_NATION_ID } from './nations';
+import { ROOKIE_AGE } from './player';
 import { readKey, removeKey, writeKey } from './storage';
 
 const STORAGE_KEY = 'baseball-star:save:v1';
@@ -21,12 +26,23 @@ export interface SaveData {
   player: PlayerProfile;
   league: LeagueState;
   seasonYear: number;
+  /** Award season, one entry per year voted. See `core/awards.ts`. */
+  awards: SeasonAwards[];
+  /** The trophy case, oldest first. See `core/trophies.ts`. */
+  trophies: UnlockedTrophy[];
   /**
    * Standings for the levels the player isn't at, kept in step with the
    * player's season by `syncOtherLevels`. Optional so pre-feature saves still
    * load; a missing one is built the first time the standings screen asks.
    */
   otherLevels?: LevelTable[];
+  /**
+   * This year's Baseball World Trophy, if this is one of the years it's played.
+   * Replaced wholesale every fourth year. See `core/worldCup.ts`.
+   */
+  worldCup?: WorldCup;
+  /** Every tournament the career has lived through, oldest first. */
+  cupHistory?: CupRecord[];
 }
 
 export function loadSave(slot: number): SaveData | null {
@@ -52,9 +68,11 @@ export function parseSave(raw: string): SaveData | null {
 }
 
 /**
- * Fill in anything a save predates. Money, gear and contracts arrived after
- * version 2 shipped, and bumping the version over additive fields would throw
- * away a career for no reason.
+ * Fill in anything a save predates. Money, gear, contracts, ages and the award
+ * season all arrived after version 2 shipped, and bumping the version over
+ * additive fields would throw away a career for no reason. A save from before
+ * awards starts with an empty trophy case rather than back-dated trophies:
+ * the seasons that would have to be voted on are gone.
  */
 function normalise(save: SaveData): void {
   const player = save.player;
@@ -62,6 +80,20 @@ function normalise(save: SaveData): void {
   if (!player.contract) player.contract = 'standard';
   if (!player.gear) player.gear = {};
   if (!Array.isArray(player.achievements)) player.achievements = [];
+  if (!Array.isArray(save.awards)) save.awards = [];
+  // A save from before the trophy case starts it empty rather than back-filled:
+  // a slam that was hit two seasons ago left no record to find.
+  if (!Array.isArray(save.trophies)) save.trophies = [];
+  // A career from before ages existed gets the one it would have had: signed
+  // at eighteen, a birthday for every season already played.
+  if (typeof player.age !== 'number') {
+    player.age = ROOKIE_AGE + Math.max(0, (save.seasonYear ?? 1) - 1);
+  }
+  // A career from before countries existed plays under the default flag. It's
+  // the one choice on the create screen that can't be made retroactively, and
+  // leaving it unset would quietly keep the player out of every tournament.
+  if (typeof player.country !== 'string') player.country = DEFAULT_NATION_ID;
+  if (!Array.isArray(save.cupHistory)) save.cupHistory = [];
 }
 
 export function writeSave(slot: number, data: Omit<SaveData, 'version'>): void {
@@ -80,5 +112,5 @@ export function clearSave(slot: number): void {
 }
 
 export function newSave(player: PlayerProfile, league: LeagueState): SaveData {
-  return { version: SAVE_VERSION, player, league, seasonYear: 1 };
+  return { version: SAVE_VERSION, player, league, seasonYear: 1, awards: [], trophies: [] };
 }

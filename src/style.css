@@ -888,6 +888,13 @@ table.standings tr.cut td {
   border-bottom: 1px dashed var(--gold);
 }
 
+/* Clubhouse: a teammate old enough that this could be his last season. */
+.vet,
+table.standings td.vet {
+  color: var(--gold);
+  font-weight: 700;
+}
+
 table.standings tr.clinched td:first-child::after {
   content: 'x';
   margin-left: 6px;
@@ -2596,4 +2603,431 @@ input[type='number'] {
   margin-top: 4px;
   padding-top: 10px;
   font-weight: 700;
+}
+
+/* ---------------------------------------------------------- award season */
+
+.mvp-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+.mvp-card.me {
+  border-color: var(--gold);
+  background: rgba(255, 209, 102, 0.1);
+}
+
+.mvp-trophy {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.mvp-who {
+  flex: 1;
+  min-width: 0;
+}
+
+.mvp-who strong {
+  display: block;
+  font-size: 17px;
+}
+
+.mvp-who span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mvp-card .ovr b {
+  color: var(--gold);
+}
+
+/* The ballot re-uses the standings table, but its second column is a name,
+   not a number, so the right-aligned default has to be undone. */
+table.standings.ballot th:first-child,
+table.standings.ballot td:first-child {
+  width: 22px;
+  color: var(--muted);
+}
+
+table.standings.ballot th:nth-child(2),
+table.standings.ballot td:nth-child(2) {
+  text-align: left;
+  width: auto;
+}
+
+table.standings.ballot td:nth-child(2) i {
+  display: block;
+  margin-top: 1px;
+  font-style: normal;
+  font-weight: 400;
+}
+
+table.standings.ballot th:nth-child(3),
+table.standings.ballot td:nth-child(3) {
+  width: 52px;
+}
+
+.award-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.award-row:last-of-type {
+  border-bottom: 0;
+}
+
+.award-row .lvl {
+  flex: 0 0 44px;
+  text-align: center;
+  padding: 4px 0;
+  border-radius: 7px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.award-row .what {
+  flex: 1;
+  min-width: 0;
+}
+
+.award-row .what strong {
+  display: block;
+  font-size: 14px;
+}
+
+.award-row .what i {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.award-row .share {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+/* --------------------------------------------------------- trophy case */
+
+/* A moment worth calling out on the recap — the gold cousin of `.notice`. */
+.notice.moment {
+  background: rgba(255, 209, 102, 0.14);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* One achievement, earned or not. Locked rows stay legible on purpose: the
+   blurb is the thing a player is chasing, so hiding it hides the game. */
+.ach-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ach-row:last-of-type {
+  border-bottom: 0;
+}
+
+.ach-row.locked {
+  opacity: 0.5;
+}
+
+.ach-icon {
+  flex: 0 0 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.ach-row.earned .ach-icon {
+  border-color: var(--accent-dim);
+}
+
+.ach-row.headline .ach-icon {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(255, 209, 102, 0.25);
+}
+
+.ach-what {
+  flex: 1;
+  min-width: 0;
+}
+
+.ach-what strong {
+  display: block;
+  font-size: 14px;
+}
+
+.ach-what i {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* What a trophy pays. Sits between the name and the date, quiet while the
+   trophy is locked and lit once it's been banked. */
+.ach-pts {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.ach-row.earned .ach-pts {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.ach-row.headline .ach-pts {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
+.ach-when {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-align: right;
+}
+
+.ach-when.new {
+  color: var(--bg);
+  background: var(--gold);
+  border-radius: 6px;
+  padding: 3px 7px;
+}
+
+/* The panel that announces a fresh unlock, on the postgame and the review. */
+.ach-new {
+  border-color: var(--gold);
+}
+
+.ach-new h2 {
+  color: var(--gold);
+}
+
+/* ------------------------------------------------------- season fixtures */
+
+/* A standings table with runs on it is wider than a phone. Let it scroll
+   sideways inside its panel rather than squeezing the club names to nothing. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table.standings.wide {
+  min-width: 430px;
+}
+
+table.standings.wide td:not(:first-child),
+table.standings.wide th:not(:first-child) {
+  width: 34px;
+}
+
+table.standings.wide td:first-child,
+table.standings.wide th:first-child {
+  white-space: nowrap;
+  padding-right: 10px;
+}
+
+/* Run differential: green when a club has outscored the league, red when it
+   hasn't. The sign says it too, so this reads fine without the colour. */
+table.standings td.up {
+  color: var(--accent);
+}
+
+table.standings td.down {
+  color: var(--red);
+}
+
+/* The season log: the matchup column carries the text, the rest are figures. */
+table.standings.fixtures td:nth-child(2),
+table.standings.fixtures th:nth-child(2) {
+  text-align: left;
+  width: auto;
+  white-space: nowrap;
+}
+
+table.standings.fixtures td:first-child,
+table.standings.fixtures th:first-child {
+  width: 26px;
+  color: var(--muted);
+}
+
+table.standings.fixtures tr.ahead td {
+  color: var(--muted);
+}
+
+/* W, L or T, sized so a column of them scans down the page. */
+.res {
+  display: inline-block;
+  min-width: 17px;
+  padding: 1px 0;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.res.win {
+  background: rgba(53, 194, 106, 0.18);
+  color: var(--accent);
+}
+
+.res.loss {
+  background: rgba(255, 107, 107, 0.16);
+  color: var(--red);
+}
+
+.res.tie {
+  background: rgba(255, 209, 102, 0.16);
+  color: var(--gold);
+}
+
+/* ------------------------------------------- the Baseball World Trophy */
+
+/*
+ * Thirty-two flags have to fit on a phone, so the country picker is a dense
+ * grid of flag-over-code tiles rather than the wide chips the rest of the
+ * create screen uses. The detail panel underneath carries the full name and
+ * the squad bar, so nothing important depends on recognising a flag.
+ */
+.nation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: 6px;
+}
+
+.nation-chip {
+  padding: 7px 2px 5px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  text-align: center;
+  cursor: pointer;
+}
+
+.nation-chip b {
+  display: block;
+  font-size: 19px;
+  line-height: 1.15;
+}
+
+.nation-chip span {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.nation-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.nation-chip.on span {
+  color: #05210f;
+}
+
+.nation-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.nation-detail strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 15px;
+}
+
+.nation-detail p {
+  margin: 10px 0 0;
+  line-height: 1.55;
+}
+
+/*
+ * Tournament days on the calendar, in their own colour: the preseason is not
+ * the club season and the strip should not pretend otherwise.
+ */
+.cal-day.cup {
+  background: var(--blue);
+  opacity: 0.8;
+}
+
+.week-day.cup span {
+  color: var(--blue);
+}
+
+/*
+ * Eight group tables stack rather than sit side by side — four rows each is
+ * already the most a phone will take without shrinking the country names.
+ */
+.cup-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.cup-table {
+  font-variant-numeric: tabular-nums;
+}
+
+.cup-table th:first-child {
+  text-align: left;
+}
+
+/*
+ * A sixteen-team bracket drawn as a tree wants about four times the width a
+ * phone has. Rounds are stacked as labelled blocks instead, reusing the club
+ * postseason's cards, with the final's rail picked out in gold.
+ */
+.cup-bracket {
+  display: grid;
+  gap: 14px;
+}
+
+.cup-bracket .bracket-round {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+}
+
+.cup-bracket .bracket-round:last-child {
+  border-left-color: var(--gold);
 }

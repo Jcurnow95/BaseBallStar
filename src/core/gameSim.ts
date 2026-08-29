@@ -8,6 +8,8 @@ import { launchBall, predictLanding } from './ballFlight';
 import type { PositionId } from './fieldGeometry';
 import { ALL_POSITIONS, FIELDER_HOME, distance, isFair, toPositionId } from './fieldGeometry';
 import type { PlayOutcome } from './playSim';
+import type { GameFeats } from './trophies';
+import { emptyGameFeats } from './trophies';
 import { effectiveAttributes } from './gear';
 import { fieldFor, infielderFor } from './outcome';
 import type { AirConditions, Weather } from './weather';
@@ -46,6 +48,17 @@ const REGULATION_INNINGS = 9;
  * the end of an inning.
  */
 const MAX_INNINGS = 12;
+/** Where "late in the game" starts, for the sake of a clutch hit. */
+const CLUTCH_INNING = 7;
+
+/** The state of a game at the moment before a pitch. See `recordFeats`. */
+interface Situation {
+  bases: boolean[];
+  us: number;
+  them: number;
+  inning: number;
+  half: 'top' | 'bottom';
+}
 
 /**
  * What a steal attempt takes out of you, safe or not — the sprint happens
@@ -127,6 +140,12 @@ export class GameSim {
   readonly mustDecide: boolean;
 
   inning = 1;
+  /**
+   * The last inning play actually reached — nine for a regulation game, more
+   * when it went to extras. `inning` runs on past the finish as halves close
+   * out, so this is the number the season log records.
+   */
+  inningsPlayed = 1;
   half: 'top' | 'bottom' = 'top';
   outs = 0;
   bases: boolean[] = [false, false, false];
@@ -137,6 +156,13 @@ export class GameSim {
   gameStats: BattingStats = emptyBattingStats();
   putouts = 0;
   errors = 0;
+
+  /**
+   * The moments a box score can't hold: what was on the bases, and what the
+   * scoreboard said, when the player put a ball in play. Read after the game
+   * by `core/trophies.ts` — nothing in the sim acts on them.
+   */
+  readonly feats: GameFeats = emptyGameFeats();
 
   /** Runs per inning (index 0 = 1st), for the linescore grid. */
   readonly lineScore = { us: [] as number[], them: [] as number[] };
@@ -271,6 +297,7 @@ export class GameSim {
       return { kind: 'gameOver', ...this.gameResult() };
     }
 
+    this.inningsPlayed = Math.max(this.inningsPlayed, this.inning);
     return this.weAreBatting ? this.stepOurHalf() : this.stepTheirHalf();
   }
 
@@ -404,6 +431,9 @@ export class GameSim {
     this.pending = null;
     this.lineupIndex++;
 
+    // Taken before anything moves: the swing is judged against the game as it
+    // stood when the pitch was thrown, not the one it leaves behind.
+    const before = this.situation();
     const stats = this.gameStats;
     stats.pa++;
 
@@ -451,6 +481,11 @@ export class GameSim {
     }
 
     this.addRuns('us', runs);
+    this.recordFeats(before, {
+      homeRun: outcome.result === 'homeRun',
+      insideThePark: false,
+      runs,
+    });
     return { text: outcome.description, tone, runs };
   }
 
@@ -592,6 +627,7 @@ export class GameSim {
     }
 
     const runs = result.runs;
+    const before = this.situation();
     if (batting === 'us') {
       this.lineupIndex++;
       const stats = this.gameStats;
@@ -606,6 +642,9 @@ export class GameSim {
         stats.rbi += runs;
         const room = Math.max(0, 3 - this.outs);
         for (let i = 0; i < Math.min(result.outs, room); i++) this.recordOut();
+        // A game can end on a misplay, and it still counts as a walk-off — the
+        // run came home on your ball. It just isn't a home run.
+        this.recordFeats(before, { homeRun: false, insideThePark: false, runs });
         return { text: result.description, tone: 'neutral' };
       }
       if (result.kind === 'homeRun') {
@@ -642,6 +681,14 @@ export class GameSim {
     // would leak into the next inning.
     const room = Math.max(0, 3 - this.outs);
     for (let i = 0; i < Math.min(result.outs, room); i++) this.recordOut();
+
+    if (batting === 'us') {
+      this.recordFeats(before, {
+        homeRun: result.kind === 'homeRun',
+        insideThePark: result.insideThePark,
+        runs,
+      });
+    }
 
     // Ours: gold for hits, big gold for the homer, red for the out. Theirs:
     // green when we got them out; their hit is gold like any hit — the runs
@@ -733,6 +780,67 @@ export class GameSim {
       'pops out to first',
     ]);
     return this.log(`${name} ${out}.`, ours ? 'bad' : 'good');
+  }
+
+  /* --------------------------------------------------------------- feats */
+
+  /** The game as it stood before a pitch: what a feat is measured against. */
+  private situation(): Situation {
+    return {
+      bases: [...this.bases],
+      us: this.score.us,
+      them: this.score.them,
+      inning: this.inning,
+      half: this.half,
+    };
+  }
+
+  /**
+   * Fold one of the player's completed plate appearances into `feats`.
+   *
+   * Called *after* the runs are on the board and the bases have moved, with
+   * the pre-pitch situation passed back in — that pairing is the whole trick.
+   * A grand slam is "three men on, then the ball left the yard"; a walk-off is
+   * "batting last, ninth or later, behind or level, and now ahead". Neither
+   * question can be answered from one side of the swing alone.
+   */
+  private recordFeats(
+    before: Situation,
+    play: { homeRun: boolean; insideThePark: boolean; runs: number },
+  ): void {
+    const feats = this.feats;
+
+    if (play.homeRun && before.bases[0] && before.bases[1] && before.bases[2]) {
+      feats.grandSlam = true;
+    }
+    if (play.insideThePark) feats.insideThePark = true;
+    if (play.runs > feats.bestRbiPa) feats.bestRbiPa = play.runs;
+
+    // Late and behind, and you fixed it — level or better. The seventh is
+    // where a nine-inning game starts counting outs.
+    if (
+      play.runs > 0 &&
+      before.inning >= CLUTCH_INNING &&
+      before.us < before.them &&
+      this.score.us >= this.score.them
+    ) {
+      feats.clutchHit = true;
+    }
+
+    // A walk-off needs the home half of the ninth or later, and a score that
+    // crossed over on this swing. `mustDecide` games run past twelve; the
+    // condition doesn't care how deep it got, only that this ended it.
+    const battingLast = this.playerIsHome && before.half === 'bottom';
+    if (
+      battingLast &&
+      before.inning >= REGULATION_INNINGS &&
+      play.runs > 0 &&
+      before.us <= before.them &&
+      this.score.us > this.score.them
+    ) {
+      feats.walkOff = true;
+      if (play.homeRun) feats.walkOffHomeRun = true;
+    }
   }
 
   /* ------------------------------------------------------------- helpers */

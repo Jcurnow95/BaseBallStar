@@ -85,6 +85,11 @@ export interface PlayOutcome {
   userError: boolean;
   /** The batter reached because of a misplay — an at-bat, but not a hit. */
   reachedOnError: boolean;
+  /**
+   * A home run the batter had to run out: the ball stayed in the park and he
+   * beat it home. Only ever true alongside `kind: 'homeRun'`.
+   */
+  insideThePark: boolean;
 }
 
 export interface PlaySetup {
@@ -1825,6 +1830,9 @@ export class PlaySim {
       userPutout: this.userPutout,
       userError: this.userError,
       reachedOnError: this.errorOnPlay && !batter.out && batterBase >= 1,
+      // `this.homeRun` is the ball over the fence. A batter who got all the way
+      // round without it is the other kind, and the rarer one.
+      insideThePark: !this.homeRun && !this.foul && !batter.out && batterBase >= 4,
     };
   }
 

@@ -1,10 +1,15 @@
 import type { App } from '../app';
+import type { Team } from '../core/league';
 import {
   LEVELS,
   SEASON_GAMES,
   ensureRosters,
+  gamesPlayed as clubGames,
   isRegularSeasonOver,
+  FORCED_RETIREMENT_AGE,
+  RETIREMENT_WATCH_AGE,
   isSeasonOver,
+  nearingRetirement,
   nextGame,
   parkForGame,
   playerTeam,
@@ -14,6 +19,7 @@ import {
   teamKit,
   weatherForGame,
 } from '../core/league';
+import { formatDiff, formatTally, standingsLine } from '../core/seasonStats';
 import {
   PLAYOFF_TEAMS,
   ROUND_LABEL,
@@ -22,6 +28,16 @@ import {
   seriesOpponent,
   startPlayoffs,
 } from '../core/playoffs';
+import { trophyProgress } from '../core/trophies';
+import type { CupRound } from '../core/worldCup';
+import {
+  ROUND_LABEL as CUP_ROUND_LABEL,
+  cupPark,
+  cupTeam,
+  groupOf,
+  nationOfTeam,
+} from '../core/worldCup';
+import { cupRecordLine } from './worldCup';
 import { bracketHtml } from '../ui/bracket';
 import { ballparkById } from '../core/ballpark';
 import { describeWeather } from '../core/weather';
@@ -35,10 +51,12 @@ import {
   ATTRIBUTE_LABELS,
   ATTRIBUTE_KEYS,
   battingAverage,
+  careerPhase,
   onBasePct,
   overallRating,
   slugging,
 } from '../core/player';
+import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
 import { unclaimedAchievements } from '../core/achievements';
 import { esc, meterHtml, q } from '../ui/dom';
@@ -54,12 +72,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
    * one of your game days, so everyone has the same number left. Clinched when
    * fewer than `PLAYOFF_TEAMS` others could still catch its win total.
    */
-  const clinched = (t: { id: string; wins: number; losses: number }): boolean => {
+  const clinched = (t: Team): boolean => {
     const league = app.requireSave().league;
     if (league.playoffs) return false;
-    const remaining = Math.max(0, SEASON_GAMES - (t.wins + t.losses));
+    const remaining = Math.max(0, SEASON_GAMES - clubGames(t));
     const threats = league.teams.filter(
-      (o) => o.id !== t.id && o.wins + Math.max(0, SEASON_GAMES - (o.wins + o.losses)) >= t.wins,
+      (o) => o.id !== t.id && o.wins + Math.max(0, SEASON_GAMES - clubGames(o)) >= t.wins,
     ).length;
     return remaining < SEASON_GAMES && threats < PLAYOFF_TEAMS;
   };
@@ -68,6 +86,10 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const { player, league } = save;
   const level = LEVELS[league.levelId];
   const team = playerTeam(league);
+  // 12-9, or 12-9-1 once a game has been called level.
+  const record = formatTally(standingsLine(team));
+  // Nobody wants a column of zeroes; the T appears the week a tie does.
+  const leagueHasTies = league.teams.some((t) => (t.ties ?? 0) > 0);
 
   // A save that finished its regular season before there was a postseason
   // gets its bracket seeded on the way in.
@@ -89,13 +111,23 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const series = playerSeries(league);
   const ovr = overallRating(player.attributes);
   const homePark = ballparkById(team.parkId);
+  const mvps = mvpSeasons(save.awards);
+  // Teammates on the way out, so the clubhouse table warns you before names
+  // start disappearing over the winter.
+  const vets = (team.roster ?? []).filter(nearingRetirement).length;
+  // The tournament, when there is one this year. Declared up here because the
+  // calendar key below needs to know whether to name the colour.
+  const cup = save.worldCup;
+  const cupOn = !!cup && cup.selection === 'in' && !cup.complete;
 
   // What kind of day a calendar slot is, for the week strip and season strip.
-  const dayKind = (index: number): 'game' | 'off' | 'playoff' | 'end' => {
+  const dayKind = (index: number): 'game' | 'off' | 'playoff' | 'cup' | 'end' => {
     const day = league.calendar[index];
     if (!day) return 'end';
     if (day.gameIndex == null) return 'off';
-    return league.schedule[day.gameIndex]?.playoff ? 'playoff' : 'game';
+    const game = league.schedule[day.gameIndex];
+    if (game?.worldCup) return 'cup';
+    return game?.playoff ? 'playoff' : 'game';
   };
 
   // The week ahead in plain words, then the whole season as a dot strip for
@@ -103,7 +135,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const weekHtml = Array.from({ length: 7 }, (_, i) => {
     const index = league.day + i;
     const kind = dayKind(index);
-    const label = kind === 'end' ? '—' : kind === 'off' ? 'Off' : kind === 'playoff' ? 'P.O.' : 'Game';
+    const label =
+      kind === 'end' ? '—'
+      : kind === 'off' ? 'Off'
+      : kind === 'playoff' ? 'P.O.'
+      : kind === 'cup' ? 'CUP'
+      : 'Game';
     return `
       <div class="week-day ${kind}${i === 0 ? ' now' : ''}">
         <b>${i === 0 ? 'Today' : `Day ${index + 1}`}</b>
@@ -120,7 +157,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
         .map((_, index) => {
           const state =
             index < league.day ? 'past' : index === league.day ? 'now' : 'ahead';
-          const kind = dayKind(index) === 'playoff' ? 'game playoff' : dayKind(index);
+          const raw = dayKind(index);
+          const kind =
+            raw === 'playoff' ? 'game playoff' : raw === 'cup' ? 'game cup' : raw;
           return `<i class="cal-day ${kind} ${state}" title="Day ${index + 1}"></i>`;
         })
         .join('')}
@@ -130,6 +169,14 @@ export function renderHub(app: App, mount: HTMLElement): void {
       <span><i class="cal-day game ahead"></i> game</span>
       <span><i class="cal-day off ahead"></i> off day</span>
       ${playoffs && playoffs.playerResult !== 'missed' ? '<span><i class="cal-day game playoff ahead"></i> playoff</span>' : ''}
+      ${
+        // Named whenever there are blue days on the strip at all — the
+        // tournament's own days stay there for the rest of the year, so the
+        // key has to outlive the tournament.
+        cup?.selection === 'in'
+          ? '<span><i class="cal-day game cup ahead"></i> world tournament</span>'
+          : ''
+      }
       <span><i class="cal-day game past"></i> done</span>
       <span>Day ${Math.min(league.day + 1, league.calendar.length)} of ${league.calendar.length}</span>
     </div>`;
@@ -150,6 +197,19 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const fraying = GEAR_SLOTS.map((s) => player.gear[s]).filter(
     (g): g is NonNullable<typeof g> => !!g && g.gamesLeft <= 2,
   ).length;
+  // The case wears its own progress, so the clubhouse always says how much of
+  // it is still out there to go and get.
+  const caseProgress = trophyProgress(save.trophies);
+  const caseBadge = `<span class="btn-badge">${caseProgress.earned}/${caseProgress.total}</span>`;
+  const cupBadge = !cup
+    ? ''
+    : cup.playerResult === 'champion'
+      ? '<span class="btn-badge">🥇 Champions</span>'
+      : cupOn
+        ? '<span class="btn-badge">Playing</span>'
+        : cup.selection === 'in'
+          ? '<span class="btn-badge">Done</span>'
+          : '<span class="btn-badge warn">Not selected</span>';
   // Milestones sit one tap away, and the badge nags until the points are
   // collected — an earned reward should never rot unseen.
   const toClaim = unclaimedAchievements(player).length;
@@ -157,6 +217,16 @@ export function renderHub(app: App, mount: HTMLElement): void {
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
     </button>
+    <button class="btn ghost" id="trophies" style="margin-top:8px">
+      Trophy Case${caseBadge}
+    </button>
+    ${
+      cup
+        ? `<button class="btn ghost" id="worldcup" style="margin-top:8px">
+             Baseball World Trophy${cupBadge}
+           </button>`
+        : ''
+    }
     <button class="btn ghost" id="achievements" style="margin-top:8px">
       Achievements${toClaim > 0 ? `<span class="btn-badge">${toClaim} to claim</span>` : ''}
     </button>
@@ -184,37 +254,57 @@ export function renderHub(app: App, mount: HTMLElement): void {
   if (seasonDone) {
     matchupHtml = `
       <div class="notice ${playoffs?.playerResult === 'champion' ? '' : 'warn'}" style="margin-bottom:12px">
-        ${wrapUp} Time to find out what the organization thinks of you.
+        ${wrapUp} The ${esc(level.name)} MVP is announced tonight.
       </div>
-      <button class="btn primary" id="finish">Season Review</button>
+      <button class="btn primary" id="finish">Awards Night</button>
       ${devButton}
       ${storeButton}`;
   } else if (upcoming) {
-    const park = parkForGame(league, upcoming);
+    // A tournament day is played for a country, not the club, so the card says
+    // so: two flags, the round, and where your group stands instead of a
+    // league record that has nothing to do with tonight.
+    const cupGame = cup && upcoming.worldCup ? cup : null;
+    const park = cupGame ? cupPark(cupGame, upcoming) : parkForGame(league, upcoming);
     // A pre-weather save gets its forecast rolled here; pin it so the game
     // plays in the weather the clubhouse promised.
     const hadForecast = !!upcoming.weather;
     const weather = weatherForGame(upcoming, app.rng);
     if (!hadForecast) app.persist();
     const line = series ? seriesLine(league, series) : null;
-    const gameLabel =
-      upcoming.playoff && series
+    const cupRound = (upcoming.worldCup?.round ?? 'group') as CupRound;
+    const myCupGroup = cupGame ? groupOf(cupGame, cupGame.nationId) : null;
+    const gameLabel = cupGame
+      ? `World Trophy · ${cupRound === 'group' && myCupGroup ? `Group ${myCupGroup.id}` : CUP_ROUND_LABEL[cupRound]}`
+      : upcoming.playoff && series
         ? `${ROUND_LABEL[series.round]} · Game ${upcoming.playoff.gameNo} of ${series.bestOf}`
         : `Game ${gamesPlayed + 1} of ${SEASON_GAMES}`;
+    const opponentName = cupGame
+      ? (() => {
+          const n = nationOfTeam(upcoming.opponentId);
+          return `${n.flag} ${n.name}`;
+        })()
+      : teamById(league, upcoming.opponentId).name;
+    const tally = cupGame
+      ? cupRecordLine(cupTeam(cupGame, cupGame.nationId))
+      : line
+        ? `${line.us}-${line.them}`
+        : record;
     matchupHtml = `
       <div class="matchup">
         <div>
-          <span class="vs" ${upcoming.playoff ? 'style="color:var(--gold)"' : ''}>${gameLabel}</span>
-          <strong>${upcoming.home ? 'vs' : '@'} ${esc(teamById(league, upcoming.opponentId).name)}</strong>
+          <span class="vs" ${upcoming.playoff || cupGame ? 'style="color:var(--gold)"' : ''}>${esc(gameLabel)}</span>
+          <strong>${cupGame ? `${nationOfTeam(cup!.nationId).flag} vs` : upcoming.home ? 'vs' : '@'} ${esc(opponentName)}</strong>
           <span class="tiny muted">${esc(park.name)} · ${esc(describeWeather(weather))}</span>
         </div>
         <div class="ovr">
-          <b>${line ? `${line.us}-${line.them}` : `${team.wins}-${team.losses}`}</b>
-          <span>${line ? 'Series' : 'Record'}</span>
+          <b>${esc(tally)}</b>
+          <span>${cupGame ? 'Group' : line ? 'Series' : 'Record'}</span>
         </div>
       </div>
       ${calendarHtml}
-      <button class="btn primary" id="play" style="margin-top:12px">Play Ball</button>
+      <button class="btn primary" id="play" style="margin-top:12px">
+        ${cupGame ? 'Play for Your Country' : 'Play Ball'}
+      </button>
       ${devButton}
       ${storeButton}`;
   } else {
@@ -230,7 +320,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <span class="tiny muted">${nextUp}</span>
         </div>
         <div class="ovr">
-          <b>${team.wins}-${team.losses}</b>
+          <b>${record}</b>
           <span>Record</span>
         </div>
       </div>
@@ -261,6 +351,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
             <div class="id-chips">
               <span class="id-chip">${esc(level.name)}</span>
               <span class="id-chip">${esc(team.name)}</span>
+              <span class="id-chip" title="${esc(careerPhase(player.age))}">Age ${player.age}</span>
               <span class="id-chip">Bats ${player.bats}</span>
               <span class="id-chip">Lv ${player.level}</span>
               <span class="id-chip">Home · ${esc(homePark.name)}</span>
@@ -350,17 +441,19 @@ export function renderHub(app: App, mount: HTMLElement): void {
       <div class="panel">
         <h2>${esc(level.name)} standings</h2>
         <table class="standings">
-          <tr><th>Team</th><th>W</th><th>L</th></tr>
+          <tr><th>Team</th><th>W</th><th>L</th>${leagueHasTies ? '<th>T</th>' : ''}<th>Diff</th></tr>
           ${standings(league)
             .map((t, i) => {
               const kit = teamKit(league, t.id);
               const cut = i === PLAYOFF_TEAMS - 1 && !playoffs;
+              const row = standingsLine(t);
               return `
             <tr class="${t.id === league.playerTeamId ? 'me' : ''} ${cut ? 'cut' : ''} ${clinched(t) ? 'clinched' : ''}">
               <td><i class="kit-chip" style="background:${kit.accent}" title="${esc(kit.name)}"></i>${esc(t.name)}${
                 t.id === league.playerTeamId ? '<span class="you-tag">You</span>' : ''
               }</td>
-              <td>${t.wins}</td><td>${t.losses}</td>
+              <td>${t.wins}</td><td>${t.losses}</td>${leagueHasTies ? `<td>${row.ties}</td>` : ''}
+              <td class="${row.diff > 0 ? 'up' : row.diff < 0 ? 'down' : ''}">${formatDiff(row.diff)}</td>
             </tr>`;
             })
             .join('')}
@@ -368,6 +461,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
         <div class="tiny muted" style="margin-top:8px">
           Squares are club colours${playoffs ? '' : ` · Top ${PLAYOFF_TEAMS} make the playoffs · x = clinched`}
         </div>
+        <button class="link-btn" id="seasonLog">Season Log &amp; Fixtures</button>
         <button class="link-btn" id="allStandings">Standings Around the Leagues</button>
       </div>
 
@@ -375,18 +469,28 @@ export function renderHub(app: App, mount: HTMLElement): void {
         <h2>Clubhouse</h2>
         <table class="standings">
           <tr><th>Player</th><th>Age</th><th>Rating</th></tr>
+          <tr class="me">
+            <td>${esc(player.name)}<span class="you-tag">You</span></td>
+            <td>${player.age}</td><td>${ovr}</td>
+          </tr>
           ${(team.roster ?? [])
             .map(
               (p) => `
             <tr>
               <td>${esc(p.name)}${p.role === 'pitcher' ? ' <span class="tiny muted">P</span>' : ''}</td>
-              <td>${p.age}</td><td>${p.rating}</td>
+              <td class="${nearingRetirement(p) ? 'vet' : ''}" ${
+                nearingRetirement(p) ? 'title="Playing out the end of his career"' : ''
+              }>${p.age}</td><td>${p.rating}</td>
             </tr>`,
             )
             .join('')}
         </table>
         <div class="tiny muted" style="margin-top:10px; text-align:center">
-          Your teammates, for as long as the front office keeps them together.
+          Your teammates, for as long as the front office keeps them together.${
+            vets > 0
+              ? ` <span class="vet">${vets} in gold ${vets === 1 ? 'is' : 'are'} near the end — expect ${vets === 1 ? 'a retirement' : 'retirements'} this winter.</span>`
+              : ''
+          }
         </div>
       </div>
 
@@ -398,6 +502,25 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div><b>${player.career.homeRuns}</b><span>HR</span></div>
           <div><b>${player.career.rbi}</b><span>RBI</span></div>
         </div>
+        ${
+          mvps.length > 0
+            ? `<div style="margin-top:12px">${mvps
+                .map(
+                  (t) =>
+                    `<div class="reward"><span>🏆 Season ${t.year} · ${esc(LEVELS[t.levelId].name)}</span><b>MVP</b></div>`,
+                )
+                .join('')}</div>`
+            : ''
+        }
+        ${
+          player.age >= RETIREMENT_WATCH_AGE
+            ? `<div class="tiny muted" style="margin-top:12px; line-height:1.55">
+                 You're ${player.age}. The players you came up with are done by
+                 ${FORCED_RETIREMENT_AGE} — you can keep going as long as you like, and hang
+                 them up whenever you say so.
+               </div>`
+            : ''
+        }
         <div class="btn-row" style="margin-top:14px">
           <button class="btn ghost tiny" id="mainmenu">Switch Player</button>
           <button class="btn ghost tiny" id="reset">Retire &amp; start over</button>
@@ -406,7 +529,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
     </div>
   `;
 
-  if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('seasonEnd'));
+  if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('awards'));
   else if (upcoming) {
     // First game ever goes by way of the how-to; after that, straight in.
     q(mount, '#play').addEventListener('click', () =>
@@ -415,8 +538,11 @@ export function renderHub(app: App, mount: HTMLElement): void {
   }
 
   q(mount, '#train').addEventListener('click', () => app.go('training'));
+  q(mount, '#seasonLog').addEventListener('click', () => app.go('fixtures'));
   q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
+  q(mount, '#trophies').addEventListener('click', () => app.go('trophies'));
+  if (cup) q(mount, '#worldcup').addEventListener('click', () => app.go('worldCup'));
   q(mount, '#achievements').addEventListener('click', () => app.go('achievements'));
   q(mount, '#howto').addEventListener('click', () => openHowto(app, 'hub'));
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));

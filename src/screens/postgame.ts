@@ -2,6 +2,8 @@ import type { App } from '../app';
 import { battingAverage } from '../core/player';
 import { contractById, formatMoney } from '../core/gear';
 import { ROUND_LABEL } from '../core/playoffs';
+import { ROUND_LABEL as CUP_ROUND_LABEL } from '../core/worldCup';
+import { unlockedPanelHtml } from '../ui/trophyList';
 import { esc, q } from '../ui/dom';
 
 export function renderPostGame(app: App, mount: HTMLElement): void {
@@ -14,9 +16,37 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
   const save = app.requireSave();
   const { stats } = summary;
   const playoff = summary.playoff;
-  const champion = playoff?.status === 'champion';
-  const verdict = champion ? 'CHAMPIONS' : summary.tie ? 'TIE' : summary.win ? 'WIN' : 'LOSS';
+  const cup = summary.cup;
+  const champion = playoff?.status === 'champion' || cup?.status === 'champion';
+  const verdict = champion
+    ? cup
+      ? 'WORLD CHAMPIONS'
+      : 'CHAMPIONS'
+    : summary.tie
+      ? 'TIE'
+      : summary.win
+        ? 'WIN'
+        : 'LOSS';
   const verdictClass = champion ? 'champ' : summary.tie ? 'tie' : summary.win ? 'win' : 'loss';
+
+  // Where the tournament stands. `note` is written where the bracket lives, so
+  // this screen never has to reason about groups or seeding.
+  const cupHtml = cup
+    ? `<div class="notice ${
+        cup.status === 'eliminated' ? 'warn' : cup.status === 'champion' ? 'moment' : ''
+      }" style="margin-bottom:12px">
+         <b>Baseball World Trophy · ${esc(CUP_ROUND_LABEL[cup.round])}</b> · ${esc(cup.note)}
+       </div>`
+    : '';
+
+  // A tournament game has no season line to quote — it is played before
+  // opening day and deliberately kept out of `season` — so the development
+  // panel quotes the tournament instead.
+  const cupLine = save.worldCup?.playerStats;
+  const tournamentAvg =
+    !cupLine || cupLine.ab === 0
+      ? '.000'
+      : (cupLine.hits / cupLine.ab).toFixed(3).replace(/^0/, '');
 
   // Where the series stands, and what it means.
   const seriesHtml = ((): string => {
@@ -50,6 +80,21 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     return `<div class="notice ${cls}" style="margin-bottom:12px"><b>${round}</b> · ${note}</div>`;
   })();
 
+  // The moments worth saying out loud, whether or not they were new. An
+  // trophy fires once in a career; a walk-off is a walk-off every time.
+  const moments = [
+    summary.feats.walkOffHomeRun
+      ? 'Walk-off home run. You ended it with one swing.'
+      : summary.feats.walkOff
+        ? 'Walk-off. The winning run came home on your at-bat.'
+        : '',
+    summary.feats.grandSlam ? 'Grand slam — all four came around.' : '',
+    summary.feats.insideThePark ? 'Inside-the-park home run. You ran it out.' : '',
+    !summary.feats.walkOff && summary.feats.clutchHit
+      ? 'You brought them back late.'
+      : '',
+  ].filter(Boolean);
+
   const line = [
     `${stats.hits}-for-${stats.ab}`,
     stats.homeRuns > 0 ? `${stats.homeRuns} HR` : '',
@@ -72,6 +117,15 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
       </div>
 
       ${seriesHtml}
+      ${cupHtml}
+
+      ${
+        moments.length > 0
+          ? `<div class="notice moment">${moments.map((m) => esc(m)).join('<br/>')}</div>`
+          : ''
+      }
+
+      ${unlockedPanelHtml(summary.unlocked)}
 
       <div class="panel">
         <h2>Your line</h2>
@@ -116,7 +170,10 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
             ? `<div class="reward"><span>Level up ×${summary.levelsGained}</span><b>+${summary.pointsGained} pts</b></div>`
             : ''
         }
-        <div class="reward"><span>Season average</span><b>${battingAverage(save.player.season)}</b></div>
+        <div class="reward">
+          <span>${cup ? 'Tournament average' : 'Season average'}</span>
+          <b>${cup ? tournamentAvg : battingAverage(save.player.season)}</b>
+        </div>
         <div class="reward"><span>Stamina</span><b>${Math.round(save.player.stamina)}%</b></div>
       </div>
 
@@ -142,11 +199,12 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     </div>
 
     <button class="btn primary" id="next">${
-      summary.seasonComplete ? 'Season Review' : 'Back to Clubhouse'
+      summary.seasonComplete ? 'Awards Night' : 'Back to Clubhouse'
     }</button>
   `;
 
   q(mount, '#next').addEventListener('click', () => {
-    app.go(summary.seasonComplete ? 'seasonEnd' : 'hub');
+    // The year ends with the awards, then the front office review.
+    app.go(summary.seasonComplete ? 'awards' : 'hub');
   });
 }

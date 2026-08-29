@@ -7,6 +7,7 @@ import type {
   Position,
 } from './types';
 import type { ContractStyle } from './gear';
+import { DEFAULT_NATION_ID } from './nations';
 import { clamp } from './rng';
 
 export const ATTRIBUTE_KEYS: AttributeKey[] = [
@@ -72,6 +73,21 @@ export const ARCHETYPES: Archetype[] = [
 
 export const POSITIONS: Position[] = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'];
 
+/** Every career starts here: eighteen, signing your first professional deal. */
+export const ROOKIE_AGE = 18;
+
+/**
+ * Where a player stands in their career, read off their age alone. Flavour
+ * for the clubhouse — nothing mechanical hangs off the label itself.
+ */
+export function careerPhase(age: number): string {
+  if (age <= 21) return 'Prospect';
+  if (age <= 25) return 'On the rise';
+  if (age <= 31) return 'In his prime';
+  if (age <= 35) return 'Veteran';
+  return 'Old pro';
+}
+
 export const POSITION_LABELS: Record<Position, string> = {
   C: 'Catcher',
   '1B': 'First Base',
@@ -113,6 +129,7 @@ export function createPlayer(
   bats: Handedness,
   archetype: Archetype,
   contract: ContractStyle = 'standard',
+  country: string = DEFAULT_NATION_ID,
 ): PlayerProfile {
   const attributes = { ...BASE_ATTRIBUTES };
   for (const key of ATTRIBUTE_KEYS) {
@@ -124,6 +141,8 @@ export function createPlayer(
     position,
     bats,
     archetype: archetype.name,
+    age: ROOKIE_AGE,
+    country,
     attributes,
     // A signing cheque, so the store is worth a look before the first game.
     money: 500,
@@ -168,6 +187,20 @@ export function slugging(s: BattingStats): string {
   if (s.ab === 0) return '.000';
   const tb = s.singles + s.doubles * 2 + s.triples * 3 + s.homeRuns * 4;
   return (tb / s.ab).toFixed(3).replace(/^0/, '');
+}
+
+/**
+ * On-base plus slugging — the one number that sums a season at the plate, and
+ * what the MVP ballot is argued over. Kept unstripped above 1.000, since a
+ * leading zero is the whole point of the milestone.
+ */
+export function ops(s: BattingStats): string {
+  const denom = s.ab + s.walks;
+  const obp = denom === 0 ? 0 : (s.hits + s.walks) / denom;
+  const tb = s.singles + s.doubles * 2 + s.triples * 3 + s.homeRuns * 4;
+  const slg = s.ab === 0 ? 0 : tb / s.ab;
+  const total = obp + slg;
+  return total >= 1 ? total.toFixed(3) : total.toFixed(3).replace(/^0/, '');
 }
 
 export function addStats(target: BattingStats, delta: Partial<BattingStats>): void {

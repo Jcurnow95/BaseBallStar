@@ -28,3 +28,6 @@ ios/App/App/public/
 android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
 ios/App/App/capacitor.config.json
+
+# Local git worktrees created by Claude Code sessions.
+.claude/worktrees/

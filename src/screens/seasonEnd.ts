@@ -1,6 +1,7 @@
 import type { App } from '../app';
 import { LEVELS, createLeague, playerTeam, rolloverSeason, standings, teamById } from '../core/league';
 import { ROUND_LABEL } from '../core/playoffs';
+import { ensureSeasonAwards, mvpBonus, playerMvp } from '../core/awards';
 import { bracketHtml } from '../ui/bracket';
 import { formatMoney } from '../core/gear';
 import {
@@ -27,6 +28,17 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
   const playoffs = league.playoffs;
   const champion = playoffs?.playerResult === 'champion';
   const RING_BONUS = 400 * (league.levelId + 1);
+
+  // Awards night has usually already run, but this screen is also where an old
+  // save that was parked at the end of a year comes back in, so vote them here
+  // if nobody has. Idempotent either way — the ballot is kept in the save.
+  const awards = ensureSeasonAwards(save.awards, player, league, save.seasonYear, app.rng);
+  // Pin them now rather than on the way out: a player who reads the review and
+  // closes the app should come back to the same ballot, not a fresh vote.
+  app.persist();
+  const mvp = playerMvp(awards);
+  const MVP_BONUS = mvpBonus(league.levelId);
+  const leagueMvp = awards.mvps[awards.playerLevelId];
   const postseasonLine = ((): string => {
     if (!playoffs) return 'No postseason was played.';
     const champ = playoffs.championId ? teamById(league, playoffs.championId).name : '—';
@@ -45,8 +57,8 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
   mount.innerHTML = `
     <div class="scroll">
       <div class="panel result-hero">
-        <div class="verdict ${check.promoted ? 'win' : champion ? 'champ' : 'tie'}">
-          ${check.promoted ? 'CALLED UP' : champion ? 'CHAMPIONS' : 'SEASON OVER'}
+        <div class="verdict ${check.promoted ? 'win' : champion || mvp ? 'champ' : 'tie'}">
+          ${check.promoted ? 'CALLED UP' : champion ? 'CHAMPIONS' : mvp ? 'LEAGUE MVP' : 'SEASON OVER'}
         </div>
         <div class="score">Season ${save.seasonYear} · ${esc(level.name)}</div>
       </div>
@@ -65,6 +77,23 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
              </div>`
           : ''
       }
+
+      <div class="panel">
+        <h2>Awards</h2>
+        <div class="reward">
+          <span>${esc(level.name)} MVP</span>
+          <b>${esc(leagueMvp.winner)}${mvp ? ' 🏆' : ''}</b>
+        </div>
+        <div class="reward">
+          <span>Your finish in the voting</span>
+          <b>${awards.playerFinish > 0 ? `${awards.playerFinish}${awards.playerFinish === 1 ? 'st' : awards.playerFinish === 2 ? 'nd' : awards.playerFinish === 3 ? 'rd' : 'th'}` : 'Unranked'}</b>
+        </div>
+        ${
+          mvp
+            ? `<div class="reward"><span>MVP bonus</span><b>${formatMoney(MVP_BONUS)}</b></div>`
+            : ''
+        }
+      </div>
 
       <div class="panel">
         <h2>Final line</h2>
@@ -121,9 +150,12 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     player.season = emptyBattingStats();
     player.stamina = 100;
     player.energy = 100;
-    // An offseason of work is worth a couple of free points; a ring, a bit more.
-    player.attributePoints += 2 + (check.promoted ? 2 : 0) + (champion ? 1 : 0);
+    // An offseason of work is worth a couple of free points; a ring, a bit
+    // more; an MVP trophy, more again — it's the one thing you can win on your
+    // own numbers rather than the club's.
+    player.attributePoints += 2 + (check.promoted ? 2 : 0) + (champion ? 1 : 0) + (mvp ? 1 : 0);
     if (champion) player.money += RING_BONUS;
+    if (mvp) player.money += MVP_BONUS;
 
     app.lastGame = null;
     app.persist();
@@ -136,6 +168,7 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
       body:
         `You report to the ${playerTeam(save.league).name}.\n` +
         `Overall ${overallRating(player.attributes)} · ${player.attributePoints} attribute points to spend.` +
+        (mvp ? `\nYou arrive as the reigning ${LEVELS[mvp.levelId].name} MVP.` : '') +
         newsText,
       confirmLabel: 'Report to camp',
     });

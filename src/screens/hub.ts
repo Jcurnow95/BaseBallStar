@@ -39,6 +39,7 @@ import {
   overallRating,
   slugging,
 } from '../core/player';
+import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
@@ -87,6 +88,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const series = playerSeries(league);
   const ovr = overallRating(player.attributes);
   const homePark = ballparkById(team.parkId);
+  const trophies = mvpSeasons(save.awards);
 
   // What kind of day a calendar slot is, for the week strip and season strip.
   const dayKind = (index: number): 'game' | 'off' | 'playoff' | 'end' => {
@@ -175,9 +177,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
   if (seasonDone) {
     matchupHtml = `
       <div class="notice ${playoffs?.playerResult === 'champion' ? '' : 'warn'}" style="margin-bottom:12px">
-        ${wrapUp} Time to find out what the organization thinks of you.
+        ${wrapUp} The ${esc(level.name)} MVP is announced tonight.
       </div>
-      <button class="btn primary" id="finish">Season Review</button>
+      <button class="btn primary" id="finish">Awards Night</button>
       ${devButton}
       ${storeButton}`;
   } else if (upcoming) {
@@ -388,12 +390,22 @@ export function renderHub(app: App, mount: HTMLElement): void {
           <div><b>${player.career.homeRuns}</b><span>HR</span></div>
           <div><b>${player.career.rbi}</b><span>RBI</span></div>
         </div>
+        ${
+          trophies.length > 0
+            ? `<div style="margin-top:12px">${trophies
+                .map(
+                  (t) =>
+                    `<div class="reward"><span>🏆 Season ${t.year} · ${esc(LEVELS[t.levelId].name)}</span><b>MVP</b></div>`,
+                )
+                .join('')}</div>`
+            : ''
+        }
         <button class="btn ghost tiny" id="reset" style="margin-top:14px">Retire &amp; start over</button>
       </div>
     </div>
   `;
 
-  if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('seasonEnd'));
+  if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('awards'));
   else if (upcoming) {
     // First game ever goes by way of the how-to; after that, straight in.
     q(mount, '#play').addEventListener('click', () =>

@@ -180,6 +180,15 @@ export function randomName(rng: Rng): string {
   return `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`;
 }
 
+/**
+ * A plausible club name, for a league the player only ever hears about second
+ * hand. Unlike `createLeague` this doesn't draw without replacement — nothing
+ * reads two of these side by side.
+ */
+export function randomClubName(rng: Rng): string {
+  return `${rng.pick(CITY_NAMES)} ${rng.pick(TEAM_NICKS)}`;
+}
+
 function newRosterPlayer(
   rng: Rng,
   role: 'batter' | 'pitcher',

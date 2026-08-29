@@ -13,6 +13,7 @@ export type Route =
   | 'training'
   | 'game'
   | 'postgame'
+  | 'awards'
   | 'seasonEnd'
   | 'store'
   | 'howto'

@@ -50,13 +50,14 @@ const SEAT_COUNT = 1500;
  * fans sit for the infield. Measured like the dugout: feet down the line
  * where the deck starts and ends (stopping short of the outfield bowl),
  * feet off the line to its front wall, how deep it is, and how many seats
- * each side holds.
+ * each side holds. They are as deep as the outfield bowl, so the stands
+ * beside the players carry the same weight as the ones beyond the fence.
  */
 const SIDE_STAND_ALONG0 = 20;
-const SIDE_STAND_ALONG1 = 225;
+const SIDE_STAND_ALONG1 = 285;
 const SIDE_STAND_OFFSET = 64;
-const SIDE_STAND_DEPTH = 32;
-const SIDE_SEAT_COUNT = 320;
+const SIDE_STAND_DEPTH = 70;
+const SIDE_SEAT_COUNT = 900;
 
 /**
  * Dugouts sit in foul territory, parallel to the lines. Measured in feet:

@@ -1,6 +1,7 @@
 import type { PlayOutcome, PlaySim, RunnerState } from '../core/playSim';
 import type { BaseId, Vec2 } from '../core/fieldGeometry';
 import { BASES, BASE_LABELS } from '../core/fieldGeometry';
+import type { Ballpark } from '../core/ballpark';
 import { fenceAt, wallHeightAt } from '../core/ballpark';
 import { clamp } from '../core/rng';
 import { createSurface, pointerPos, vibrate } from '../ui/canvas';
@@ -41,23 +42,114 @@ const MAX_SCALE = 3.2;
 /** Vertical squash applied to ball height, so a fly ball reads as elevation. */
 const HEIGHT_SCALE = 0.62;
 
-/** How deep the outfield stand is, in feet, and how many seats it holds. */
+/**
+ * The stand is one continuous ring round the whole field: the bowl behind
+ * the outfield fence, carried past each foul pole until it meets a low wall
+ * in foul ground, down both lines behind that wall, and round behind the
+ * plate as a backstop curve. It is the same depth all the way round, so the
+ * fans beside the players carry as much weight as the ones beyond the fence.
+ */
 const STAND_DEPTH = 70;
-const SEAT_COUNT = 1500;
+/**
+ * How far the foul-ground wall sits off each line, in feet — flush behind
+ * the dugouts, so the bleachers hug the field the way a small park's do.
+ * The backstop is a circle round the plate of this same radius, which makes
+ * it tangent to both walls: the ring turns the corner behind home without
+ * a kink.
+ */
+const STAND_OFFSET = 60;
+/** Square feet of deck per seat, so a bigger park holds a bigger crowd. */
+const SQFT_PER_SEAT = 26;
+/** Rows kept clear at the front and back of the deck — wall and walkway. */
+const SEAT_MARGIN = 6;
+/**
+ * Aisles cut straight through the deck every so many feet round the ring,
+ * so it reads as blocks of bleachers rather than one unbroken slab.
+ */
+const AISLE_SPACING = 58;
+const AISLE_WIDTH = 4;
 
 /**
- * Grandstands also run down each foul line behind the dugouts — where the
- * fans sit for the infield. Measured like the dugout: feet down the line
- * where the deck starts and ends (stopping short of the outfield bowl),
- * feet off the line to its front wall, how deep it is, and how many seats
- * each side holds. They are as deep as the outfield bowl, so the stands
- * beside the players carry the same weight as the ones beyond the fence.
+ * The ring's inner edge as a closed loop in world space, with what's needed
+ * to push it outward: each segment's outward normal (for laying seats, which
+ * must never leak past a corner) and a mitred push per vertex (for the outer
+ * edge and tier lines, which must stay a constant width round corners).
  */
-const SIDE_STAND_ALONG0 = 20;
-const SIDE_STAND_ALONG1 = 285;
-const SIDE_STAND_OFFSET = 64;
-const SIDE_STAND_DEPTH = 70;
-const SIDE_SEAT_COUNT = 900;
+interface StandRing {
+  inner: Vec2[];
+  normals: Vec2[];
+  push: Vec2[];
+  /** Feet round the ring from the first vertex to each vertex. */
+  along: number[];
+}
+
+function buildStandRing(park: Ballpark): StandRing {
+  const polar = (bearing: number, radius: number): Vec2 => ({
+    x: Math.sin(bearing) * radius,
+    y: Math.cos(bearing) * radius,
+  });
+  // A point on the foul wall: feet down the line, at the wall's offset.
+  const wallAt = (side: number, along: number): Vec2 => ({
+    x: (side * (along + STAND_OFFSET)) / Math.SQRT2,
+    y: (along - STAND_OFFSET) / Math.SQRT2,
+  });
+  // Where the bowl, carried round past the pole at the pole's radius, meets
+  // the foul wall — as a bearing from the plate and as feet down the line.
+  const corner = (side: number) => {
+    const r = fenceAt(park, polar((side * Math.PI) / 4, 1));
+    return {
+      bearing: side * (Math.PI / 4 + Math.asin(STAND_OFFSET / r)),
+      along: Math.sqrt(r * r - STAND_OFFSET * STAND_OFFSET),
+    };
+  };
+  const left = corner(-1);
+  const right = corner(1);
+
+  // Clockwise: backstop from the first-base wall round to the third-base
+  // wall, up the third-base line, over the bowl, and down the first-base
+  // line back to the start. Each piece starts where the last one ended, so
+  // the shared vertices are added once.
+  const inner: Vec2[] = [];
+  const BACKSTOP_STEPS = 12;
+  for (let i = 0; i <= BACKSTOP_STEPS; i++) {
+    const bearing = Math.PI * 0.75 + (i / BACKSTOP_STEPS) * (Math.PI / 2);
+    inner.push(polar(bearing, STAND_OFFSET));
+  }
+  inner.push(wallAt(-1, left.along));
+  const ARC_STEPS = 60;
+  for (let i = 1; i < ARC_STEPS; i++) {
+    const bearing = left.bearing + (i / ARC_STEPS) * (right.bearing - left.bearing);
+    inner.push(polar(bearing, fenceAt(park, polar(bearing, 1))));
+  }
+  inner.push(wallAt(1, right.along));
+
+  const n = inner.length;
+  const along: number[] = [0];
+  const normals: Vec2[] = inner.map((v, i) => {
+    const w = inner[(i + 1) % n];
+    const len = Math.hypot(w.x - v.x, w.y - v.y) || 1;
+    along.push(along[i] + len);
+    // The loop runs clockwise, so outward is the left of the direction of travel.
+    return { x: -(w.y - v.y) / len, y: (w.x - v.x) / len };
+  });
+  const push: Vec2[] = inner.map((_, i) => {
+    const a = normals[(i + n - 1) % n];
+    const b = normals[i];
+    const mx = a.x + b.x;
+    const my = a.y + b.y;
+    const len = Math.hypot(mx, my) || 1;
+    const m = { x: mx / len, y: my / len };
+    // Scale the mitre so the offset edge sits a full foot out from both
+    // neighbouring segments, capped so a sharp corner can't spike.
+    const k = 1 / Math.max(0.35, m.x * b.x + m.y * b.y);
+    return { x: m.x * k, y: m.y * k };
+  });
+
+  return { inner, normals, push, along };
+}
+
+/** Whether a point this many feet round the ring falls in an aisle. */
+const inAisle = (feet: number): boolean => feet % AISLE_SPACING < AISLE_WIDTH;
 
 /**
  * Dugouts sit in foul territory, parallel to the lines. Measured in feet:
@@ -117,8 +209,9 @@ export class PlayView {
   /** Recent ball positions in world space — the comet tail that makes a
    * 4px ball trackable at a glance. */
   private ballTrail: { x: number; y: number; z: number }[] = [];
-  /** Every seat in the park in world space, built once — outfield bowl and
-   * both side grandstands. The stands never move. */
+  /** The stand's footprint, laid out once for this park. It never moves. */
+  private readonly ring: StandRing;
+  /** Every seat in the park in world space, built once from the ring. */
   private readonly seats: (Vec2 & { colour: string })[];
 
   private joystick: Joystick = {
@@ -138,6 +231,7 @@ export class PlayView {
     this.root.innerHTML = '';
 
     this.surface = createSurface(this.root);
+    this.ring = buildStandRing(this.sim.park);
     this.seats = this.buildSeats();
 
     this.banner = document.createElement('div');
@@ -644,17 +738,11 @@ export class PlayView {
     ctx.closePath();
     ctx.fill();
 
-    // The stand, sitting on the dead ground behind the wall.
-    ctx.fillStyle = '#141c30';
-    ctx.beginPath();
-    ctx.moveTo(wall[0].x, wall[0].y);
-    trace(wall);
-    trace(arc(STAND_DEPTH), true);
-    ctx.closePath();
-    ctx.fill();
     ctx.restore();
 
-    this.drawSideStands(ctx);
+    // The stand sits on the dead ground behind the wall and wraps on round
+    // the field from there.
+    this.drawStands(ctx);
     this.drawCrowd(ctx);
     ctx.save();
 
@@ -700,39 +788,38 @@ export class PlayView {
   }
 
   /**
-   * Lay every stand out once. Seat order is shuffled by hash rather than
-   * sequential, so taking the first N of them for a given crowd size scatters
-   * people through the bowl and both side stands instead of packing them in
-   * from one foul pole round.
+   * Lay the seats out once, segment by segment round the ring, as many per
+   * segment as its area allows. Each seat is placed by hash so it stays put
+   * frame to frame, and the finished list is shuffled by hash too, so taking
+   * the first N of it for a given crowd size scatters people right round
+   * the park instead of packing them in from one end.
    */
   private buildSeats(): (Vec2 & { colour: string })[] {
-    const park = this.sim.park;
+    const { inner, normals, along } = this.ring;
+    const n = inner.length;
+    const rows = STAND_DEPTH - SEAT_MARGIN * 2;
     const seats: (Vec2 & { colour: string; order: number })[] = [];
-    const add = (x: number, y: number, h: number) =>
-      seats.push({
-        x,
-        y,
-        colour: CROWD_COLOURS[h % CROWD_COLOURS.length],
-        order: Math.imul(h ^ 0x9e3779b9, 2246822519) >>> 0,
-      });
 
-    // The outfield bowl.
-    for (let i = 0; i < SEAT_COUNT; i++) {
-      const h = (i * 2654435761) >>> 0;
-      const angle = -Math.PI / 4 + ((h % SEAT_COUNT) / SEAT_COUNT) * (Math.PI / 2);
-      const dir = { x: Math.sin(angle), y: Math.cos(angle) };
-      const radius = fenceAt(park, dir) + 6 + ((h >>> 9) % (STAND_DEPTH - 12));
-      add(dir.x * radius, dir.y * radius, h);
-    }
-
-    // The grandstands down each line. Seats live in the dugout's local frame
-    // — feet along the foul line and out from it — mapped to world space.
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < SIDE_SEAT_COUNT; i++) {
-        const h = Math.imul(i + (side > 0 ? 70001 : 40009), 2654435761) >>> 0;
-        const a = SIDE_STAND_ALONG0 + 4 + (h % (SIDE_STAND_ALONG1 - SIDE_STAND_ALONG0 - 8));
-        const o = SIDE_STAND_OFFSET + 4 + ((h >>> 9) % (SIDE_STAND_DEPTH - 8));
-        add((side * (a + o)) / Math.SQRT2, (a - o) / Math.SQRT2, h);
+    let index = 0;
+    for (let i = 0; i < n; i++) {
+      const v = inner[i];
+      const w = inner[(i + 1) % n];
+      const length = along[i + 1] - along[i];
+      const count = Math.round((length * rows) / SQFT_PER_SEAT);
+      for (let k = 0; k < count; k++) {
+        let h = Math.imul(++index, 2654435761) >>> 0;
+        h ^= h >>> 13;
+        h = Math.imul(h, 0x5bd1e995) >>> 0;
+        h ^= h >>> 15;
+        const t = (h % 1024) / 1024;
+        if (inAisle(along[i] + t * length)) continue;
+        const d = SEAT_MARGIN + ((h >>> 10) % rows);
+        seats.push({
+          x: v.x + (w.x - v.x) * t + normals[i].x * d,
+          y: v.y + (w.y - v.y) * t + normals[i].y * d,
+          colour: CROWD_COLOURS[h % CROWD_COLOURS.length],
+          order: Math.imul(h ^ 0x9e3779b9, 2246822519) >>> 0,
+        });
       }
     }
 
@@ -741,54 +828,70 @@ export class PlayView {
   }
 
   /**
-   * The grandstands flanking the infield — a concrete deck down each foul
-   * line behind the dugouts, with a low wall on the field side. The fans in
-   * them come from the shared seat list, so the same crowd fraction fills
-   * the bowl and the sides alike.
+   * The stand itself — the concrete deck right round the ring, tier breaks
+   * across it, aisles cut through it, and the low wall along its front. The
+   * outfield fence is drawn over the front edge later, so only the foul-
+   * ground stretch shows this wall.
    */
-  private drawSideStands(ctx: CanvasRenderingContext2D): void {
-    ctx.save();
-    for (const side of [-1, 1]) {
-      const at = (a: number, o: number): Vec2 =>
-        this.toScreen({ x: (side * (a + o)) / Math.SQRT2, y: (a - o) / Math.SQRT2 });
-
-      const a0 = SIDE_STAND_ALONG0;
-      const a1 = SIDE_STAND_ALONG1;
-      const o0 = SIDE_STAND_OFFSET;
-      const o1 = SIDE_STAND_OFFSET + SIDE_STAND_DEPTH;
-
-      // The deck, in the same concrete as the outfield stand.
-      ctx.fillStyle = '#141c30';
-      ctx.beginPath();
-      [at(a0, o0), at(a1, o0), at(a1, o1), at(a0, o1)].forEach((p, i) =>
-        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y),
+  private drawStands(ctx: CanvasRenderingContext2D): void {
+    const { inner, push, along } = this.ring;
+    const n = inner.length;
+    const edge = (depth: number): Vec2[] =>
+      inner.map((v, i) =>
+        this.toScreen({ x: v.x + push[i].x * depth, y: v.y + push[i].y * depth }),
       );
+    const loop = (points: Vec2[]) => {
+      points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
       ctx.closePath();
-      ctx.fill();
+    };
+    const front = edge(0);
+    const back = edge(STAND_DEPTH);
 
-      // Faint breaks so the deck reads as tiers of seating.
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-      ctx.lineWidth = Math.max(1, 0.5 * this.scale);
-      for (let k = 1; k < 4; k++) {
-        const o = o0 + (SIDE_STAND_DEPTH * k) / 4;
-        const r0 = at(a0, o);
-        const r1 = at(a1, o);
-        ctx.beginPath();
-        ctx.moveTo(r0.x, r0.y);
-        ctx.lineTo(r1.x, r1.y);
-        ctx.stroke();
-      }
+    ctx.save();
+    // The deck: the band between the two loops.
+    ctx.fillStyle = '#141c30';
+    ctx.beginPath();
+    loop(front);
+    loop(back);
+    ctx.fill('evenodd');
 
-      // Low wall between the front row and foul ground.
-      ctx.strokeStyle = '#2c3a5c';
-      ctx.lineWidth = Math.max(2, 1.4 * this.scale);
-      const w0 = at(a0, o0);
-      const w1 = at(a1, o0);
+    // Faint breaks so the deck reads as tiers of seating.
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = Math.max(1, 0.5 * this.scale);
+    for (let k = 1; k < 4; k++) {
       ctx.beginPath();
-      ctx.moveTo(w0.x, w0.y);
-      ctx.lineTo(w1.x, w1.y);
+      loop(edge((STAND_DEPTH * k) / 4));
       ctx.stroke();
     }
+
+    // Aisles, front to back, wherever the ring's length crosses one.
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = Math.max(1, AISLE_WIDTH * 0.5 * this.scale);
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const v = inner[i];
+      const w = inner[(i + 1) % n];
+      const length = along[i + 1] - along[i];
+      const first = Math.ceil(along[i] / AISLE_SPACING) * AISLE_SPACING;
+      for (let s = first; s < along[i + 1]; s += AISLE_SPACING) {
+        const t = (s + AISLE_WIDTH / 2 - along[i]) / length;
+        const x = v.x + (w.x - v.x) * t;
+        const y = v.y + (w.y - v.y) * t;
+        const nrm = this.ring.normals[i];
+        const a = this.toScreen({ x, y });
+        const b = this.toScreen({ x: x + nrm.x * STAND_DEPTH, y: y + nrm.y * STAND_DEPTH });
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+    }
+    ctx.stroke();
+
+    // Low wall between the front row and the field.
+    ctx.strokeStyle = '#2c3a5c';
+    ctx.lineWidth = Math.max(2, 1.4 * this.scale);
+    ctx.beginPath();
+    loop(front);
+    ctx.stroke();
     ctx.restore();
   }
 

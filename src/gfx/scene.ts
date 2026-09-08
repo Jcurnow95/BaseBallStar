@@ -122,32 +122,33 @@ export function drawFarPark(
   const rows = 7;
   const width = bleed.right - bleed.left;
 
-  // Tiers, thinner toward the back, curving up at the edges where the bowl
-  // wraps round toward us.
-  const curve = (x: number, y: number): number => y - L.H * 0.035 * Math.pow((x - L.cx) / L.W, 2) * 4;
-  const rowY = (k: number): number => {
-    const t = k / rows;
-    return wallTop - (wallTop - standsTop) * (1 - Math.pow(1 - t, 1.5));
-  };
-  for (let k = rows - 1; k >= 0; k--) {
-    const y0 = rowY(k + 1);
-    const y1 = rowY(k);
-    ctx.fillStyle = k % 2 === 0 ? light.seats : light.seatsAlt;
+  // Tiers, thinner toward the back. The front row sits on the wall right
+  // across the frame; the bowl wraps round toward us at the edges, so out
+  // there it's nearer and reads taller, which is what lifts the top edge.
+  const edge = (x: number): number => 1 + 0.55 * Math.pow(((x - L.cx) / L.W) * 2, 2);
+  const rowFrac = (k: number): number => 1 - Math.pow(1 - k / rows, 1.5);
+  const rowAt = (k: number, x: number): number => wallTop - (wallTop - standsTop) * rowFrac(k) * edge(x);
+  const traceBand = (kBottom: number, kTop: number) => {
     ctx.beginPath();
-    ctx.moveTo(bleed.left, curve(bleed.left, y0));
-    for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, curve(x, y0));
-    ctx.lineTo(bleed.right, curve(bleed.right, y0));
-    ctx.lineTo(bleed.right, curve(bleed.right, y1) + 1);
-    for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, curve(x, y1) + 1);
+    ctx.moveTo(bleed.left, rowAt(kBottom, bleed.left));
+    for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, rowAt(kBottom, x));
+    ctx.lineTo(bleed.right, rowAt(kBottom, bleed.right));
+    ctx.lineTo(bleed.right, rowAt(kTop, bleed.right));
+    for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, rowAt(kTop, x));
+    ctx.lineTo(bleed.left, rowAt(kTop, bleed.left));
     ctx.closePath();
+  };
+  for (let k = 0; k < rows; k++) {
+    ctx.fillStyle = k % 2 === 0 ? light.seats : light.seatsAlt;
+    traceBand(k, k + 1);
     ctx.fill();
-    // Riser shadow.
+    // Riser shadow along the front of each row.
     ctx.strokeStyle = alpha('#000000', 0.22);
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = bleed.left; x <= bleed.right; x += 24) {
-      if (x === bleed.left) ctx.moveTo(x, curve(x, y1));
-      else ctx.lineTo(x, curve(x, y1));
+      if (x === bleed.left) ctx.moveTo(x, rowAt(k, x));
+      else ctx.lineTo(x, rowAt(k, x));
     }
     ctx.stroke();
   }
@@ -161,8 +162,8 @@ export function drawFarPark(
     const h = hash(i + 1200);
     const row = (h >>> 3) % rows;
     const x = bleed.left + unit(h) * width;
-    const y0 = curve(x, rowY(row + 1));
-    const y1 = curve(x, rowY(row));
+    const y0 = rowAt(row + 1, x);
+    const y1 = rowAt(row, x);
     const y = y0 + (y1 - y0) * (0.35 + unit(h, 9) * 0.5);
     ctx.fillStyle = CROWD_COLOURS[h % CROWD_COLOURS.length];
     ctx.fillRect(x, y - size * 1.4, size, size * 1.4);
@@ -171,13 +172,16 @@ export function drawFarPark(
   // Back wall of the bowl, and the scoreboard sitting on it.
   ctx.fillStyle = shade(light.concrete, 0.85);
   ctx.beginPath();
-  ctx.moveTo(bleed.left, curve(bleed.left, standsTop));
-  for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, curve(x, standsTop));
-  ctx.lineTo(bleed.right, curve(bleed.right, standsTop));
-  ctx.lineTo(bleed.right, curve(bleed.right, standsTop) - L.H * 0.012);
-  for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, curve(x, standsTop) - L.H * 0.012);
+  ctx.moveTo(bleed.left, rowAt(rows, bleed.left));
+  for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, rowAt(rows, x));
+  ctx.lineTo(bleed.right, rowAt(rows, bleed.right));
+  ctx.lineTo(bleed.right, rowAt(rows, bleed.right) - L.H * 0.012);
+  for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, rowAt(rows, x) - L.H * 0.012);
   ctx.closePath();
   ctx.fill();
+  // A dark facade under the front row, so the stand plants on the wall.
+  ctx.fillStyle = shade(light.concreteDark, 0.75);
+  ctx.fillRect(bleed.left, wallTop - L.H * 0.008, width, L.H * 0.008);
   drawScoreboard(ctx, L, light, standsTop - L.H * 0.012);
   drawTowers(ctx, L, light, standsTop);
 

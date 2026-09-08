@@ -6,7 +6,6 @@ import { IDEAL_UNDER, resolveSwing, sweetSpotRadius } from '../core/swing';
 import { foulChanceFor } from '../core/outcome';
 import { hasBattingEye, hasPerfectZone } from '../core/progression';
 import { launchBall, predictLanding } from '../core/ballFlight';
-import { drawBaseball } from './baseball';
 import { isFair } from '../core/fieldGeometry';
 import type { Uniform } from '../core/uniforms';
 import { Rng, clamp, lerp } from '../core/rng';
@@ -16,7 +15,23 @@ import type { Surface } from '../ui/canvas';
 import { playSound } from '../ui/audio';
 import type { AirConditions, Weather } from '../core/weather';
 import { CALM, airFor } from '../core/weather';
-import { drawGloom, drawRain, drawRainSplashes, drawWindFlag } from './weatherFx';
+import type { Lighting } from '../gfx/palette';
+import { CUE_GOLD, CUE_GREEN, alpha, lightingFor } from '../gfx/palette';
+import { drawBaseball } from '../gfx/ball';
+import { PITCH_RELEASE_POINT, drawBatter, drawPitcher } from '../gfx/figure';
+import type { SceneLayout } from '../gfx/scene';
+import {
+  STAGE_ASPECT,
+  batterAnchor,
+  drawFarPark,
+  drawGround,
+  drawHaze,
+  drawSky,
+  pitcherAnchor,
+  sceneLayout,
+} from '../gfx/scene';
+import { drawLightning, drawRain, drawRainSplashes, drawTint, drawWindFlag } from '../gfx/weather';
+import { drawTapMark } from '../gfx/hud';
 
 /**
  * The at-bat minigame.
@@ -56,25 +71,6 @@ type Phase = 'windup' | 'flight' | 'freeze';
 
 const WINDUP_MS = 900;
 const FREEZE_MS = 1250;
-/**
- * Width / height of the play area. Matches the canvas shape on a portrait
- * phone, and letterboxes rather than distorts on anything wider.
- */
-const STAGE_ASPECT = 0.6;
-/**
- * The mound's crest as a fraction of stage height. Below the horizon (0.36) so
- * it sits on the grass, and above the strike zone's top edge (0.475) with room
- * for the hump's ground shadow.
- */
-const MOUND_Y = 0.415;
-/**
- * Pitcher figure scale, as fractions of stage height and width. Shared by the
- * drawing and by `layout()`, which derives the release point from the same
- * shoulder the arm whips over. Sized so the pitcher looms — the camera is
- * meant to feel tight, not like watching from the upper deck.
- */
-const PITCHER_H = 0.088;
-const PITCHER_W = 0.058;
 /** Flight continues past the plate so late swings still have something to hit. */
 const OVERRUN = 1.22;
 /**
@@ -90,15 +86,6 @@ const OVERRUN = 1.22;
 const PRIME_AT = 0.98;
 const PRIME_START = 0.88;
 const PRIME_END = 1.12;
-
-/**
- * Crowd pixels. Muted and slightly varied — a stand of identical dots reads as
- * a texture, and a stand of bright ones pulls the eye off the ball.
- */
-export const CROWD_COLOURS = [
-  '#8d9bb8', '#6f7d99', '#a8b3c9', '#5d6a85', '#9aa7c0',
-  '#b0796a', '#7a8bb0', '#c2b090', '#6b7f96', '#94a0ba',
-];
 
 /** History-dot colour per pitch type: hot colours for velocity, cool for spin. */
 const PITCH_DOT_COLOURS: Record<PitchType, string> = {
@@ -117,6 +104,24 @@ interface BallState {
   rot: number;
 }
 
+interface Layout {
+  ox: number;
+  oy: number;
+  canvasW: number;
+  canvasH: number;
+  W: number;
+  H: number;
+  cx: number;
+  scene: SceneLayout;
+  zoneY: number;
+  zoneHW: number;
+  zoneHH: number;
+  /** Where the ball leaves the pitcher's hand. */
+  release: { x: number; y: number };
+  minR: number;
+  maxR: number;
+}
+
 export class AtBatView {
   private readonly root: HTMLElement;
   private readonly surface: Surface;
@@ -128,14 +133,14 @@ export class AtBatView {
   /**
    * Milliseconds into the current phase, advanced by the frame loop.
    *
-   * This used to be read off the wall clock. The frame loop stops whenever the
-   * app is minimised or backgrounded, but the wall clock doesn't, so coming
-   * back to the game found the pitch long past the plate and rang up a called
-   * strike the player never saw — and left the pitcher frozen mid-delivery
-   * until something woke the loop up. Advancing the clock only by frames means
-   * time simply doesn't pass while you're away.
+   * The frame loop stops whenever the app is minimised or backgrounded, but
+   * the wall clock doesn't, so reading this off the clock found the pitch
+   * long past the plate on return. Advancing only by frames means time
+   * simply doesn't pass while you're away.
    */
   private phaseElapsed = 0;
+  /** Milliseconds since the ball left the hand; drives the follow-through. */
+  private sinceRelease = 0;
   private lastFrame = 0;
   private raf = 0;
   private destroyed = false;
@@ -161,9 +166,10 @@ export class AtBatView {
   /** Vision high enough that the ring and glow tell strike from ball. */
   private readonly battingEye: boolean;
   private readonly weather: Weather;
+  private readonly light: Lighting;
   private readonly air: AirConditions;
-  /** Seconds the weather has been animating; only advances while unpaused. */
-  private weatherClock = 0;
+  /** Seconds the scene has been animating; only advances while unpaused. */
+  private clock = 0;
 
   constructor(root: HTMLElement, opts: AtBatOptions) {
     this.root = root;
@@ -173,6 +179,7 @@ export class AtBatView {
     this.perfectZoneUnlocked = hasPerfectZone(opts.player.attributes);
     this.battingEye = hasBattingEye(opts.player.attributes);
     this.weather = opts.weather ?? CALM;
+    this.light = lightingFor(this.weather);
     this.air = airFor(this.weather);
 
     this.surface = createSurface(this.root);
@@ -215,6 +222,7 @@ export class AtBatView {
     this.tapPoint = null;
     this.frozenBall = null;
     this.trail = [];
+    this.sinceRelease = 0;
     this.setPhase('windup');
     this.banner.className = 'atbat-banner';
     this.banner.textContent = '';
@@ -295,6 +303,7 @@ export class AtBatView {
     this.lastFrame = performance.now();
     if (this.phase === 'flight' && !this.swung) {
       this.trail = [];
+      this.sinceRelease = 0;
       this.setPhase('windup');
     }
   };
@@ -310,10 +319,7 @@ export class AtBatView {
     const { x, y } = this.toStage(tap.x, tap.y);
 
     if (this.phase === 'windup') {
-      // Before the pitch is even thrown. This used to be scored as a swing
-      // and a miss, which mostly punished people prodding the screen to see
-      // if the game was still alive — a real early swing (the first frame of
-      // the flight) already whiffs on its own. Just say so.
+      // Before the pitch is even thrown: prodding the screen isn't a swing.
       this.readout.textContent = 'WAIT FOR THE PITCH…';
       return;
     }
@@ -398,15 +404,11 @@ export class AtBatView {
 
   /**
    * The play area, as a fixed-aspect portrait box fitted inside the canvas and
-   * centred.
-   *
-   * Everything here is in *stage* coordinates, with `ox`/`oy` giving the
-   * stage's offset within the canvas. Deriving horizontal features from canvas
-   * width and vertical ones from canvas height independently — which is what
-   * this used to do — stretches the field, the strike zone and the ball on any
-   * screen that isn't phone-shaped.
+   * centred. Everything here is in *stage* coordinates, with `ox`/`oy` giving
+   * the stage's offset within the canvas, so the strike zone and the ball
+   * keep their shape on any screen.
    */
-  private layout() {
+  private layout(): Layout {
     const canvasW = this.surface.width;
     const canvasH = this.surface.height;
 
@@ -417,6 +419,9 @@ export class AtBatView {
       W = H * STAGE_ASPECT;
     }
 
+    const scene = sceneLayout(W, H);
+    const pitcher = pitcherAnchor(scene);
+
     return {
       ox: (canvasW - W) / 2,
       oy: (canvasH - H) / 2,
@@ -425,28 +430,21 @@ export class AtBatView {
       W,
       H,
       cx: W / 2,
-      horizon: H * 0.36,
+      scene,
       // The zone fills the bottom third: big, and close to where a thumb
-      // already rests. Its top edge runs nearly to the mound's skirt, so the
-      // stretch of empty grass the old camera showed is gone.
+      // already rests.
       zoneY: H * 0.6,
       zoneHW: W * 0.24,
       zoneHH: H * 0.125,
-      // Where the pitcher stands: the crest of the mound, on the grass below
-      // the horizon so the figure reads as planted on the field rather than
-      // hovering in front of the outfield wall.
-      mound: { x: W / 2, y: H * MOUND_Y },
-      // Where the ball leaves the throwing hand — up by the shoulder, on the
-      // arm side — so the pitch comes out of the release rather than the feet.
+      // The ball leaves the throwing hand at the moment the figure releases.
       release: {
-        x: W / 2 - W * PITCHER_W * 0.2 - H * PITCHER_H * 0.57,
-        y: H * MOUND_Y - H * PITCHER_H * 1.06,
+        x: pitcher.x + PITCH_RELEASE_POINT[0] * pitcher.h,
+        y: pitcher.y - PITCH_RELEASE_POINT[1] * pitcher.h,
       },
       minR: Math.max(3, W * 0.015),
       // Sized for a fingertip, not for realism. Tap offsets are measured in ball
       // radii (see `core/swing.ts`), so a bigger ball is a bigger target in
-      // pixels at exactly the same difficulty. The floor keeps it thumb-sized on
-      // a short or narrow stage, where a purely proportional ball goes tiny.
+      // pixels at exactly the same difficulty.
       maxR: Math.max(W * 0.16, 34),
     };
   }
@@ -471,13 +469,7 @@ export class AtBatView {
     // Perspective: slow apparent movement early, rushing at the end.
     const travel = Math.pow(capped, 2.15);
     // Flatter than `travel`, so the ball is already a fat target through the
-    // swing window rather than only at the instant it reaches the plate. The
-    // flight itself is unchanged — this is size, not speed.
-    //
-    // Flattened again for the read rather than the swing: at 2 the ball was
-    // still under 30px across for the first 40% of the flight, which is the
-    // window the pitch has to be identified in (the readout appears at 0.22).
-    // The size at the plate is set by `maxR` and is untouched by this.
+    // swing window rather than only at the instant it reaches the plate.
     const grow = Math.pow(capped, 1.6);
     // Break arrives late, which is what makes a slider a slider.
     const breakIn = Math.pow(capped, this.pitch.def.breakSharpness);
@@ -515,7 +507,8 @@ export class AtBatView {
     if (!this.paused) {
       const step = Math.min(now - this.lastFrame, 50);
       this.phaseElapsed += step;
-      this.weatherClock += step / 1000;
+      this.clock += step / 1000;
+      if (this.phase !== 'windup') this.sinceRelease += step;
     }
     this.lastFrame = now;
 
@@ -550,29 +543,31 @@ export class AtBatView {
     const L = this.layout();
     if (L.W <= 0 || L.H <= 0) return;
 
-    // Work in stage space, so every layout number below stays stage-relative.
-    // The backdrop bleeds past the stage to cover the whole canvas, so a wider
-    // screen shows more sky and grass rather than black bars.
+    // Work in stage space. The backdrop bleeds past the stage to cover the
+    // whole canvas, so a wider screen shows more park rather than bars.
     ctx.save();
     ctx.translate(L.ox, L.oy);
+    const bleed = { left: -L.ox, top: -L.oy, right: L.canvasW - L.ox, bottom: L.canvasH - L.oy };
 
-    this.drawField(ctx, L);
+    drawSky(ctx, L.scene, bleed, this.light, this.weather, this.clock);
+    drawFarPark(ctx, L.scene, bleed, this.light, clamp(this.opts.level.crowd, 0, 1));
+    drawGround(ctx, L.scene, bleed, this.light);
+    drawHaze(ctx, L.scene, bleed, this.light);
+
     this.drawPitcher(ctx, L);
     this.drawZone(ctx, L);
     this.drawCountHud(ctx, L);
-    this.drawPlate(ctx, L);
     this.drawBatter(ctx, L);
 
     if (this.phase === 'flight') {
       const t = this.flightProgress();
       const ball = this.ballAt(t);
       this.trail.push(ball);
-      if (this.trail.length > 9) this.trail.shift();
-      this.drawTrail(ctx);
+      if (this.trail.length > 6) this.trail.shift();
       this.drawPrimeGlow(ctx, ball, t);
       this.drawBall(ctx, ball);
       this.drawTimingRing(ctx, ball, t, L);
-      this.drawPerfectZone(ctx, ball);
+      this.drawPerfectZone(ctx, ball, L);
     } else if (this.phase === 'freeze') {
       this.drawFreeze(ctx);
     }
@@ -580,301 +575,33 @@ export class AtBatView {
     ctx.restore();
 
     // Weather sits over the whole canvas, not just the stage.
-    drawGloom(ctx, L.canvasW, L.canvasH, this.weather);
-    drawRain(ctx, L.canvasW, L.canvasH, this.weather, this.weatherClock);
-    // Splashes only where the rain actually lands: the dirt at the bottom.
-    drawRainSplashes(
-      ctx,
-      L.canvasW,
-      L.canvasH,
-      this.weather,
-      this.weatherClock,
-      L.oy + L.H * 0.58,
-    );
+    drawRain(ctx, L.canvasW, L.canvasH, this.weather, this.clock);
+    drawRainSplashes(ctx, L.canvasW, L.canvasH, this.weather, this.clock, L.oy + L.H * 0.58);
+    drawTint(ctx, L.canvasW, L.canvasH, this.light);
+    drawLightning(ctx, L.canvasW, L.canvasH, this.weather, this.clock);
     // Under the pause button, clear of the readout across the top.
     drawWindFlag(ctx, 10, 52, this.weather);
   }
 
-  private drawField(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
-    // Canvas edges expressed in stage coordinates. The horizon and the dirt
-    // apex stay anchored to the stage; only the fills reach past it.
-    const left = -L.ox;
-    const top = -L.oy;
-    const right = L.canvasW - L.ox;
-    const bottom = L.canvasH - L.oy;
-    const fullW = L.canvasW;
-
-    // Clear nights are deep blue; cloud flattens the sky to slate.
-    const sky = ctx.createLinearGradient(0, top, 0, L.horizon);
-    if (this.weather.sky === 'clear') {
-      sky.addColorStop(0, '#0a1024');
-      sky.addColorStop(1, '#1d2c4d');
-    } else if (this.weather.sky === 'overcast') {
-      sky.addColorStop(0, '#12161f');
-      sky.addColorStop(1, '#2b3341');
-    } else if (this.weather.sky === 'storm') {
-      // Near-black, so a storm night reads as a storm before the first drop
-      // registers.
-      sky.addColorStop(0, '#06080d');
-      sky.addColorStop(1, '#1a202c');
-    } else {
-      sky.addColorStop(0, '#0d1017');
-      sky.addColorStop(1, '#232a36');
-    }
-    ctx.fillStyle = sky;
-    ctx.fillRect(left, top, fullW, L.horizon - top);
-
-    this.drawCrowd(ctx, left, fullW, L);
-
-    // Outfield wall.
-    ctx.fillStyle = '#0f3d2e';
-    ctx.fillRect(left, L.horizon - 8, fullW, 10);
-
-    // Grass.
-    const grass = ctx.createLinearGradient(0, L.horizon, 0, bottom);
-    grass.addColorStop(0, '#1f6b3f');
-    grass.addColorStop(1, '#2c8a52');
-    ctx.fillStyle = grass;
-    ctx.fillRect(left, L.horizon, fullW, bottom - L.horizon);
-
-    // Mowing stripes.
-    ctx.fillStyle = 'rgba(255,255,255,0.035)';
-    const stripe = fullW / 8;
-    for (let i = 0; i < 8; i += 2) {
-      ctx.fillRect(left + i * stripe, L.horizon, stripe, bottom - L.horizon);
-    }
-
-    // Infield dirt sweeping up to the batter's box.
-    ctx.fillStyle = '#8a5a35';
-    ctx.beginPath();
-    ctx.moveTo(left - fullW * 0.2, bottom);
-    ctx.quadraticCurveTo(L.cx, L.H * 0.5, right + fullW * 0.2, bottom);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  /**
-   * The stand behind the outfield wall, and however many people turned up.
-   *
-   * The seat grid is drawn first and the crowd is scattered over it, so a
-   * Single-A game reads as rows of empty plastic with a few hundred people in
-   * it and the Majors reads as a wall of colour. Positions come from an index
-   * hash rather than rng, so nobody teleports between frames.
-   */
-  private drawCrowd(
-    ctx: CanvasRenderingContext2D,
-    left: number,
-    fullW: number,
-    L: ReturnType<AtBatView['layout']>,
-  ): void {
-    const top = L.horizon * 0.5;
-    const height = L.horizon * 0.5;
-
-    // Concrete, then seat rows.
-    ctx.fillStyle = '#141c30';
-    ctx.fillRect(left, top, fullW, height);
-    ctx.fillStyle = 'rgba(255,255,255,0.045)';
-    const rows = 7;
-    for (let r = 0; r < rows; r++) {
-      ctx.fillRect(left, top + (height / rows) * r, fullW, 1);
-    }
-
-    const fill = clamp(this.opts.level.crowd, 0, 1);
-    const seats = Math.round((fullW / 5) * rows);
-    const taken = Math.round(seats * fill);
-    const size = Math.max(2, L.W * 0.008);
-
-    for (let i = 0; i < taken; i++) {
-      // Deterministic scatter: spread seats across the whole stand rather than
-      // filling it left to right, so a half-full park looks patchy not sliced.
-      const h = (i * 2654435761) >>> 0;
-      const row = h % rows;
-      const col = (h >>> 8) % Math.ceil(fullW / 5);
-      const x = left + col * 5 + ((h >>> 3) % 3);
-      const y = top + (height / rows) * row + 2 + ((h >>> 5) % 2);
-      ctx.fillStyle = CROWD_COLOURS[h % CROWD_COLOURS.length];
-      ctx.fillRect(x, y, size, size);
-    }
-  }
-
-  /**
-   * The pitcher, drawn as a figure with legs and a real delivery: gather, leg
-   * kick, stride, then the throwing arm comes over the top and releases as the
-   * ball leaves. The glove hand stays in front so the throwing arm never reads
-   * as a bat.
-   */
-  private drawPitcher(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
+  /** The pitcher on the mound: gather, leg kick, stride, release, follow-through. */
+  private drawPitcher(ctx: CanvasRenderingContext2D, L: Layout): void {
     const windup = this.phase === 'windup' ? clamp(this.phaseElapsed / WINDUP_MS, 0, 1) : 1;
-    const afterRelease = this.phase !== 'windup';
-    // How far through the follow-through we are, once the ball is gone.
-    const follow = afterRelease ? clamp(this.phaseElapsed / 420, 0, 1) : 0;
-
-    const kit = this.opts.pitcherKit;
-    const bodyH = L.H * PITCHER_H;
-    const bodyW = L.W * PITCHER_W;
-    const legLen = bodyH * 0.62;
-    const armLen = bodyH * 0.58;
-    // Where the planted back foot meets the dirt: the crest of the mound. The
-    // feet stay here through the delivery; the crouch drops the body onto them.
-    const footY = -bodyH * 0.42 + legLen;
-
-    // Gather (0-0.35), stride (0.35-0.78), whip through release (0.78-1).
-    const gather = clamp(windup / 0.35, 0, 1);
-    const stride = clamp((windup - 0.35) / 0.43, 0, 1);
-    const whip = clamp((windup - 0.78) / 0.22, 0, 1);
-
-    const lift = Math.sin(gather * Math.PI) * (1 - stride);
-    const crouch = Math.sin(windup * Math.PI) * bodyH * 0.1;
-    const shoulderY = -bodyH + crouch;
-    const hipY = -bodyH * 0.42 + crouch;
-
-    // ---- Mound: a raised hump of dirt sitting on the grass, with the pitcher's
-    // feet on its crest. Drawn in mound space (not shifted by the crouch) so the
-    // ground stays put while the figure bobs through the delivery.
-    ctx.save();
-    ctx.translate(L.mound.x, L.mound.y);
-    {
-      const rx = L.W * 0.175;
-      const hump = L.H * 0.034;
-      const baseY = footY + hump * 0.75;
-
-      // Ground shadow the hump throws onto the grass, low and toward us.
-      ctx.fillStyle = 'rgba(0,0,0,0.22)';
-      ctx.beginPath();
-      ctx.ellipse(0, baseY + hump * 0.35, rx * 1.02, hump * 0.75, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Flat dirt circle the hump rises out of.
-      ctx.fillStyle = '#7d4f2c';
-      ctx.beginPath();
-      ctx.ellipse(0, baseY, rx, hump * 0.8, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // The hump itself: lit from above, darkening toward the near edge.
-      const dome = ctx.createLinearGradient(0, footY - hump * 0.3, 0, baseY);
-      dome.addColorStop(0, '#b47a48');
-      dome.addColorStop(0.55, '#96633a');
-      dome.addColorStop(1, '#7d4f2c');
-      ctx.fillStyle = dome;
-      ctx.beginPath();
-      ctx.moveTo(-rx * 0.82, baseY);
-      ctx.quadraticCurveTo(-rx * 0.5, footY - hump * 0.3, 0, footY - hump * 0.3);
-      ctx.quadraticCurveTo(rx * 0.5, footY - hump * 0.3, rx * 0.82, baseY);
-      ctx.closePath();
-      ctx.fill();
-
-      // Front lip of the hump, so it reads as rounded rather than a flat wedge.
-      ctx.fillStyle = 'rgba(0,0,0,0.16)';
-      ctx.beginPath();
-      ctx.ellipse(0, baseY - hump * 0.05, rx * 0.82, hump * 0.42, 0, 0, Math.PI);
-      ctx.fill();
-
-      // Pitching rubber on the crest, just behind the feet.
-      ctx.fillStyle = '#e9e6dd';
-      ctx.fillRect(-bodyW * 0.75, footY - hump * 0.18, bodyW * 1.5, Math.max(1.5, hump * 0.14));
-
-      // The pitcher's own shadow, pooled at the feet on the crest.
-      ctx.fillStyle = 'rgba(0,0,0,0.28)';
-      ctx.beginPath();
-      ctx.ellipse(bodyW * 0.1, footY + hump * 0.08, bodyW * 1.05, hump * 0.28, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(L.mound.x, L.mound.y);
-    ctx.lineCap = 'round';
-
-    // ---- Legs. Back leg plants, front leg lifts then strides toward us.
-    ctx.strokeStyle = kit.pants;
-    ctx.lineWidth = Math.max(2.5, bodyW * 0.34);
-
-    ctx.beginPath();
-    ctx.moveTo(0, hipY);
-    ctx.lineTo(-bodyW * 0.5, footY);
-    ctx.stroke();
-
-    const frontKneeX = bodyW * (0.25 + stride * 0.75);
-    const frontFootY = footY - legLen * lift * 0.55 + follow * legLen * 0.12;
-    ctx.beginPath();
-    ctx.moveTo(0, hipY);
-    ctx.lineTo(frontKneeX, frontFootY);
-    ctx.stroke();
-
-    // ---- Torso, curved to match the round-capped limbs.
-    ctx.fillStyle = kit.shirt;
-    ctx.beginPath();
-    ctx.moveTo(-bodyW * 0.46, shoulderY + bodyH * 0.03);
-    ctx.quadraticCurveTo(0, shoulderY - bodyH * 0.09, bodyW * 0.46, shoulderY + bodyH * 0.03);
-    ctx.quadraticCurveTo(bodyW * 0.3, (shoulderY + hipY) / 2, bodyW * 0.32, hipY);
-    ctx.quadraticCurveTo(0, hipY + bodyH * 0.07, -bodyW * 0.32, hipY);
-    ctx.quadraticCurveTo(-bodyW * 0.3, (shoulderY + hipY) / 2, -bodyW * 0.46, shoulderY + bodyH * 0.03);
-    ctx.closePath();
-    ctx.fill();
-
-    // ---- Glove arm, out front through the whole delivery.
-    ctx.strokeStyle = kit.shirt;
-    ctx.lineWidth = Math.max(2, bodyW * 0.26);
-    const gloveX = bodyW * (0.5 + stride * 0.5) - follow * bodyW * 0.7;
-    const gloveY = shoulderY + bodyH * 0.16 + follow * bodyH * 0.2;
-    ctx.beginPath();
-    ctx.moveTo(bodyW * 0.2, shoulderY + bodyH * 0.06);
-    ctx.lineTo(gloveX, gloveY);
-    ctx.stroke();
-    ctx.fillStyle = '#6b4a2a';
-    ctx.beginPath();
-    ctx.arc(gloveX, gloveY, bodyW * 0.26, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ---- Throwing arm: back and up during the stride, over the top to release,
-    // then across the body on the follow-through.
-    let armAngle: number;
-    if (!afterRelease) {
-      const back = lerp(-1.05, -2.5, stride); // down at the side -> up behind the head
-      armAngle = lerp(back, -0.15, whip); // whip over the top to release
-    } else {
-      armAngle = lerp(-0.15, 0.95, follow); // across the body
-    }
-
-    ctx.strokeStyle = kit.shirt;
-    ctx.lineWidth = Math.max(2, bodyW * 0.24);
-    const handX = -bodyW * 0.2 + Math.cos(armAngle) * -armLen;
-    const handY = shoulderY + bodyH * 0.04 + Math.sin(armAngle) * armLen * 0.85;
-    ctx.beginPath();
-    ctx.moveTo(-bodyW * 0.2, shoulderY + bodyH * 0.06);
-    ctx.lineTo(handX, handY);
-    ctx.stroke();
-
-    // Ball in hand right up until release.
-    if (!afterRelease && whip < 0.85) {
-      ctx.fillStyle = '#fdfdfb';
-      ctx.beginPath();
-      ctx.arc(handX, handY, Math.max(1.5, bodyW * 0.16), 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // ---- Head and cap.
-    const headR = bodyW * 0.34;
-    const headY = shoulderY - headR * 0.9;
-    ctx.fillStyle = '#c98d63';
-    ctx.beginPath();
-    ctx.arc(0, headY, headR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = kit.cap;
-    ctx.beginPath();
-    ctx.arc(0, headY, headR, Math.PI, Math.PI * 2);
-    ctx.fill();
-    ctx.fillRect(-headR, headY - headR * 0.16, headR * 2, headR * 0.3);
-
-    ctx.restore();
+    const follow = this.phase === 'windup' ? 0 : clamp(this.sinceRelease / 520, 0, 1);
+    const a = pitcherAnchor(L.scene);
+    // A small idle breath before the delivery starts.
+    const breath = windup <= 0 ? Math.sin(this.clock * 2.4) * a.h * 0.006 : 0;
+    drawPitcher(ctx, a.x, a.y + breath, a.h, this.opts.pitcherKit, { windup, follow });
   }
 
-  private drawZone(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
-    // Vision keeps the strike-zone guide visible; low vision fades it out.
-    // The whole guide brightens the moment the ball is live, when it's needed.
+  /**
+   * The strike zone: a pane of glass with a nine-box grid and corner
+   * brackets. Vision keeps it visible; low vision fades it. It brightens the
+   * moment the ball is live.
+   */
+  private drawZone(ctx: CanvasRenderingContext2D, L: Layout): void {
     const live = this.phase === 'flight' ? 1.5 : 1;
     const visibility = Math.min(
-      0.9,
+      0.92,
       clamp(0.22 + this.opts.player.attributes.vision / 220, 0.22, 0.66) * live,
     );
     const x0 = L.cx - L.zoneHW;
@@ -883,10 +610,12 @@ export class AtBatView {
     const zh = L.zoneHH * 2;
 
     ctx.save();
-    // A faint pane of glass, so the zone reads against dark grass instead of
-    // being four hairlines lost in it.
-    ctx.fillStyle = `rgba(255,255,255,${this.phase === 'flight' ? 0.08 : 0.055})`;
+    ctx.fillStyle = `rgba(255,255,255,${this.phase === 'flight' ? 0.1 : 0.06})`;
     ctx.fillRect(x0, y0, zw, zh);
+    // A soft dark edge, so the pane reads over bright grass as well as clay.
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(x0, y0, zw, zh);
 
     ctx.strokeStyle = `rgba(255,255,255,${visibility})`;
     ctx.lineWidth = 2;
@@ -909,8 +638,6 @@ export class AtBatView {
       ctx.stroke();
     }
 
-    // Solid corner brackets, heavier than the dashed frame, so the zone keeps
-    // its shape even where the dashes happen to fall on the gaps.
     const arm = Math.min(zw, zh) * 0.22;
     ctx.strokeStyle = `rgba(255,255,255,${Math.min(1, visibility * 1.5)})`;
     ctx.lineWidth = 3.5;
@@ -937,11 +664,11 @@ export class AtBatView {
   }
 
   /**
-   * The count, living where the eyes already are — beside the zone — plus one
-   * dot per pitch already thrown this at-bat, coloured by what it was with the
-   * radar reading alongside. Drawn on the opposite side from the batter.
+   * The count beside the zone, plus one dot per pitch already thrown this
+   * at-bat, coloured by what it was with the radar reading alongside. Drawn
+   * on the opposite side from the batter.
    */
-  private drawCountHud(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
+  private drawCountHud(ctx: CanvasRenderingContext2D, L: Layout): void {
     const side = -this.batterSide();
     const pad = L.W * 0.03;
     const x0 = side > 0 ? L.cx + L.zoneHW + pad : L.cx - L.zoneHW - pad;
@@ -953,8 +680,9 @@ export class AtBatView {
     ctx.font = `bold ${Math.max(10, L.W * 0.032)}px system-ui, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.textAlign = align > 0 ? 'left' : 'right';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 4;
 
-    // B / S pip rows, same colours as the header so the language is one.
     const rows: Array<[string, number, number, string]> = [
       ['B', this.count.balls, 3, '#35c26a'],
       ['S', this.count.strikes, 2, '#ff6b6b'],
@@ -962,7 +690,7 @@ export class AtBatView {
     let y = L.zoneY - L.zoneHH + pipR + 2;
     const letterW = Math.max(10, L.W * 0.032);
     for (const [letter, have, total, colour] of rows) {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
       ctx.fillText(letter, x0, y + 0.5);
       for (let i = 0; i < total; i++) {
         const px = x0 + align * (letterW + i * step + pipR);
@@ -972,16 +700,14 @@ export class AtBatView {
           ctx.fillStyle = colour;
           ctx.fill();
         } else {
-          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+          ctx.lineWidth = 1.2;
           ctx.stroke();
         }
       }
       y += step + 3;
     }
 
-    // Pitch history, newest at the bottom, capped so a foul-ball marathon
-    // doesn't crawl down into the plate.
     const shown = this.history.slice(-6);
     y += 4;
     ctx.font = `bold ${Math.max(9, L.W * 0.026)}px system-ui, sans-serif`;
@@ -990,7 +716,7 @@ export class AtBatView {
       ctx.beginPath();
       ctx.arc(x0 + align * pipR, y, pipR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
       ctx.fillText(String(p.mph), x0 + align * (pipR * 2 + 5), y + 0.5);
       y += step + 1;
     }
@@ -998,27 +724,20 @@ export class AtBatView {
   }
 
   /**
-   * The batter — you — in the box beside the plate, drawn with the same
-   * round-capped limbs as the pitcher so the two read as the same game. Three
-   * real poses sell the moment: an easy stance, a coil as the pitcher strides,
-   * and the bat whipping through when the tap lands.
+   * The batter — you — in the box. An easy stance, a coil as the pitcher
+   * strides, and the bat whipping through when the tap lands. A taken pitch
+   * just relaxes back into the stance.
    */
-  private drawBatter(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
+  private drawBatter(ctx: CanvasRenderingContext2D, L: Layout): void {
     const side = this.batterSide();
-    const h = L.H * 0.2;
-    const x = L.cx + side * L.W * 0.36;
-    const y = L.H * 0.905;
-    const kit = this.opts.batterKit;
+    const a = batterAnchor(L.scene, side);
 
-    // Pose: 0 = relaxed stance, 1 = fully loaded. The coil tracks the
-    // pitcher's stride; the swing only plays when a tap actually landed —
-    // a taken pitch just relaxes back into the stance.
     let load: number;
-    let swingP = 0;
+    let swing = 0;
     if (this.phase === 'freeze') {
       if (this.tapPoint) {
         load = 1;
-        swingP = clamp(this.phaseElapsed / 170, 0, 1);
+        swing = clamp(this.phaseElapsed / 210, 0, 1);
       } else {
         load = 0;
       }
@@ -1027,141 +746,25 @@ export class AtBatView {
     } else {
       load = clamp((this.phaseElapsed / WINDUP_MS - 0.3) / 0.55, 0, 1);
     }
-    const bob = Math.sin(this.weatherClock * 2.6) * (1 - load) * h * 0.012;
-    // Ease the barrel through the hitting zone rather than sweeping linearly.
-    const swing = 1 - (1 - swingP) * (1 - swingP);
 
-    ctx.save();
-    ctx.translate(x, y);
-    // Local +x points at the plate, whichever box the batter is in.
-    ctx.scale(-side, 1);
-    ctx.lineCap = 'round';
-
-    // Ground shadow first, so the figure is planted rather than pasted on.
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(h * 0.02, h * 0.012, h * 0.32, h * 0.055, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Weight drifts back as the batter loads, then drives forward with the bat.
-    const shift = -load * (1 - swing) * h * 0.06 + swing * h * 0.1;
-    const hipX = shift;
-    const hipY = -h * 0.42 + bob;
-    const shX = shift * 1.35;
-    const shY = -h * 0.68 + bob + load * (1 - swing) * h * 0.015;
-
-    // ---- Legs. Front foot lifts a touch in the load, plants for the swing.
-    ctx.strokeStyle = kit.pants;
-    ctx.lineWidth = Math.max(3, h * 0.115);
-    ctx.beginPath();
-    ctx.moveTo(hipX, hipY);
-    ctx.lineTo(-h * 0.17, 0);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(hipX, hipY);
-    ctx.lineTo(h * 0.17, -load * (1 - swing) * h * 0.05);
-    ctx.stroke();
-
-    // ---- Torso, curved like the pitcher's.
-    const shHalf = h * 0.165;
-    const hipHalf = h * 0.125;
-    ctx.fillStyle = kit.shirt;
-    ctx.beginPath();
-    ctx.moveTo(shX - shHalf, shY + h * 0.015);
-    ctx.quadraticCurveTo(shX, shY - h * 0.04, shX + shHalf, shY + h * 0.015);
-    ctx.quadraticCurveTo(shX + shHalf * 0.75, (shY + hipY) / 2, hipX + hipHalf, hipY);
-    ctx.quadraticCurveTo(hipX, hipY + h * 0.03, hipX - hipHalf, hipY);
-    ctx.quadraticCurveTo(shX - shHalf * 0.75, (shY + hipY) / 2, shX - shHalf, shY + h * 0.015);
-    ctx.closePath();
-    ctx.fill();
-
-    // ---- Hands and bat. Up by the back shoulder in the stance, wrapped
-    // deeper in the load, then whipped level through the zone.
-    const loadBack = load * (1 - swing);
-    const handX = shX - h * (0.09 + loadBack * 0.06) + swing * h * 0.24;
-    const handY = shY + h * (0.06 - loadBack * 0.03) + swing * h * 0.14;
-    const batAngle = lerp(-1.9 - load * 0.45, 0.9, swing);
-    const batLen = h * 0.48;
-    const tipX = handX + Math.cos(batAngle) * batLen;
-    const tipY = handY + Math.sin(batAngle) * batLen;
-
-    // Arms from both shoulders to the hands.
-    ctx.strokeStyle = kit.shirt;
-    ctx.lineWidth = Math.max(2.5, h * 0.075);
-    ctx.beginPath();
-    ctx.moveTo(shX - h * 0.07, shY + h * 0.05);
-    ctx.lineTo(handX, handY);
-    ctx.moveTo(shX + h * 0.07, shY + h * 0.03);
-    ctx.lineTo(handX, handY);
-    ctx.stroke();
-
-    // Bat: darker handle, brighter barrel, so the taper reads at a glance.
-    ctx.strokeStyle = '#8a6a45';
-    ctx.lineWidth = Math.max(2, h * 0.04);
-    ctx.beginPath();
-    ctx.moveTo(handX, handY);
-    ctx.lineTo(lerp(handX, tipX, 0.35), lerp(handY, tipY, 0.35));
-    ctx.stroke();
-    ctx.strokeStyle = '#d9a468';
-    ctx.lineWidth = Math.max(3, h * 0.06);
-    ctx.beginPath();
-    ctx.moveTo(lerp(handX, tipX, 0.3), lerp(handY, tipY, 0.3));
-    ctx.lineTo(tipX, tipY);
-    ctx.stroke();
-
-    // Batting gloves on the hands.
-    ctx.fillStyle = kit.cap;
-    ctx.beginPath();
-    ctx.arc(handX, handY, h * 0.045, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ---- Head and helmet, eyes on the pitcher.
-    const headR = h * 0.095;
-    const headX = shX + h * 0.02;
-    const headY = shY - headR * 1.15;
-    ctx.fillStyle = '#c98d63';
-    ctx.beginPath();
-    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = kit.cap;
-    ctx.beginPath();
-    ctx.arc(headX, headY, headR * 1.06, Math.PI * 0.95, Math.PI * 2.1);
-    ctx.fill();
-    // Ear flap on the pitcher side.
-    ctx.beginPath();
-    ctx.ellipse(headX + headR * 0.55, headY + headR * 0.25, headR * 0.42, headR * 0.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  private drawPlate(ctx: CanvasRenderingContext2D, L: ReturnType<AtBatView['layout']>): void {
-    const py = L.H * 0.86;
-    const hw = L.W * 0.13;
-    ctx.fillStyle = '#f2f4f8';
-    ctx.beginPath();
-    ctx.moveTo(L.cx - hw, py);
-    ctx.lineTo(L.cx + hw, py);
-    ctx.lineTo(L.cx + hw * 0.8, py + L.H * 0.022);
-    ctx.lineTo(L.cx, py + L.H * 0.04);
-    ctx.lineTo(L.cx - hw * 0.8, py + L.H * 0.022);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  private drawTrail(ctx: CanvasRenderingContext2D): void {
-    for (let i = 0; i < this.trail.length; i++) {
-      const b = this.trail[i];
-      const alpha = (i / this.trail.length) * 0.22;
-      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r * 0.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawBatter(
+      ctx,
+      a.x,
+      a.y,
+      a.h,
+      this.opts.batterKit,
+      { load, swing, sway: this.clock * 2.6 },
+      side < 0 ? 1 : -1,
+    );
   }
 
   private drawBall(ctx: CanvasRenderingContext2D, ball: BallState): void {
-    drawBaseball(ctx, ball.x, ball.y, ball.r, ball.rot);
+    const prev = this.trail.length > 1 ? this.trail[this.trail.length - 2] : ball;
+    drawBaseball(ctx, ball.x, ball.y, ball.r, {
+      rot: ball.rot,
+      vx: ball.x - prev.x,
+      vy: ball.y - prev.y,
+    });
   }
 
   /** 0 outside the prime tap window, 1 through its heart, eased at both edges. */
@@ -1174,22 +777,18 @@ export class AtBatView {
 
   /**
    * Gold halo behind the ball while it's over the plate — the "swing now"
-   * signal. Under the ball, so the seams stay crisp on top of the light.
-   * Strikes only: a ball off the plate never earns the swing colour, which
-   * is what makes the two readable as different pitches at a glance. Needs
-   * the batting eye (see `hasBattingEye`): until Vision is there, nothing
-   * glows and the zone is yours to judge.
+   * signal. Strikes only, and only with the batting eye (see
+   * `hasBattingEye`): until Vision is there, the zone is yours to judge.
    */
   private drawPrimeGlow(ctx: CanvasRenderingContext2D, ball: BallState, t: number): void {
     if (!this.battingEye || !this.pitch.isStrike) return;
     const p = this.primePresence(t);
     if (p <= 0) return;
-    // A quick breathe — alive at a glance without strobing.
     const pulse = 1 + Math.sin(this.phaseElapsed / 46) * 0.05;
-    const R = ball.r * 1.8 * pulse;
+    const R = ball.r * 1.9 * pulse;
     const glow = ctx.createRadialGradient(ball.x, ball.y, ball.r * 0.55, ball.x, ball.y, R);
-    glow.addColorStop(0, `rgba(255,209,102,${0.45 * p})`);
-    glow.addColorStop(1, 'rgba(255,209,102,0)');
+    glow.addColorStop(0, alpha(CUE_GOLD, 0.5 * p));
+    glow.addColorStop(1, alpha(CUE_GOLD, 0));
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, R, 0, Math.PI * 2);
@@ -1199,87 +798,73 @@ export class AtBatView {
   /**
    * Timing ring: converges on the ball through the flight and, on a strike,
    * locks onto its rim, gold, exactly while the ball is over the plate —
-   * "tap when the ring meets the ball", without a word of instruction. The
-   * same gold as the fielding landing ring, so one colour means "act here"
-   * everywhere. On a ball the ring never locks: it washes out just before
-   * the plate, and the missing lock is the "lay off" read. Once the window
-   * has passed the ring is simply gone: the chance went with it.
-   *
-   * All of that ball-versus-strike reading is the batting eye, earned with
-   * Vision. Without it the ring still converges and locks — white, on every
-   * pitch — so the tap timing is there to learn, but it says nothing about
-   * whether the pitch is worth swinging at.
+   * "tap when the ring meets the ball". On a ball the ring never locks: it
+   * washes out just before the plate. Without the batting eye the ring still
+   * converges and locks — white, on every pitch — so the timing is there to
+   * learn, but it says nothing about whether the pitch is worth swinging at.
    */
-  private drawTimingRing(
-    ctx: CanvasRenderingContext2D,
-    ball: BallState,
-    t: number,
-    L: ReturnType<AtBatView['layout']>,
-  ): void {
+  private drawTimingRing(ctx: CanvasRenderingContext2D, ball: BallState, t: number, L: Layout): void {
     if (t >= PRIME_END) return;
-    // Held back until the pitch has shown itself (the readout lands at 0.22),
-    // so the early read stays about the ball, not the aid.
     const fadeIn = clamp((t - 0.3) / 0.18, 0, 1);
     if (fadeIn <= 0) return;
 
     const conv = clamp(t / PRIME_AT, 0, 1);
-    // Wide early and closing faster late, roughly matching the pitch's own
-    // perspective curve, so ring and ball arrive at the plate together.
     const gap = Math.pow(1 - conv, 1.35) * L.W * 0.34;
     const r = ball.r * 1.16 + gap;
     const reads = this.battingEye ? this.pitch.isStrike : true;
     const locked = reads ? this.primePresence(t) : 0;
-    // On a ball the ring dissolves as it reaches the plate instead of
-    // locking — by the time a strike would be glowing gold, there's nothing.
     const wash = reads ? 1 : 1 - clamp((t - PRIME_START) / 0.07, 0, 1);
     if (wash <= 0) return;
 
     ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 3;
     if (locked > 0 && this.battingEye) {
-      ctx.strokeStyle = `rgba(255,209,102,${0.5 + locked * 0.45})`;
+      ctx.strokeStyle = alpha(CUE_GOLD, 0.5 + locked * 0.45);
       ctx.lineWidth = Math.max(2, ball.r * 0.09);
     } else if (locked > 0) {
       ctx.strokeStyle = `rgba(255,255,255,${0.45 + locked * 0.4})`;
       ctx.lineWidth = Math.max(2, ball.r * 0.09);
     } else {
-      ctx.strokeStyle = `rgba(255,255,255,${0.35 * fadeIn * wash})`;
+      ctx.strokeStyle = `rgba(255,255,255,${0.38 * fadeIn * wash})`;
       ctx.lineWidth = Math.max(1.5, ball.r * 0.07);
     }
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, r, 0, Math.PI * 2);
     ctx.stroke();
+    // Four ticks, so the ring reads as a sight rather than a halo.
+    if (locked <= 0) {
+      const tick = Math.max(3, ball.r * 0.16);
+      ctx.beginPath();
+      for (let k = 0; k < 4; k++) {
+        const ang = k * (Math.PI / 2) + Math.PI / 4;
+        ctx.moveTo(ball.x + Math.cos(ang) * (r - tick), ball.y + Math.sin(ang) * (r - tick));
+        ctx.lineTo(ball.x + Math.cos(ang) * (r + tick), ball.y + Math.sin(ang) * (r + tick));
+      }
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
   /**
    * The perfect hit zone, unlocked at 120 combined Contact and Vision. Marks
-   * the sweet spot on the ball as it comes in — the barrel zone that gives the
-   * home-run chance. The whole ball is hittable; this is just where the damage
-   * is. Purely an aid, it changes nothing about how contact resolves.
+   * the sweet spot on the ball as it comes in. Purely an aid.
    */
-  private drawPerfectZone(ctx: CanvasRenderingContext2D, ball: BallState): void {
+  private drawPerfectZone(ctx: CanvasRenderingContext2D, ball: BallState, L: Layout): void {
     if (!this.perfectZoneUnlocked) return;
-    // Only once the ball is close enough for the marker to mean anything.
-    if (ball.r < this.layout().maxR * 0.42) return;
+    if (ball.r < L.maxR * 0.42) return;
 
     const centerY = ball.y + IDEAL_UNDER * ball.r;
-    const radius = sweetSpotRadius(
-      this.opts.player.attributes.contact,
-      this.opts.player.stamina,
-    ) * ball.r;
-
-    // Fade in as the ball arrives so it doesn't distract early in the flight.
-    const presence = clamp((ball.r / this.layout().maxR - 0.42) / 0.4, 0, 1);
+    const radius = sweetSpotRadius(this.opts.player.attributes.contact, this.opts.player.stamina) * ball.r;
+    const presence = clamp((ball.r / L.maxR - 0.42) / 0.4, 0, 1);
 
     ctx.save();
     ctx.globalAlpha = 0.55 + presence * 0.35;
-    ctx.strokeStyle = '#5ce6a0';
+    ctx.strokeStyle = CUE_GREEN;
     ctx.lineWidth = Math.max(1.5, ball.r * 0.07);
     ctx.beginPath();
     ctx.arc(ball.x, centerY, radius, 0, Math.PI * 2);
     ctx.stroke();
-
-    // Crosshair on the exact spot.
     const tick = radius * 0.42;
     ctx.lineWidth = Math.max(1, ball.r * 0.05);
     ctx.beginPath();
@@ -1294,24 +879,19 @@ export class AtBatView {
   /**
    * Post-swing teaching frame: shows where the tap landed on the ball. The
    * green sweet-spot ring is part of the perfect-zone aid — until that's
-   * unlocked (see `hasPerfectZone`), you only see your own mark and have to
-   * find the spot yourself.
+   * unlocked you only see your own mark.
    */
   private drawFreeze(ctx: CanvasRenderingContext2D): void {
     const ball = this.frozenBall;
     if (!ball) return;
 
-    this.drawBall(ctx, ball);
+    drawBaseball(ctx, ball.x, ball.y, ball.r, { rot: ball.rot });
 
     if (this.perfectZoneUnlocked) {
-      const sweet = sweetSpotRadius(
-        this.opts.player.attributes.contact,
-        this.opts.player.stamina,
-      );
+      const sweet = sweetSpotRadius(this.opts.player.attributes.contact, this.opts.player.stamina);
       const idealY = ball.y + IDEAL_UNDER * ball.r;
-
       ctx.save();
-      ctx.strokeStyle = 'rgba(80, 230, 140, 0.85)';
+      ctx.strokeStyle = alpha(CUE_GREEN, 0.85);
       ctx.lineWidth = 2;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
@@ -1321,18 +901,7 @@ export class AtBatView {
     }
 
     if (this.tapPoint) {
-      ctx.save();
-      ctx.strokeStyle = '#ffd166';
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      const s = Math.max(8, ball.r * 0.32);
-      ctx.beginPath();
-      ctx.moveTo(this.tapPoint.x - s, this.tapPoint.y - s);
-      ctx.lineTo(this.tapPoint.x + s, this.tapPoint.y + s);
-      ctx.moveTo(this.tapPoint.x + s, this.tapPoint.y - s);
-      ctx.lineTo(this.tapPoint.x - s, this.tapPoint.y + s);
-      ctx.stroke();
-      ctx.restore();
+      drawTapMark(ctx, this.tapPoint.x, this.tapPoint.y, Math.max(8, ball.r * 0.32));
     }
   }
 }

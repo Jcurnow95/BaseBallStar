@@ -11,6 +11,7 @@ import {
   distance,
   isFair,
   isOutfield,
+  isOutfielder,
   magnitude,
 } from './fieldGeometry';
 import type { Ballpark } from './ballpark';
@@ -135,6 +136,11 @@ const HOLD_LIMIT = 4.5;
 /** Fielding the ball, transferring to the hand and setting to throw. */
 const TRANSFER_TIME = 0.75;
 /**
+ * How much a fielder running the ball to a bag himself has to beat the
+ * runner by before he'll try it, in seconds.
+ */
+const FOOT_MARGIN = 0.15;
+/**
  * How much a runner has to beat the return throw by before trying for a base.
  * The defense only throws when it wins the race, so a runner who leaves with
  * less cushion than this is running into an out.
@@ -167,6 +173,18 @@ const BREAK_ON_CONTACT = 0.4;
 const WALL_MARGIN = 3;
 /** Gap kept between runners, as a fraction of a basepath — about seven feet. */
 const RUNNER_GAP = 0.08;
+/**
+ * How sure a CPU fielder has to be before he lets a throw go: the margin, in
+ * seconds, it has to beat the runner by. Anything closer than this he
+ * concedes, holds for `THROW_IN_DELAY`, and gets the ball in.
+ *
+ * This is also what keeps balls in play turning into hits as often as they
+ * do — the defense gives up every race it can't win by this much. Shrink it
+ * and infield hits go with it: in `tools/play.ts`, every tenth of a second
+ * off this or `TRANSFER_TIME` costs the batter about two points of hit rate
+ * on balls in play with the bases empty. Deliberately flat across levels.
+ */
+const THROW_CUSHION = 0.75;
 /** How long a fielder holds a ball with no play before returning it. */
 const THROW_IN_DELAY = 0.7;
 /** A throw covers this much ground before it needs a cut-off man. */
@@ -351,25 +369,30 @@ export class PlaySim {
     // nearest one only backs the play up. Letting them chase it directly would
     // mean standing still cost the player almost nothing.
     let chaser: FielderState | undefined;
-    if (userIsNearest) {
-      if (sorted[0]) {
-        sorted[0].target = backup;
-        sorted[0].role = 'backup';
-      }
-    } else {
+    if (!userIsNearest) {
       chaser = sorted[0];
       if (chaser) {
         chaser.target = chaseTarget;
         chaser.role = 'chase';
       }
-      if (sorted[1]) {
-        sorted[1].target = backup;
-        sorted[1].role = 'backup';
-      }
+    }
+
+    // Backing up is an outfielder's job. This used to go to whoever was next
+    // nearest the ball, which on every ball to right field was the second
+    // baseman — who then sprinted forty-five feet past the right fielder and
+    // stood in the outfield for the rest of the play with nobody near his
+    // bag. Outfielders are the ones with nothing else to do once the ball is
+    // past them; infielders stay in and cover.
+    const backupMan = candidates
+      .filter((f) => f !== chaser && isOutfielder(f.id))
+      .sort((a, b) => distance(a, backup) - distance(b, backup))[0];
+    if (backupMan) {
+      backupMan.target = backup;
+      backupMan.role = 'backup';
     }
 
     const busy = new Set<PositionId>(
-      [chaser?.id, sorted[0]?.id].filter(Boolean) as PositionId[],
+      [chaser?.id, backupMan?.id].filter(Boolean) as PositionId[],
     );
 
     for (const base of [1, 2, 3, 0] as BaseId[]) {
@@ -769,7 +792,10 @@ export class PlaySim {
 
   private moveFielders(dt: number): void {
     for (const fielder of this.fielders) {
-      if (fielder.isUser || fielder.hasBall) continue;
+      if (fielder.isUser) continue;
+      // A fielder holding the ball only moves to take it to a bag himself
+      // (`footPlayFor`); a chaser who has just gloved it plants and throws.
+      if (fielder.hasBall && fielder.role !== 'cover') continue;
       if (fielder.reaction > 0) {
         fielder.reaction -= dt;
         continue;
@@ -797,6 +823,10 @@ export class PlaySim {
       fielder.x += (dx / range) * step;
       fielder.y += (dy / range) * step;
       this.containFielder(fielder);
+      if (fielder.hasBall) {
+        this.ball.x = fielder.x;
+        this.ball.y = fielder.y;
+      }
     }
   }
 
@@ -1032,9 +1062,7 @@ export class PlaySim {
         const next = target + 1;
         const runTime = ((next - from) * BASE_DISTANCE) / runner.speed;
         const returnTime =
-          pickupTime +
-          TRANSFER_TIME +
-          this.throwFlightTime(rest, (next % 4) as BaseId, armSpeed);
+          pickupTime + TRANSFER_TIME + this.throwFlightTime(rest, (next % 4) as BaseId, armSpeed);
         if (runTime + RUNNER_CAUTION > returnTime) break;
         target = next;
       }
@@ -1190,6 +1218,9 @@ export class PlaySim {
     this.battedBallLive = false;
     this.throwReaction = fielder.isUser ? 0 : TRANSFER_TIME;
     this.holdTimer = 0;
+    // Wherever he was running to is moot now he has it. `footPlayFor` gives
+    // him a bag to take it to if there is one.
+    if (!fielder.isUser) fielder.target = null;
 
     if (wasFly) {
       this.caughtInAir = true;
@@ -1269,18 +1300,24 @@ export class PlaySim {
     if (!carrier?.hasBall || this.deadTimer > 0) return;
     for (const base of [1, 2, 3, 0] as BaseId[]) {
       if (distance(carrier, BASES[base]) > RECEIVE_RADIUS) continue;
-      // A force any time he's short; a tag only as he reaches the bag, coming
-      // or going. Standing on it while an unforced runner is still 60 feet
-      // out does nothing — wait for him.
-      if (
-        !this.forcedRunnerAt(base) &&
-        !this.retreatingRunnerAt(base, TAG_REACH) &&
-        !this.arrivingRunnerAt(base, TAG_REACH)
-      )
-        continue;
+      if (!this.bagPlayAt(base)) continue;
       this.resolveForceAt(base, carrier, true);
       return;
     }
+  }
+
+  /**
+   * Whether a fielder holding the ball on `base` retires somebody right now.
+   * A force any time he's short; a tag only as he reaches the bag, coming or
+   * going. Standing on it while an unforced runner is still 60 feet out does
+   * nothing — wait for him.
+   */
+  private bagPlayAt(base: BaseId): boolean {
+    return (
+      this.forcedRunnerAt(base) !== null ||
+      this.retreatingRunnerAt(base, TAG_REACH) !== null ||
+      this.arrivingRunnerAt(base, TAG_REACH) !== null
+    );
   }
 
   private considerCpuThrow(dt: number): void {
@@ -1298,14 +1335,37 @@ export class PlaySim {
       return;
     }
 
+    // Take it to the bag himself when he can get there first. Stepping on a
+    // base with the ball in the glove needs no transfer, so this is checked
+    // before the throwing clock: a first baseman who gloves a grounder a few
+    // steps off the bag used to stand on the spot for the length of a
+    // transfer, then look for someone to throw to, then wait for the second
+    // baseman to cover — and the batter walked in while he waited.
+    const foot = this.footPlayFor(carrier);
+    if (foot) {
+      if (distance(carrier, BASES[foot.base]) <= RECEIVE_RADIUS) {
+        if (this.bagPlayAt(foot.base)) {
+          this.resolveForceAt(foot.base, carrier, true);
+          return;
+        }
+      } else {
+        carrier.coverBase = foot.base;
+        carrier.target = BASES[foot.base];
+        carrier.role = 'cover';
+      }
+    }
+
     this.throwReaction -= dt;
     if (this.throwReaction > 0) return;
 
-    const base = this.bestThrowTarget(carrier);
-    if (base !== null) {
-      this.sendBallToBase(carrier, base);
+    const play = this.bestThrowPlay(carrier);
+    // A throw wins over running it there when it gets a lead runner the legs
+    // can't, or beats the legs to the same bag.
+    if (play && (!foot || play.reach > foot.reach || play.time < foot.time)) {
+      this.sendBallToBase(carrier, play.base);
       return;
     }
+    if (foot) return;
 
     // No play on. A fielder with no throw used to just stand there holding it,
     // which is how a runner could keep tapping GO and jog all the way round:
@@ -1424,9 +1484,27 @@ export class PlaySim {
    * travels far faster than a runner and nothing stopped them trying.
    */
   private bestThrowTarget(carrier: FielderState): BaseId | null {
-    const throwSpeed = this.armSpeedFor(carrier);
+    return this.bestThrowPlay(carrier)?.base ?? null;
+  }
 
-    let best: BaseId | null = null;
+  /**
+   * The throw `bestThrowTarget` would make, with how far up the line it
+   * retires a man (`reach`, 1..4) and how long the ball takes to get there
+   * from now, so it can be weighed against running it to the bag.
+   */
+  private bestThrowPlay(
+    carrier: FielderState,
+  ): { base: BaseId; reach: number; time: number } | null {
+    const throwSpeed = this.armSpeedFor(carrier);
+    // Whatever is left of the transfer, plus the margin the fielder wants
+    // before he'll let it go. By the time a CPU fielder asks this he has
+    // paid the transfer, so the cushion is the whole of it — and it is the
+    // same size as a transfer on purpose: that is the race the batter has
+    // always been given, and the hit rate is tuned around it.
+    const transfer = Math.max(0, this.throwReaction);
+    const cushion = carrier.isUser ? 0 : THROW_CUSHION;
+
+    let best: { base: BaseId; reach: number; time: number } | null = null;
     let bestLead = -1;
 
     for (const runner of this.runners) {
@@ -1449,30 +1527,68 @@ export class PlaySim {
       const toGo = retreating ? runner.progress : 1 - runner.progress;
       const runnerTime = (toGo * BASE_DISTANCE) / runner.speed;
 
-      // Already standing on that bag with the ball: no throw to make, just
-      // wait for him and tag him as he arrives. He gets the length of the
-      // basepath to think better of it — and if he turns round, the throw
-      // behind him is the play. Without this a fielder on the bag didn't
-      // count as covering it, so a runner could jog straight into his glove
-      // and be called safe.
+      // Already standing on that bag with the ball: no throw to make. A man
+      // forced there is out the moment the bag is stepped on; anyone else
+      // has to be tagged, so wait for him to arrive. He gets the length of
+      // the basepath to think better of it — and if he turns round, the
+      // throw behind him is the play. Without this a fielder on the bag
+      // didn't count as covering it, so a runner could jog straight into his
+      // glove and be called safe.
       if (distance(carrier, BASES[target]) <= RECEIVE_RADIUS) {
-        if (toGo <= TAG_REACH && reach > bestLead) {
+        const forced = !retreating && this.isForcedInto(runner, target);
+        if ((forced || toGo <= TAG_REACH) && reach > bestLead) {
           bestLead = reach;
-          best = target;
+          best = { base: target, reach, time: 0 };
         }
         continue;
       }
 
       if (!this.hasCover(target, carrier)) continue;
-      const throwTime = TRANSFER_TIME + this.throwFlightTime(carrier, target, throwSpeed);
+      const throwTime = transfer + this.throwFlightTime(carrier, target, throwSpeed);
 
-      if (throwTime < runnerTime && reach > bestLead) {
+      if (throwTime + cushion < runnerTime && reach > bestLead) {
         bestLead = reach;
-        best = target;
+        best = { base: target, reach, time: throwTime };
       }
     }
     return best;
   }
+
+  /**
+   * The bag a fielder holding the ball should run to and step on himself:
+   * the one where his legs beat the runner, furthest up the line first.
+   * Same race as `bestThrowPlay`, without the transfer — the ball is
+   * already in his glove — and without needing anyone to cover.
+   */
+  private footPlayFor(
+    carrier: FielderState,
+  ): { base: BaseId; reach: number; time: number } | null {
+    let best: { base: BaseId; reach: number; time: number } | null = null;
+    let bestLead = -1;
+
+    for (const runner of this.runners) {
+      if (runner.out || runner.at >= 4) continue;
+      if (runner.progress <= 0 && runner.done) continue;
+
+      const retreating = this.isRetreating(runner);
+      if (!retreating && runner.intent <= runner.at) continue;
+      const reach = retreating ? runner.at : runner.at + 1;
+      const target = (reach % 4) as BaseId;
+      const toGo = retreating ? runner.progress : 1 - runner.progress;
+      const runnerTime = (toGo * BASE_DISTANCE) / runner.speed;
+
+      const range = Math.max(0, distance(carrier, BASES[target]) - RECEIVE_RADIUS);
+      const footTime = range / carrier.speed;
+      if (footTime + FOOT_MARGIN >= runnerTime) continue;
+
+      if (reach > bestLead) {
+        bestLead = reach;
+        best = { base: target, reach, time: footTime };
+      }
+    }
+    return best;
+  }
+
 
   /**
    * Throws travel a guaranteed arc from fielder to bag rather than being

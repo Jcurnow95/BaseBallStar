@@ -408,6 +408,11 @@ export class PlaySim {
     return this.lastEvent;
   }
 
+  /** The batted ball has cleared the fence. Everyone on the bases is coming home. */
+  get overTheFence(): boolean {
+    return this.homeRun;
+  }
+
   /** True when the user is holding the ball and can pick a base to throw to. */
   get userHasBall(): boolean {
     return this.phase === 'held' && (this.userFielder?.hasBall ?? false);

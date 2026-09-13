@@ -58,6 +58,7 @@ export type SoundName =
   | 'catchMade'
   | 'catchMissed'
   | 'homeRun'
+  | 'homeRunCall'
   | 'rally'
   | 'fanfare'
   | 'cheerBig'
@@ -90,6 +91,9 @@ const CLIPS: Record<SoundName, Clip> = {
   // Starts *after* the crack at ~1.0s, so this is pure crowd eruption. The bat
   // already made its noise back at contact; replaying it here would double up.
   homeRun: { channel: 'crowd', file: 'homerun', offset: 1.8, duration: 5.5, gain: 0.75 },
+  // The call itself. A 2.4s clip that's hot from the first sample and peaks at
+  // full scale, so it plays whole and gets pulled well down to sit on the roar.
+  homeRunCall: { channel: 'crowd', file: 'homerun-call', offset: 0, duration: 2.4, gain: 0.5 },
   rally: { channel: 'crowd', file: 'sting-charge-short', offset: 0.13, duration: 2.6, gain: 0.9 },
   fanfare: { channel: 'crowd', file: 'sting-charge-long', offset: 0.1, duration: 3.8, gain: 0.8 },
   // The cheer recordings all open with a slow two-second swell. A crowd that
@@ -113,6 +117,7 @@ const WARM_ORDER: SoundName[] = [
   'catchMissed',
   'cheerShort',
   'homeRun',
+  'homeRunCall',
   'cheerBig',
   'cheerSoft',
   'rally',
@@ -278,6 +283,22 @@ export function playSound(name: SoundName): void {
     source.disconnect();
     gain.disconnect();
   };
+}
+
+/** Seconds between the call and the organ answering it — the call's length, near enough. */
+const FANFARE_DELAY_MS = 2300;
+
+/**
+ * The whole home-run sound in one place, since two screens want it the same:
+ * the announcer's call and the crowd's roar together the instant the ball
+ * clears, then the organ sting once the call has finished. Returns a cancel
+ * for the pending sting, for a screen being torn down before it lands.
+ */
+export function playHomeRunCall(): () => void {
+  playSound('homeRunCall');
+  playSound('homeRun');
+  const timer = window.setTimeout(() => playSound('fanfare'), FANFARE_DELAY_MS);
+  return () => window.clearTimeout(timer);
 }
 
 /* -------------------------------------------------------------- ambience */

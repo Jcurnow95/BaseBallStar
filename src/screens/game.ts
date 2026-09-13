@@ -44,12 +44,14 @@ import { PlaySim } from '../core/playSim';
 import { toPositionId } from '../core/fieldGeometry';
 import { AtBatView } from '../game/atBatView';
 import { PlayView } from '../game/playView';
+import { Celebration } from '../game/celebrationFx';
 import { showCoachTip, tipSeen } from '../game/coachTips';
 import { esc, q } from '../ui/dom';
 import type { FeedIcon } from '../ui/feedIcons';
 import { feedIconFor, feedIconSvg } from '../ui/feedIcons';
 import {
   isChannelMuted,
+  playHomeRunCall,
   playSound,
   resumeAmbience,
   startAmbience,
@@ -134,7 +136,12 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
 
   let delay = NORMAL_DELAY;
   let timer = 0;
-  let soundTimer = 0;
+  /** Cancels the organ sting still pending after a home run. */
+  let cancelFanfare = (): void => {};
+  /** Fireworks in progress over the stage, if any. */
+  let party: Celebration | null = null;
+  /** Whether the current live play has already had its home-run moment. */
+  let celebrated = false;
   let view: AtBatView | PlayView | null = null;
   let count: Count = { balls: 0, strikes: 0 };
   let disposed = false;
@@ -199,6 +206,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   `;
 
   const idle = q(mount, '#idle');
+  const stage = q(mount, '#stage');
   const host = q(mount, '#host');
   const feed = q(mount, '#feed');
   const speedBtn = q<HTMLButtonElement>(mount, '#speed');
@@ -400,6 +408,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     pauseOverlay.classList.toggle('show', value);
     pauseBtn.style.display = value ? 'none' : '';
     if (view) view.paused = value;
+    if (party) party.paused = value;
 
     if (value) {
       clearTimeout(timer);
@@ -678,6 +687,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   /** Hand a fair ball over to the top-down field, on whichever side we're on. */
   function beginLivePlay(battedBall: BattedBall, side: UserSide): void {
     showPlay();
+    celebrated = false;
 
     const playSim = new PlaySim({
       battedBall,
@@ -704,6 +714,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // Home fills the first-base dugout: that's us when we're hosting and in
       // the field, or when we're visiting and at bat.
       homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',
+      // Only our homers get the party. Theirs go by in silence, like the rest
+      // of their good news.
+      onHomeRun: side === 'offense' ? celebrate : undefined,
       onComplete: (result: PlayOutcome) => {
         destroyView();
         finishLivePlay(result, side);
@@ -747,6 +760,24 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   }
 
   /**
+   * The ball has left the yard: the call, the roar, and fireworks sized to
+   * the runs coming home. Fires the instant the ball clears the fence, while
+   * the play view is still up. The party is mounted on the stage rather than
+   * the view so it carries on over the idle card when the view is torn down a
+   * couple of seconds later. Deliberately not `schedule` for the sting —
+   * that's the single-slot game clock, and borrowing it would cancel the
+   * pending tick and stall the inning.
+   */
+  function celebrate(runs: number): void {
+    celebrated = true;
+    cancelFanfare();
+    cancelFanfare = playHomeRunCall();
+    party?.destroy();
+    party = new Celebration(stage, runs);
+    party.paused = paused;
+  }
+
+  /**
    * The crowd's take on what just happened. Only your side's good news gets a
    * reaction — cheering the opposition's double from your own dugout reads as
    * a bug, and firing something on every routine out would flatten the big
@@ -759,12 +790,10 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     }
 
     if (result.kind === 'homeRun') {
-      playSound('homeRun');
-      // Let the roar establish before the organ answers it. Deliberately not
-      // `schedule` — that's the single-slot game clock, and borrowing it here
-      // would cancel the pending tick and stall the inning.
-      clearTimeout(soundTimer);
-      soundTimer = window.setTimeout(() => playSound('fanfare'), 1400);
+      // Over the fence, the party started the moment the ball cleared it. An
+      // inside-the-park job only becomes a homer when the batter touches the
+      // plate, so it gets its moment here instead.
+      if (!celebrated) celebrate(result.runs);
       return;
     }
     if (result.kind === 'foul' || result.kind === 'out') return;
@@ -973,7 +1002,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   return () => {
     disposed = true;
     clearTimeout(timer);
-    clearTimeout(soundTimer);
+    cancelFanfare();
+    party?.destroy();
     stopAmbience();
     document.removeEventListener('visibilitychange', onVisibility);
     if (view) view.destroy();

@@ -3031,3 +3031,17 @@ table.standings.fixtures tr.ahead td {
 .cup-bracket .bracket-round:last-child {
   border-left-color: var(--gold);
 }
+
+/* ---------------------------------------------------- home-run celebration */
+
+/* Fireworks and confetti over the whole stage. Sits above the play view and
+   the idle card, under the catch overlay (8) and the pause card (12), and
+   never takes a tap. */
+.celebration-fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 7;
+  pointer-events: none;
+}

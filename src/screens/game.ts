@@ -323,6 +323,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   // the play-by-play feed takes over the screen, so watching the sim is
   // reading the game rather than squinting at a three-line strip.
   const showIdle = (): void => {
+    // The play is over; the party fades with it rather than raining on the card.
+    party?.wrapUp();
     idle.style.display = '';
     host.style.display = 'none';
     speedBtn.style.display = '';
@@ -330,6 +332,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   };
 
   const showPlay = (): void => {
+    // An inside-the-park party started over the card; the next play ends it.
+    party?.wrapUp();
     idle.style.display = 'none';
     host.style.display = '';
     speedBtn.style.display = 'none';

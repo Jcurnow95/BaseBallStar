@@ -307,6 +307,7 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
         },
         onDone: ({ homeRun, distance }) => {
           flight?.destroy();
+          party?.wrapUp();
           flight = null;
           if (finished) return;
           if (homeRun) {

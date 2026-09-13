@@ -48,6 +48,8 @@ const SPARK_GRAVITY = 230;
 const SPARK_DRAG = 0.2;
 /** Seconds the label stays up after the last rocket. */
 const LABEL_TAIL = 0.8;
+/** Seconds the whole show takes to fade once the screen under it has ended. */
+const WRAP_FADE = 0.5;
 
 interface Rocket {
   x: number;
@@ -104,6 +106,8 @@ export class Celebration {
   private confettiSpawned = 0;
   private destroyed = false;
   private _paused = false;
+  /** Seconds of fade left once `wrapUp` has been called; negative until then. */
+  private fadeLeft = -1;
 
   /**
    * @param stage Positioned container to draw over. The canvas covers it.
@@ -132,6 +136,16 @@ export class Celebration {
     return this._paused;
   }
 
+  /**
+   * The screen under the party has ended. Stop launching anything new and
+   * fade what's up over half a second, then go — rather than raining
+   * confetti over the scoreboard for the rest of the show.
+   */
+  wrapUp(): void {
+    if (this.fadeLeft >= 0) return;
+    this.fadeLeft = WRAP_FADE;
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -158,6 +172,7 @@ export class Celebration {
   };
 
   private finished(): boolean {
+    if (this.fadeLeft >= 0) return this.fadeLeft <= 0;
     return (
       this.elapsed >= this.level.duration + LABEL_TAIL &&
       this.rockets.length === 0 &&
@@ -172,7 +187,10 @@ export class Celebration {
     const level = this.level;
     this.elapsed += dt;
 
-    if (this.elapsed < level.duration) {
+    const winding = this.fadeLeft >= 0;
+    if (winding) this.fadeLeft = Math.max(0, this.fadeLeft - dt);
+
+    if (!winding && this.elapsed < level.duration) {
       this.rocketDue += level.rocketsPerSec * dt;
       while (this.rocketDue >= 1) {
         this.rocketDue -= 1;
@@ -293,6 +311,9 @@ export class Celebration {
   private draw(): void {
     const { ctx, width: W, height: H } = this.surface;
     ctx.clearRect(0, 0, W, H);
+
+    // Fading the element beats fading every particle: one opacity, one layer.
+    if (this.fadeLeft >= 0) this.surface.canvas.style.opacity = String(this.fadeLeft / WRAP_FADE);
 
     if (this.level.flash) {
       const a = Math.max(0, 0.6 * (1 - this.elapsed / 0.45));

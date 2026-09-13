@@ -1,12 +1,12 @@
 import type { PlayOutcome, PlaySim, RunnerState } from '../core/playSim';
-import type { BaseId, Vec2 } from '../core/fieldGeometry';
+import type { BaseId, PositionId, Vec2 } from '../core/fieldGeometry';
 import { ALL_POSITIONS, BASES, BASE_LABELS } from '../core/fieldGeometry';
 import { wallHeightAt } from '../core/ballpark';
 import { clamp } from '../core/rng';
 import { createSurface, pointerPos, vibrate } from '../ui/canvas';
 import type { Surface } from '../ui/canvas';
 import type { Uniform } from '../core/uniforms';
-import { Camera, TILT } from '../gfx/camera';
+import { Camera, RISE, TILT } from '../gfx/camera';
 import { ParkRenderer } from '../gfx/park';
 import type { Lighting } from '../gfx/palette';
 import { CUE_GOLD, CUE_RED, lightingFor, skinFor } from '../gfx/palette';
@@ -53,6 +53,10 @@ export interface PlayViewOptions {
 
 const MIN_SCALE = 1.5;
 const MAX_SCALE = 3.2;
+/** Seconds the glove takes to bring a caught ball back in to the body. */
+const CATCH_FX_SECONDS = 0.45;
+/** A fielder this close to a ball in the air (feet) reaches for it. */
+const REACH_RANGE = 14;
 
 interface Joystick {
   active: boolean;
@@ -98,6 +102,12 @@ export class PlayView {
   private anims = new Map<string, FigureAnim>();
   /** Recent ball positions in world space — the comet tail. */
   private ballTrail: { x: number; y: number; z: number }[] = [];
+  /** Who had the ball last frame, to spot the moment a catch is made. */
+  private prevCarrier: PositionId | null = null;
+  /** Where the ball was last seen in the air, so the catch can be drawn from there. */
+  private lastAir: { x: number; y: number; z: number } | null = null;
+  /** The glove closing on a ball just caught: who, where it was taken, when. */
+  private catchFx: { id: PositionId; from: { x: number; y: number; z: number }; start: number } | null = null;
 
   private joystick: Joystick = {
     active: false,
@@ -511,7 +521,7 @@ export class PlayView {
     const H = cam.height;
     const marginX = Math.max(40, W * 0.18);
     const marginY = Math.max(40, H * 0.18);
-    const air = cam.project({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
+    const air = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
     const ground = cam.project({ x: sim.ball.x, y: sim.ball.y });
 
     if (air.x < marginX) cam.x -= (marginX - air.x) / cam.scale;
@@ -537,6 +547,7 @@ export class PlayView {
     const park = this.park;
     const light = this.light;
     const ballBeyondWall = !sim.ballCarrier && park.isBeyondWall(sim.ball);
+    this.trackCatch();
 
     park.drawGround(ctx, cam, light);
     park.drawStands(ctx, cam, light, this.opts.crowd);
@@ -573,6 +584,22 @@ export class PlayView {
     return clamp(15 * this.cam.scale, 28, 52);
   }
 
+  /**
+   * Where the ball is drawn. The figures stand about three times life size,
+   * so a ball drawn at its true height arrives at their ankles when it's
+   * really at the glove. Near the ground the ball's height is stretched by
+   * the same factor as the figures; high up the stretch levels off to a
+   * fixed offset, so a fly ball still flies the same arc and the camera
+   * isn't chasing it off the top of the screen.
+   */
+  private ballScreen(x: number, y: number, z: number): Vec2 {
+    const lifeSize = 6 * this.cam.scale * RISE;
+    const exaggeration = this.spriteHeight() / lifeSize;
+    const gloveBand = 8;
+    const stretched = z + (exaggeration - 1) * gloveBand * (1 - Math.exp(-z / gloveBand));
+    return this.cam.project({ x, y }, stretched);
+  }
+
   /** Animation state is keyed per entity so run cycles carry across frames. */
   private animFor(key: string, p: Vec2, dt: number): FigureAnim {
     let anim = this.anims.get(key);
@@ -584,12 +611,51 @@ export class PlayView {
     return anim;
   }
 
+  /**
+   * Notice the frame a fielder takes the ball, and remember where it was in
+   * the air just before, so the glove can be drawn closing on that spot and
+   * bringing the ball in rather than the ball simply vanishing.
+   */
+  private trackCatch(): void {
+    const sim = this.sim;
+    const carrier = sim.ballCarrier;
+    if (carrier && carrier !== this.prevCarrier) {
+      this.catchFx = {
+        id: carrier,
+        from: this.lastAir ?? { x: sim.ball.x, y: sim.ball.y, z: sim.ball.z },
+        start: this.clock,
+      };
+    }
+    this.prevCarrier = carrier;
+    if (!carrier) this.lastAir = { x: sim.ball.x, y: sim.ball.y, z: sim.ball.z };
+  }
+
+  /** The one fielder near enough to a ball in the air to be reaching for it. */
+  private reachingFielder(): PositionId | null {
+    const sim = this.sim;
+    const ball = sim.ball;
+    if (sim.ballCarrier || ball.atRest || ball.z > 12 || sim.phase === 'dead') return null;
+    let best: PositionId | null = null;
+    let bestDist = REACH_RANGE;
+    for (const f of sim.fielders) {
+      const d = Math.hypot(f.x - ball.x, f.y - ball.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = f.id;
+      }
+    }
+    return best;
+  }
+
   private collectActors(dt: number): Actor[] {
     const { ctx } = this.surface;
     const sim = this.sim;
     const cam = this.cam;
     const height = this.spriteHeight();
     const actors: Actor[] = [];
+    const reacher = this.reachingFielder();
+    const airBall = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
+    const fx = this.catchFx && this.clock - this.catchFx.start < CATCH_FX_SECONDS ? this.catchFx : null;
 
     for (const runner of sim.runners) {
       if (runner.out || runner.at >= 4) continue;
@@ -616,6 +682,24 @@ export class PlayView {
       const p = cam.project({ x: fielder.x, y: fielder.y });
       const anim = this.animFor(`f:${fielder.id}`, p, dt);
       const index = ALL_POSITIONS.indexOf(fielder.id);
+
+      // The glove: closing on a ball just taken and drawing it in, stretched
+      // toward one about to arrive, or the ball up by the ear ready to throw.
+      let reach: Vec2 | undefined;
+      let ballInGlove = false;
+      let holdingBall = false;
+      if (fx && fx.id === fielder.id) {
+        const t = (this.clock - fx.start) / CATCH_FX_SECONDS;
+        const ease = t * t * (3 - 2 * t);
+        const from = this.ballScreen(fx.from.x, fx.from.y, fx.from.z);
+        reach = { x: from.x + (p.x - from.x) * ease, y: from.y + (p.y - height * 0.5 - from.y) * ease };
+        ballInGlove = true;
+      } else if (fielder.hasBall) {
+        holdingBall = true;
+      } else if (reacher === fielder.id) {
+        reach = airBall;
+      }
+
       actors.push({
         screen: p,
         draw: () =>
@@ -627,7 +711,9 @@ export class PlayView {
             glove: true,
             number: String(index + 1),
             highlight: fielder.isUser,
-            holdingBall: fielder.hasBall,
+            holdingBall,
+            reach,
+            ballInGlove,
             shadow: this.light.shadow,
           }),
       });
@@ -745,7 +831,7 @@ export class PlayView {
     const sim = this.sim;
     const cam = this.cam;
     const target = cam.project(BASES[flight.base]);
-    const ball = cam.project({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
+    const ball = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
     const contested = sim.setup.userSide === 'offense' && sim.userRunnerNextBase === flight.base;
     const colour = contested ? CUE_RED : CUE_GOLD;
 
@@ -780,9 +866,9 @@ export class PlayView {
     if (sim.ballCarrier) return;
     const cam = this.cam;
     const ground = cam.project({ x: sim.ball.x, y: sim.ball.y });
-    const air = cam.project({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
+    const air = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
     const radius = Math.min(7.5, Math.max(3, 3 + sim.ball.z / 40));
-    drawBallTail(ctx, this.ballTrail.map((t) => cam.project({ x: t.x, y: t.y }, t.z)).concat([air]), radius);
+    drawBallTail(ctx, this.ballTrail.map((t) => this.ballScreen(t.x, t.y, t.z)).concat([air]), radius);
     drawFieldBall(ctx, air, ground, sim.ball.z, cam.scale, this.light.shadow);
   }
 }

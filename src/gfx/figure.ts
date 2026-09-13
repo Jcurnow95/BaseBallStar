@@ -90,6 +90,13 @@ export interface FieldFigureOptions {
   helmet?: boolean;
   /** Ball held up in the throwing hand. */
   holdingBall?: boolean;
+  /**
+   * Screen point the glove stretches toward — an incoming ball, or the spot
+   * it was just taken at. The arm reaches as far as it can that way.
+   */
+  reach?: { x: number; y: number };
+  /** Draw the ball in the glove (used with `reach` for the moment of the catch). */
+  ballInGlove?: boolean;
   /** Alpha of the ground shadow. */
   shadow?: number;
   /** Squad number on the back. */
@@ -233,7 +240,28 @@ export function drawFieldFigure(
   // ---- Front arm, glove and ball.
   const f = side ? backArm(-armSwing) : backArm(1);
   let ballAt: { x: number; y: number } | null = null;
-  if (holding) {
+  if (o.reach) {
+    // Glove arm stretched toward the ball, as far as the arm goes.
+    const sx = shoulderX + (side ? dir * h * 0.02 : h * 0.03);
+    const sy = shoulderY + h * 0.03;
+    const dx = o.reach.x - sx;
+    const dy = o.reach.y - sy;
+    const dist = Math.hypot(dx, dy) || 1;
+    const len = Math.min(dist, h * 0.38);
+    const hx = sx + (dx / dist) * len;
+    const hy = sy + (dy / dist) * len;
+    limb(sx, sy, hx, hy, armW, kit.shirt, 0, dy < 0 ? h * 0.03 : -h * 0.03);
+    glove(ctx, hx, hy, h * 0.09);
+    if (o.ballInGlove) {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(hx + (dx / dist) * h * 0.03, hy + (dy / dist) * h * 0.03 - h * 0.02, Math.max(2.2, h * 0.065), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else if (holding) {
     // Ball up by the ear, ready to throw.
     const hx = shoulderX + (side ? -dir : 1) * h * 0.14;
     const hy = shoulderY - h * 0.16;

@@ -36,6 +36,8 @@ export interface LifeSummary {
   upkeep: number;
   /** What the sponsors paid tonight. */
   endorsements: number;
+  /** The agent's share of all of it. */
+  agentCut: number;
   /** Fame after the game, and how much of it the game added. */
   fame: number;
   fameGain: number;

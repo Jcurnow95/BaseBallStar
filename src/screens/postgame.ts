@@ -4,7 +4,7 @@ import { contractById, formatMoney } from '../core/gear';
 import { ROUND_LABEL } from '../core/playoffs';
 import { ROUND_LABEL as CUP_ROUND_LABEL } from '../core/worldCup';
 import { unlockedPanelHtml } from '../ui/trophyList';
-import { MEDIA_ANSWERS, answerMedia, fameLabel } from '../core/lifestyle';
+import { MEDIA_ANSWERS, addClubhouse, answerMedia, fameLabel } from '../core/lifestyle';
 import type { MediaAnswer } from '../core/lifestyle';
 import { lifestyleOf } from '../core/save';
 import { esc, q, qa } from '../ui/dom';
@@ -178,6 +178,11 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
             : ''
         }
         ${
+          summary.life.agentCut > 0
+            ? `<div class="reward"><span>Agent's cut</span><b class="down">−${formatMoney(summary.life.agentCut)}</b></div>`
+            : ''
+        }
+        ${
           summary.life.upkeep > 0
             ? `<div class="reward"><span>Home &amp; upkeep</span><b class="down">−${formatMoney(summary.life.upkeep)}</b></div>`
             : ''
@@ -260,6 +265,7 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
       const answer = button.dataset.answer as MediaAnswer;
       const life = lifestyleOf(save);
       const result = answerMedia(life, answer, moment.win);
+      addClubhouse(life, result.clubhouse);
       summary.life.media = null;
       summary.life.fame = life.fame;
       app.persist();

@@ -1,39 +1,50 @@
 /**
  * Life off the field: where you live, what you drive, how famous you are and
- * who pays for it — and, as the career grows, who is in your corner and
- * what you leave behind. See `core/lifestyle.ts` for the rules; this screen
- * only spends money and shows what it bought.
+ * who pays for it, who is in your corner — and, as the career grows, what
+ * you leave behind. See `core/lifestyle.ts` for the rules; this screen only
+ * spends money and shows what it bought.
  */
 import type { App } from '../app';
-import { SLOT_LABELS, formatMoney, gearById } from '../core/gear';
-import type { GearSlot } from '../core/gear';
+import { CONTRACTS, SLOT_LABELS, contractSalary, formatMoney, gearById } from '../core/gear';
+import type { ContractStyle, GearSlot } from '../core/gear';
 import {
+  AGENTS,
   HOMES,
   SPONSORS,
   TOYS,
+  acceptRequest,
+  agentOf,
+  agentTier,
   availableDeals,
   buyHome,
   buyToy,
   dealPayPerGame,
+  declineRequest,
   fameBonusMult,
   fameCrowdBoost,
   fameLabel,
+  fireAgent,
   gameStaminaGuard,
+  hireAgent,
   homeById,
   homeUpgrades,
+  moraleEnergyBonus,
   overnightEnergyBonus,
   ownsToy,
   signDeal,
   sponsorById,
+  teammateBoost,
   upkeepPerGame,
 } from '../core/lifestyle';
 import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
+const signed = (n: number): string => (n > 0 ? `+${n}` : `${n}`);
+
 export function renderLife(app: App, mount: HTMLElement): void {
   const save = app.requireSave();
-  const { player } = save;
+  const { player, league } = save;
   const life = lifestyleOf(save);
 
   const draw = (): void => {
@@ -43,15 +54,34 @@ export function renderLife(app: App, mount: HTMLElement): void {
     const rest = overnightEnergyBonus(life);
     const guard = gameStaminaGuard(life);
     const dealPay = dealPayPerGame(life);
+    const agent = agentOf(life);
 
     // What the whole set-up is doing for you, in one strip.
     const perksHtml = `
       <div class="statline" style="margin-top:12px">
         <div><b>${formatMoney(dealPay)}</b><span>Deals / game</span></div>
         <div><b>${formatMoney(upkeep)}</b><span>Upkeep / game</span></div>
-        <div><b>+${rest}</b><span>Energy / night</span></div>
+        <div><b>${signed(rest)}</b><span>Energy / night</span></div>
         <div><b>−${guard}</b><span>Stamina wear</span></div>
       </div>`;
+
+    // ---- Messages: whoever is waiting on an answer.
+    const messagesHtml = life.requests
+      .map(
+        (r) => `
+        <div class="gear-card">
+          <div class="info">
+            <strong>${esc(r.from)}</strong>
+            <span>${esc(r.text)}</span>
+            ${r.cost > 0 ? `<span class="gear-bonus">${formatMoney(r.cost)}</span>` : ''}
+          </div>
+          <div class="drill-btns">
+            <button class="btn primary tiny" data-accept="${r.id}" ${player.money < r.cost ? 'disabled' : ''}>${esc(r.acceptLabel)}</button>
+            <button class="btn ghost tiny" data-decline="${r.id}">${esc(r.declineLabel)}</button>
+          </div>
+        </div>`,
+      )
+      .join('');
 
     // ---- Fame: the meter and what it is buying right now.
     const crowdPct = Math.round(fameCrowdBoost(life.fame) * 100);
@@ -86,7 +116,7 @@ export function renderLife(app: App, mount: HTMLElement): void {
           </div>`;
       })
       .join('');
-    const offers = availableDeals(life, false);
+    const offers = availableDeals(life, agentTier(life));
     const offersHtml = offers
       .map((s) => {
         const item = gearById(s.gearId);
@@ -102,9 +132,84 @@ export function renderLife(app: App, mount: HTMLElement): void {
       })
       .join('');
     // What's still out of reach, so the meter has something to point at.
-    const nextBrand = SPONSORS.filter((s) => life.fame < s.minFame).sort(
-      (a, b) => a.minFame - b.minFame,
-    )[0];
+    const nextBrand = SPONSORS.filter(
+      (s) => !availableDeals(life, 2).includes(s) && !offers.includes(s),
+    ).sort((a, b) => a.minFame - b.minFame)[0];
+    const brandNote =
+      offers.length > 0
+        ? 'A sponsor hands you their kit free, replaces it when it wears out, and pays a cheque every game. Their slot is theirs for the length of the deal.'
+        : nextBrand
+          ? life.fame >= nextBrand.minFame
+            ? `${esc(nextBrand.brand)} will talk, but only to an agent${nextBrand.minFame >= 65 ? ' who represents All-Stars' : ''}.`
+            : `Nobody is calling right now. ${esc(nextBrand.brand)} starts paying attention at ${nextBrand.minFame} fame${nextBrand.needsAgent ? ', through an agent' : ''}.`
+          : 'Every brand in the game has your number.';
+
+    // ---- People: the agent, the clubhouse, and home.
+    const agentHtml = agent
+      ? `
+        <div class="gear-card on">
+          <div class="info">
+            <strong>🤝 ${esc(agent.name)}</strong>
+            <span>${esc(agent.blurb)}</span>
+            <span class="gear-bonus">${Math.round(agent.cut * 100)}% of every cheque · ${
+              agent.tier === 2 ? 'signature brands' : 'national brands'
+            }${agent.renegotiates ? ' · rewrites your contract any time' : ''}${
+              agent.salaryMult > 1 ? ` · +${Math.round((agent.salaryMult - 1) * 100)}% guaranteed money` : ''
+            }</span>
+          </div>
+          <button class="buy" id="fireAgent">Part ways</button>
+        </div>
+        ${
+          agent.renegotiates
+            ? `<p class="tiny muted" style="margin:10px 0 6px">Contract, from the next game:</p>
+               <div class="chip-row">
+                 ${CONTRACTS.map(
+                   (c) =>
+                     `<button class="chip ${c.id === player.contract ? 'on' : ''}" data-contract="${c.id}" title="${esc(c.blurb)}">${esc(c.name)}<br/><span class="tiny">${formatMoney(Math.round(contractSalary(league.levelId, c.id) * agent.salaryMult))} · ×${c.bonusMult}</span></button>`,
+                 ).join('')}
+               </div>`
+            : ''
+        }`
+      : AGENTS.map(
+          (a) => `
+        <div class="gear-card">
+          <div class="info">
+            <strong>${esc(a.name)}</strong>
+            <span>${esc(a.blurb)}</span>
+            <span class="gear-bonus">${Math.round(a.cut * 100)}% of every cheque · opens the ${
+              a.tier === 2 ? 'signature brands' : 'national brands'
+            }${a.renegotiates ? ' · rewrites your contract any time' : ''}${
+              a.salaryMult > 1 ? ` · +${Math.round((a.salaryMult - 1) * 100)}% guaranteed money` : ''
+            }</span>
+          </div>
+          <button class="buy" data-agent="${a.id}" ${player.money < a.fee ? 'disabled' : ''}>${formatMoney(a.fee)}</button>
+        </div>`,
+        ).join('');
+
+    const boost = teammateBoost(life);
+    const peopleHtml = `
+      ${meterHtml('Morale', life.morale, 100, life.morale < 35 ? 'low' : life.morale < 55 ? 'warn' : '')}
+      <p class="tiny muted" style="margin:4px 0 0">
+        ${signed(moraleEnergyBonus(life))} energy a night · games teach ${Math.round((0.9 + life.morale / 500) * 100)}% of what they could.
+      </p>
+      ${meterHtml('Clubhouse standing', life.clubhouse, 100, life.clubhouse < 35 ? 'low' : life.clubhouse < 55 ? 'warn' : '')}
+      <p class="tiny muted" style="margin:4px 0 12px">
+        Teammates play ${boost === 0 ? 'at their rating' : `${signed(boost)} on their rating`} behind you. Wins, training and a dinner lift it; losses and a big mouth cost it.
+      </p>
+      ${
+        life.partner
+          ? `${meterHtml(`${life.partner.name} · at home`, life.partner.bond, 100, life.partner.bond < 30 ? 'low' : life.partner.bond < 55 ? 'warn' : '')}
+             <p class="tiny muted" style="margin:4px 0 0">
+               ${life.kids > 0 ? `${life.kids} kid${life.kids === 1 ? '' : 's'} at home · ` : ''}Every game on the road costs a little. Family time on an off day puts it back${life.kids === 0 ? '; keep it high through a winter and it might become a family' : ''}.
+             </p>`
+          : `<p class="tiny muted" style="margin:0">Nobody at home yet. A night out on an off day is where people meet people.</p>`
+      }
+      ${
+        life.friend
+          ? `${meterHtml(`${life.friend.name} · from back home`, life.friend.bond, 100, life.friend.bond < 30 ? 'low' : life.friend.bond < 55 ? 'warn' : '')}
+             <p class="tiny muted" style="margin:4px 0 0">The friend who knew you before the number. Asks for tickets now and then. Say yes.</p>`
+          : ''
+      }`;
 
     const homeHtml = `
       <div class="gear-card on">
@@ -171,6 +276,15 @@ export function renderLife(app: App, mount: HTMLElement): void {
           </p>
         </div>
 
+        ${
+          life.requests.length > 0
+            ? `<div class="panel">
+                 <h2>Messages</h2>
+                 ${messagesHtml}
+               </div>`
+            : ''
+        }
+
         <div class="panel">
           <h2>Fame</h2>
           ${fameHtml}
@@ -180,15 +294,22 @@ export function renderLife(app: App, mount: HTMLElement): void {
           <h2>Endorsements</h2>
           ${activeHtml || '<p class="tiny muted" style="margin:0 0 8px">No deals running.</p>'}
           ${offersHtml ? `<div style="margin-top:10px">${offersHtml}</div>` : ''}
-          <p class="tiny muted" style="margin:10px 0 0">
-            ${
-              offers.length > 0
-                ? 'A sponsor hands you their kit free, replaces it when it wears out, and pays a cheque every game. Their slot is theirs for the length of the deal.'
-                : nextBrand
-                  ? `Nobody is calling right now. ${esc(nextBrand.brand)} starts paying attention at ${nextBrand.minFame} fame${nextBrand.needsAgent ? ', through an agent' : ''}.`
-                  : 'Every brand in the game has your number.'
-            }
-          </p>
+          <p class="tiny muted" style="margin:10px 0 0">${brandNote}</p>
+        </div>
+
+        <div class="panel">
+          <h2>Your people</h2>
+          ${peopleHtml}
+        </div>
+
+        <div class="panel">
+          <h2>Agent</h2>
+          ${agentHtml}
+          ${
+            agent
+              ? ''
+              : '<p class="tiny muted" style="margin:10px 0 0">An agent takes a cut of everything and, in return, gets the brands to pick up the phone.</p>'
+          }
         </div>
 
         <div class="panel">
@@ -218,6 +339,25 @@ export function renderLife(app: App, mount: HTMLElement): void {
     `;
     q(mount, '.scroll').scrollTop = scrollTop;
 
+    for (const button of qa<HTMLButtonElement>(mount, '[data-accept]')) {
+      button.addEventListener('click', async () => {
+        const line = acceptRequest(player, life, button.dataset.accept!);
+        if (!line) return;
+        app.persist();
+        draw();
+        await showDialog({ title: 'Done', body: line, confirmLabel: 'Good' });
+      });
+    }
+    for (const button of qa<HTMLButtonElement>(mount, '[data-decline]')) {
+      button.addEventListener('click', async () => {
+        const line = declineRequest(life, button.dataset.decline!);
+        if (!line) return;
+        app.persist();
+        draw();
+        await showDialog({ title: 'Passed', body: line, confirmLabel: 'Okay' });
+      });
+    }
+
     for (const button of qa<HTMLButtonElement>(mount, '[data-deal]')) {
       button.addEventListener('click', async () => {
         const def = sponsorById(button.dataset.deal!);
@@ -239,6 +379,58 @@ export function renderLife(app: App, mount: HTMLElement): void {
         if (!ok) return;
         if (!signDeal(life, def.id)) return;
         player.gear[def.slot as GearSlot] = { id: item.id, gamesLeft: item.games };
+        app.persist();
+        draw();
+      });
+    }
+
+    for (const button of qa<HTMLButtonElement>(mount, '[data-agent]')) {
+      button.addEventListener('click', async () => {
+        const def = AGENTS.find((a) => a.id === button.dataset.agent);
+        if (!def) return;
+        const ok = await showDialog({
+          title: `Sign with ${def.name}?`,
+          body: `${formatMoney(def.fee)} to sign, then ${Math.round(def.cut * 100)}% of every cheque — salary, bonuses and sponsors alike. ${def.blurb}`,
+          confirmLabel: 'Sign',
+          cancelLabel: 'Not now',
+        });
+        if (!ok) return;
+        if (hireAgent(player, life, def.id)) {
+          app.persist();
+          draw();
+        }
+      });
+    }
+    const fire = mount.querySelector<HTMLButtonElement>('#fireAgent');
+    if (fire && agent) {
+      fire.addEventListener('click', async () => {
+        const ok = await showDialog({
+          title: `Part ways with ${agent.name}?`,
+          body: 'The cut stops. So do the calls from the brands they opened up. Deals already signed run their course.',
+          confirmLabel: 'Part ways',
+          cancelLabel: 'Keep them',
+          danger: true,
+        });
+        if (!ok) return;
+        fireAgent(life);
+        app.persist();
+        draw();
+      });
+    }
+    for (const chip of qa<HTMLButtonElement>(mount, '[data-contract]')) {
+      chip.addEventListener('click', async () => {
+        const id = chip.dataset.contract as ContractStyle;
+        if (id === player.contract) return;
+        const offer = CONTRACTS.find((c) => c.id === id);
+        if (!offer) return;
+        const ok = await showDialog({
+          title: `Move to the ${offer.name}?`,
+          body: `${offer.blurb} Takes effect from your next game.`,
+          confirmLabel: 'Rewrite it',
+          cancelLabel: 'Leave it',
+        });
+        if (!ok) return;
+        player.contract = id;
         app.persist();
         draw();
       });

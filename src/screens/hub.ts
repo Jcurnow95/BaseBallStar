@@ -59,7 +59,8 @@ import {
 import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
 import { unclaimedAchievements } from '../core/achievements';
-import { fameLabel, homeById } from '../core/lifestyle';
+import { ensurePeople, fameLabel, homeById } from '../core/lifestyle';
+import { randomName } from '../core/league';
 import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
@@ -105,6 +106,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   // Front-office news and life news share the one board: both are things that
   // happened while you weren't looking, and both are shown once.
   const life = lifestyleOf(save);
+  ensurePeople(life, () => randomName(app.rng));
   const news = [...(league.news ?? []), ...life.notices];
   league.news = undefined;
   life.notices = [];
@@ -224,7 +226,11 @@ export function renderHub(app: App, mount: HTMLElement): void {
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
     </button>
     <button class="btn ghost" id="life" style="margin-top:8px">
-      Life Off the Field · ${esc(homeById(life.home).name)}
+      Life Off the Field · ${esc(homeById(life.home).name)}${
+        life.requests.length > 0
+          ? `<span class="btn-badge">${life.requests.length} message${life.requests.length === 1 ? '' : 's'}</span>`
+          : ''
+      }
     </button>
     <button class="btn ghost" id="trophies" style="margin-top:8px">
       Trophy Case${caseBadge}

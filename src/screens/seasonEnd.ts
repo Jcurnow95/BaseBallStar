@@ -16,7 +16,7 @@ import {
 } from '../core/player';
 import { checkPromotion, offseasonAgePoints } from '../core/progression';
 import { isCupYear, startWorldCup } from '../core/worldCup';
-import { addFame, fadeFame, fameForHonors, noteLife } from '../core/lifestyle';
+import { addFame, fadeFame, fameForHonors, lifeOffseason, noteLife } from '../core/lifestyle';
 import { lifestyleOf } from '../core/save';
 import { esc, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
@@ -199,6 +199,8 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
       addFame(life, honorFame);
       noteLife(life, `The winter was kind to the name: +${honorFame} fame for the honours.`);
     }
+    // And the winter at home, which is where the people are.
+    const homeLines = lifeOffseason(life, () => app.rng.next());
 
     // Every fourth year the world tournament comes round, and it is played
     // before opening day — so it is seeded here, on the new league, after the
@@ -212,9 +214,11 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     app.lastGame = null;
     app.persist();
 
-    const newsText = clubhouseNews.length
-      ? `\n\nClubhouse news:\n${clubhouseNews.map((line) => `· ${line}`).join('\n')}`
-      : '';
+    const newsText =
+      (homeLines.length ? `\n\n${homeLines.join('\n')}` : '') +
+      (clubhouseNews.length
+        ? `\n\nClubhouse news:\n${clubhouseNews.map((line) => `· ${line}`).join('\n')}`
+        : '');
     await showDialog({
       title: `Season ${save.seasonYear} — ${LEVELS[save.league.levelId].name}`,
       body:

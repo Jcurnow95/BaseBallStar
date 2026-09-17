@@ -39,16 +39,22 @@ import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
 import {
   addFame,
+  agentCut,
   dealForSlot,
+  ensurePeople,
   fameBonusMult,
   fameCrowdBoost,
   fameFromGame,
   gameStaminaGuard,
+  lifeDayTick,
   mediaMomentFor,
+  moraleXpMult,
   overnightEnergyBonus,
+  teammateBoost,
   tickDeals,
   upkeepPerGame,
 } from '../core/lifestyle';
+import { randomName } from '../core/league';
 import { GEAR_SLOTS, gearById } from '../core/gear';
 import { lifestyleOf } from '../core/save';
 import { clamp } from '../core/rng';
@@ -81,6 +87,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const save = app.requireSave();
   const { player, league } = save;
   const life = lifestyleOf(save);
+  ensurePeople(life, () => randomName(app.rng));
   const level = LEVELS[league.levelId];
   const upcoming = nextGame(league);
 
@@ -121,10 +128,21 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   // single elimination has nowhere to put a tie.
   const mustDecide =
     !!scheduled.playoff || (!!cup && scheduled.worldCup?.round !== 'group');
+  // The clubhouse plays for you, or it doesn't: standing with the teammates
+  // is a few rating points on every one of them tonight. The club's own
+  // record isn't touched, only the men who take the field behind you.
+  const boost = cup ? 0 : teammateBoost(life);
+  const myTeamTonight =
+    boost === 0 || !myTeam.roster
+      ? myTeam
+      : {
+          ...myTeam,
+          roster: myTeam.roster.map((p) => ({ ...p, rating: clamp(p.rating + boost, 10, 99) })),
+        };
   const sim = new GameSim(
     player,
     gameLevel,
-    myTeam,
+    myTeamTonight,
     opponent,
     scheduled.home,
     app.rng,
@@ -870,7 +888,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       (a) => !metBefore.has(a.id) && isAchievementMet(a, player),
     ).map((a) => a.name);
 
-    const xp = gameXp(sim.gameStats, sim.putouts);
+    // A miserable player learns less from a night; a happy one, a little more.
+    const xp = Math.round(gameXp(sim.gameStats, sim.putouts) * moraleXpMult(life));
     const report = grantXp(player, xp);
 
     // Payday, then a game's worth of wear on everything in the bag. The world
@@ -898,6 +917,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     // replaced from the truck — that is what the deal is for.
     const deals = tickDeals(life);
     player.money += deals.paid;
+    // The agent's share comes off everything that came in tonight.
+    const cut = agentCut(life, earnings.total + deals.paid);
+    player.money -= cut;
     for (const brand of deals.ended) lifeNotes.push(`Your deal with ${brand.brand} has run its course.`);
     for (const slot of GEAR_SLOTS) {
       const sponsor = dealForSlot(life, slot);
@@ -944,6 +966,12 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     const wear = Math.max(2, 6 + Math.round(app.rng.next() * 4) - gameStaminaGuard(life));
     player.stamina = clamp(player.stamina - wear, 0, 100);
     advanceDay(league, cup ? undefined : app.rng);
+    lifeDayTick(life, {
+      levelId: league.levelId,
+      gameDay: true,
+      won: sim.score.us === sim.score.them ? null : won,
+      roll: () => app.rng.next(),
+    });
     recoverOvernight(player, overnightEnergyBonus(life));
 
     // Move the tournament along first, so the trophy case can see a final
@@ -1023,6 +1051,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       life: {
         upkeep,
         endorsements: deals.paid,
+        agentCut: cut,
         fame: life.fame,
         fameGain,
         media,

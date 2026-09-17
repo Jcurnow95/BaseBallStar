@@ -29,6 +29,23 @@ export interface LifestyleState {
   fame: number;
   /** Sponsor deals being paid out. See `SPONSORS`. */
   deals: OwnedDeal[];
+  /** Who negotiates for you, if anyone. See `AGENTS`. */
+  agent: string | null;
+  /** 0-100. How the player feels about life. Moves sleep and how much a game teaches. */
+  morale: number;
+  /** 0-100. Standing with the teammates. Lifts or drags their play behind you. */
+  clubhouse: number;
+  /** The person at home, once there is one. */
+  partner: Person | null;
+  /** How many kids. Each one costs a little and gives back more at home. */
+  kids: number;
+  /** The friend from back home who never stopped calling. Named on first sight. */
+  friend: Person | null;
+  /** Messages waiting for an answer. See `LifeRequest`. */
+  requests: LifeRequest[];
+  /** Calendar day the activity list was last reset on, and what's been done. */
+  dayStamp: number;
+  doneToday: string[];
   /**
    * Things that happened off the field since the clubhouse last looked, shown
    * once on the hub then cleared — same shape as the league's own news.
@@ -38,19 +55,57 @@ export interface LifestyleState {
   log: string[];
 }
 
-export function createLifestyle(): LifestyleState {
-  return { home: 'apartment', toys: [], fame: 0, deals: [], notices: [], log: [] };
+export interface Person {
+  name: string;
+  /** 0-100. Fades a point a day on the road; time together puts it back. */
+  bond: number;
 }
+
+export function createLifestyle(): LifestyleState {
+  return {
+    home: 'apartment',
+    toys: [],
+    fame: 0,
+    deals: [],
+    agent: null,
+    morale: 70,
+    clubhouse: 50,
+    partner: null,
+    kids: 0,
+    friend: null,
+    requests: [],
+    dayStamp: -1,
+    doneToday: [],
+    notices: [],
+    log: [],
+  };
+}
+
+const person = (p: unknown): Person | null =>
+  p && typeof (p as Person).name === 'string'
+    ? { name: (p as Person).name, bond: clamp(Number((p as Person).bond) || 0, 0, 100) }
+    : null;
 
 /** Fill in anything a save predates, so an old career walks in with a flat. */
 export function normaliseLifestyle(life: Partial<LifestyleState> | undefined): LifestyleState {
   const fresh = createLifestyle();
   if (!life) return fresh;
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? clamp(v, 0, 100) : fallback;
   return {
     home: HOMES.some((h) => h.id === life.home) ? (life.home as HomeId) : fresh.home,
     toys: Array.isArray(life.toys) ? life.toys.filter((id) => !!toyById(id)) : [],
-    fame: typeof life.fame === 'number' ? clamp(life.fame, 0, 100) : 0,
+    fame: num(life.fame, 0),
     deals: Array.isArray(life.deals) ? life.deals.filter((d) => !!sponsorById(d.id)) : [],
+    agent: life.agent && agentById(life.agent) ? life.agent : null,
+    morale: num(life.morale, fresh.morale),
+    clubhouse: num(life.clubhouse, fresh.clubhouse),
+    partner: person(life.partner),
+    kids: Math.max(0, Math.round(Number(life.kids) || 0)),
+    friend: person(life.friend),
+    requests: Array.isArray(life.requests) ? life.requests : [],
+    dayStamp: typeof life.dayStamp === 'number' ? life.dayStamp : -1,
+    doneToday: Array.isArray(life.doneToday) ? life.doneToday : [],
     notices: Array.isArray(life.notices) ? life.notices : [],
     log: Array.isArray(life.log) ? life.log : [],
   };
@@ -232,16 +287,22 @@ export function buyToy(player: PlayerProfile, life: LifestyleState, id: string):
 
 /* ------------------------------------------------------------------- hooks */
 
-/** What the house and everything parked outside it cost, per game. */
+/** What a kid costs a game. Not much; they are worth more at home than they cost. */
+const KID_UPKEEP = 15;
+
+/** What the house, everything parked outside it and everyone inside it cost, per game. */
 export function upkeepPerGame(life: LifestyleState): number {
   const toys = life.toys.reduce((sum, id) => sum + (toyById(id)?.upkeep ?? 0), 0);
-  return homeById(life.home).upkeep + toys;
+  return homeById(life.home).upkeep + toys + life.kids * KID_UPKEEP;
 }
 
-/** Extra energy the overnight roll gives back, from the bed and the drive home. */
+/**
+ * Extra energy the overnight roll gives back: the bed, the drive home, and
+ * how the player feels about all of it. Can go negative on a bad stretch.
+ */
 export function overnightEnergyBonus(life: LifestyleState): number {
   const toys = life.toys.reduce((sum, id) => sum + (toyById(id)?.restEnergy ?? 0), 0);
-  return homeById(life.home).restEnergy + toys;
+  return homeById(life.home).restEnergy + toys + moraleEnergyBonus(life);
 }
 
 /** Stamina a game doesn't get to take, capped so a game always costs something. */
@@ -511,11 +572,20 @@ export function dealForSlot(life: LifestyleState, slot: SponsorDef['slot']): Spo
   return null;
 }
 
-/** Offers on the table: fame high enough, slot free, and an agent where one is needed. */
-export function availableDeals(life: LifestyleState, hasAgent: boolean): SponsorDef[] {
-  return SPONSORS.filter(
-    (s) => life.fame >= s.minFame && (!s.needsAgent || hasAgent) && !dealForSlot(life, s.slot),
-  );
+/** The fame a signature line asks for; those brands only deal with the top agents. */
+const SIGNATURE_FAME = 65;
+
+/**
+ * Offers on the table: fame high enough, slot free, and representation where
+ * the brand insists on it. `tier` is `agentTier`: the national brands want
+ * an agent at all, the signature lines want one who represents All-Stars.
+ */
+export function availableDeals(life: LifestyleState, tier: number): SponsorDef[] {
+  return SPONSORS.filter((s) => {
+    if (life.fame < s.minFame || dealForSlot(life, s.slot)) return false;
+    if (!s.needsAgent) return true;
+    return s.minFame >= SIGNATURE_FAME ? tier >= 2 : tier >= 1;
+  });
 }
 
 /** Sign. The caller hands over the gear; this only books the deal. */
@@ -639,4 +709,426 @@ export function answerMedia(life: LifestyleState, answer: MediaAnswer, win: bool
   }
   result.fame = addFame(life, result.fame);
   return result;
+}
+
+/* ------------------------------------------------------------------ agents */
+
+export interface AgentDef {
+  id: string;
+  name: string;
+  blurb: string;
+  /** Share of every cheque: salary, bonus and sponsor money alike. */
+  cut: number;
+  /** Paid once, on signing. */
+  fee: number;
+  /** 1 opens the national brands; 2 opens the signature lines too. */
+  tier: 1 | 2;
+  /** Can rewrite the contract style mid-season. */
+  renegotiates: boolean;
+  /** What they squeeze out of the club on the guaranteed money. */
+  salaryMult: number;
+}
+
+export const AGENTS: AgentDef[] = [
+  {
+    id: 'marty',
+    name: 'Marty Kowalski',
+    blurb: 'A friend of the family with a fax machine. Answers the phone, mostly.',
+    cut: 0.06,
+    fee: 400,
+    tier: 1,
+    renegotiates: false,
+    salaryMult: 1,
+  },
+  {
+    id: 'voss',
+    name: 'Dana Voss · Voss Sports',
+    blurb: 'Represents half the All-Star team. Takes a real cut and earns it.',
+    cut: 0.12,
+    fee: 5000,
+    tier: 2,
+    renegotiates: true,
+    salaryMult: 1.1,
+  },
+];
+
+export const agentById = (id: string | null | undefined): AgentDef | null =>
+  (id && AGENTS.find((a) => a.id === id)) || null;
+
+export const agentOf = (life: LifestyleState): AgentDef | null => agentById(life.agent);
+
+/** 0 without representation, else the agent's tier. What the sponsors ask about. */
+export const agentTier = (life: LifestyleState): number => agentOf(life)?.tier ?? 0;
+
+export function hireAgent(player: PlayerProfile, life: LifestyleState, id: string): boolean {
+  const def = agentById(id);
+  if (!def || life.agent === id || player.money < def.fee) return false;
+  player.money -= def.fee;
+  life.agent = id;
+  noteLife(life, `${def.name} is your agent now. ${Math.round(def.cut * 100)}% of everything.`, false);
+  return true;
+}
+
+export function fireAgent(life: LifestyleState): void {
+  const def = agentOf(life);
+  if (!def) return;
+  life.agent = null;
+  noteLife(life, `You and ${def.name} parted ways.`, false);
+}
+
+/** The agent's share of a night's money, rounded down so a small cheque survives. */
+export function agentCut(life: LifestyleState, money: number): number {
+  const def = agentOf(life);
+  return def ? Math.floor(Math.max(0, money) * def.cut) : 0;
+}
+
+/* --------------------------------------------------------------- the people */
+
+/** Morale and the clubhouse: what they do, in numbers. */
+
+/** Overnight energy from how you feel: -10 at rock bottom, +10 walking on air. */
+export const moraleEnergyBonus = (life: LifestyleState): number =>
+  Math.round((life.morale - 50) / 5);
+
+/** How much a game teaches, 0.9-1.1. A miserable player is not learning much. */
+export const moraleXpMult = (life: LifestyleState): number => 0.9 + life.morale / 500;
+
+/** Rating points on every teammate, -4 to +4. They play for you, or they don't. */
+export const teammateBoost = (life: LifestyleState): number =>
+  Math.round((life.clubhouse - 50) / 12);
+
+export function addMorale(life: LifestyleState, amount: number): void {
+  life.morale = clamp(life.morale + amount, 0, 100);
+}
+
+export function addClubhouse(life: LifestyleState, amount: number): void {
+  life.clubhouse = clamp(life.clubhouse + amount, 0, 100);
+}
+
+const bond = (p: Person | null, amount: number): void => {
+  if (p) p.bond = clamp(p.bond + amount, 0, 100);
+};
+
+/** The friend from home is there from day one; they just need a name. */
+export function ensurePeople(life: LifestyleState, name: () => string): void {
+  if (!life.friend) life.friend = { name: name(), bond: 60 };
+}
+
+/* ---------------------------------------------------------------- requests */
+
+export type RequestKind = 'tickets' | 'dinner';
+
+export interface LifeRequest {
+  id: string;
+  kind: RequestKind;
+  from: string;
+  text: string;
+  /** Money it costs to say yes. */
+  cost: number;
+  acceptLabel: string;
+  declineLabel: string;
+}
+
+let requestSeq = 0;
+
+/** Say yes. Returns what happened, or null if it can't be afforded. */
+export function acceptRequest(
+  player: PlayerProfile,
+  life: LifestyleState,
+  id: string,
+): string | null {
+  const req = life.requests.find((r) => r.id === id);
+  if (!req) return null;
+  if (player.money < req.cost) return null;
+  player.money -= req.cost;
+  life.requests = life.requests.filter((r) => r.id !== id);
+  let line: string;
+  if (req.kind === 'tickets') {
+    bond(life.friend, 12);
+    addMorale(life, 4);
+    line = `${req.from} was in the stands, loud. Worth every dollar.`;
+  } else {
+    bond(life.partner, 15);
+    addMorale(life, 8);
+    line = `Dinner with ${req.from}. The season felt a long way off for a night.`;
+  }
+  noteLife(life, line, false);
+  return line;
+}
+
+export function declineRequest(life: LifestyleState, id: string): string | null {
+  const req = life.requests.find((r) => r.id === id);
+  if (!req) return null;
+  life.requests = life.requests.filter((r) => r.id !== id);
+  let line: string;
+  if (req.kind === 'tickets') {
+    bond(life.friend, -10);
+    line = `${req.from} said it was fine. It was not fine.`;
+  } else {
+    bond(life.partner, -12);
+    addMorale(life, -4);
+    line = `${req.from} ate alone.`;
+  }
+  noteLife(life, line, false);
+  return line;
+}
+
+/* ------------------------------------------------------------- activities */
+
+export interface ActivityDef {
+  id: string;
+  name: string;
+  detail: string;
+  energyCost: number;
+  /** Cost in dollars at a given level; a night out in the Majors is not a night out in Single-A. */
+  cost: (levelId: number) => number;
+  morale: number;
+  fame: number;
+  clubhouse: number;
+  stamina: number;
+  partnerBond: number;
+  friendBond: number;
+  /** Chance of meeting someone, when there's nobody at home. */
+  meetPartner: number;
+  /** Needs this toy in the garage. */
+  needsToy?: string;
+}
+
+export const ACTIVITIES: ActivityDef[] = [
+  {
+    id: 'family',
+    name: 'Family Time',
+    detail: 'Call home, or go home. The people who knew you before the number on your back.',
+    energyCost: 25,
+    cost: () => 0,
+    morale: 15,
+    fame: 0,
+    clubhouse: 0,
+    stamina: 0,
+    partnerBond: 20,
+    friendBond: 6,
+    meetPartner: 0,
+  },
+  {
+    id: 'nightout',
+    name: 'Night Out',
+    detail: 'Downtown with the guys. You might meet someone. You might feel it tomorrow.',
+    energyCost: 30,
+    cost: (level) => 60 * (level + 1),
+    morale: 10,
+    fame: 1,
+    clubhouse: 2,
+    stamina: -3,
+    partnerBond: -4,
+    friendBond: 0,
+    meetPartner: 0.35,
+  },
+  {
+    id: 'charity',
+    name: 'Charity Event',
+    detail: 'A hospital visit, a youth clinic, a photo with the mayor. The name travels.',
+    energyCost: 25,
+    cost: (level) => 100 * (level + 1),
+    morale: 4,
+    fame: 3,
+    clubhouse: 1,
+    stamina: 0,
+    partnerBond: 0,
+    friendBond: 0,
+    meetPartner: 0,
+  },
+  {
+    id: 'teamdinner',
+    name: 'Team Dinner',
+    detail: 'You pick up the cheque. Nobody forgets who picked up the cheque.',
+    energyCost: 20,
+    cost: (level) => 40 * (level + 1),
+    morale: 5,
+    fame: 0,
+    clubhouse: 7,
+    stamina: 0,
+    partnerBond: 0,
+    friendBond: 0,
+    meetPartner: 0,
+  },
+  {
+    id: 'fishing',
+    name: 'Fishing Trip',
+    detail: 'A borrowed rod and a quiet bank. Nothing bites, and that is the point.',
+    energyCost: 20,
+    cost: () => 30,
+    morale: 12,
+    fame: 0,
+    clubhouse: 0,
+    stamina: 4,
+    partnerBond: 0,
+    friendBond: 4,
+    meetPartner: 0,
+  },
+  {
+    id: 'boatday',
+    name: 'Day on the Water',
+    detail: 'Your boat, your people, no signal. The best rest money can buy.',
+    energyCost: 20,
+    cost: () => 0,
+    morale: 20,
+    fame: 0,
+    clubhouse: 0,
+    stamina: 6,
+    partnerBond: 10,
+    friendBond: 6,
+    meetPartner: 0,
+    needsToy: 'boat',
+  },
+];
+
+/** Reset the once-a-day list when the calendar has moved on. */
+function stampDay(life: LifestyleState, day: number): void {
+  if (life.dayStamp !== day) {
+    life.dayStamp = day;
+    life.doneToday = [];
+  }
+}
+
+export function activitiesFor(life: LifestyleState, day: number): ActivityDef[] {
+  stampDay(life, day);
+  return ACTIVITIES.filter((a) => !a.needsToy || ownsToy(life, a.needsToy));
+}
+
+export const activityDone = (life: LifestyleState, id: string): boolean =>
+  life.doneToday.includes(id);
+
+export interface ActivityOutcome {
+  lines: string[];
+}
+
+/**
+ * Do the thing. Null when it can't be afforded in energy or money, or has
+ * already been done today. `partnerName` is asked for only when someone is
+ * actually met, so the caller can keep the name generator to itself.
+ */
+export function doActivity(
+  player: PlayerProfile,
+  life: LifestyleState,
+  activity: ActivityDef,
+  levelId: number,
+  day: number,
+  roll: () => number,
+  partnerName: () => string,
+): ActivityOutcome | null {
+  stampDay(life, day);
+  if (activityDone(life, activity.id)) return null;
+  const cost = activity.cost(levelId);
+  if (player.energy < activity.energyCost || player.money < cost) return null;
+
+  player.energy = clamp(player.energy - activity.energyCost, 0, 100);
+  player.money -= cost;
+  player.stamina = clamp(player.stamina + activity.stamina, 0, 100);
+  addMorale(life, activity.morale);
+  addClubhouse(life, activity.clubhouse);
+  const fame = addFame(life, activity.fame);
+  bond(life.partner, activity.partnerBond);
+  bond(life.friend, activity.friendBond);
+  life.doneToday.push(activity.id);
+
+  const lines: string[] = [];
+  if (!life.partner && activity.meetPartner > 0 && roll() < activity.meetPartner) {
+    life.partner = { name: partnerName(), bond: 45 };
+    lines.push(`You met ${life.partner.name}. You swapped numbers.`);
+    noteLife(life, `You met ${life.partner.name}.`, false);
+  }
+  if (fame >= 1) lines.push(`+${Math.round(fame)} fame.`);
+  if (activity.clubhouse > 0) lines.push(`The clubhouse noticed.`);
+  if (activity.morale > 0) lines.push(`Morale +${activity.morale}.`);
+  return { lines };
+}
+
+/* --------------------------------------------------------------- the days */
+
+export interface DayTickContext {
+  levelId: number;
+  /** Whether a game was played today. Road life wears on the people at home. */
+  gameDay: boolean;
+  won: boolean | null;
+  roll: () => number;
+}
+
+/**
+ * A day passes. Morale drifts back toward even, the people at home get a
+ * little further away, the clubhouse remembers who won, and now and then
+ * somebody asks for something. Returns nothing; anything worth saying goes
+ * on the notice board.
+ */
+export function lifeDayTick(life: LifestyleState, ctx: DayTickContext): void {
+  // Morale drifts toward 60 by a point a day.
+  if (life.morale > 60) life.morale -= 1;
+  else if (life.morale < 60) life.morale += 1;
+
+  if (ctx.gameDay) {
+    if (ctx.won === true) addClubhouse(life, 2);
+    else if (ctx.won === false) addClubhouse(life, -1);
+    bond(life.partner, -1.5);
+    bond(life.friend, -1);
+  } else {
+    bond(life.friend, -0.5);
+  }
+
+  // A partner who never sees you stops waiting.
+  if (life.partner && life.partner.bond <= 0) {
+    noteLife(life, `${life.partner.name} moved out. You were never home.`);
+    life.partner = null;
+    addMorale(life, -20);
+  } else if (life.partner && life.partner.bond < 30) {
+    addMorale(life, -1);
+  }
+
+  // One ask at a time; nobody wants a phone full of them.
+  if (life.requests.length === 0) {
+    if (life.friend && ctx.roll() < 0.08) {
+      life.requests.push({
+        id: `r${++requestSeq}-${Date.now()}`,
+        kind: 'tickets',
+        from: life.friend.name,
+        text: `${life.friend.name} is in town this weekend and wondering about tickets. Good ones.`,
+        cost: 40 * (ctx.levelId + 1),
+        acceptLabel: 'Sort the tickets',
+        declineLabel: 'Not this time',
+      });
+      noteLife(life, `${life.friend.name} texted. There's a message waiting off the field.`, true);
+    } else if (life.partner && ctx.roll() < 0.06) {
+      life.requests.push({
+        id: `r${++requestSeq}-${Date.now()}`,
+        kind: 'dinner',
+        from: life.partner.name,
+        text: `${life.partner.name} booked a table. Tonight, after the park.`,
+        cost: 30 * (ctx.levelId + 1),
+        acceptLabel: 'Be there',
+        declineLabel: 'Too tired',
+      });
+      noteLife(life, `${life.partner.name} texted. There's a message waiting off the field.`, true);
+    }
+  }
+}
+
+/**
+ * The winter at home. A partner who's been kept close might make it a family;
+ * a kid is a small cost every game and a bigger reason to go home.
+ */
+export function lifeOffseason(life: LifestyleState, roll: () => number): string[] {
+  const lines: string[] = [];
+  if (life.partner) {
+    bond(life.partner, 15);
+    if (life.partner.bond >= 70 && life.kids < 3 && roll() < 0.3) {
+      life.kids += 1;
+      addMorale(life, 15);
+      const line =
+        life.kids === 1
+          ? `You and ${life.partner.name} had a baby over the winter.`
+          : `Another one. That makes ${life.kids} kids at home.`;
+      noteLife(life, line);
+      lines.push(line);
+    }
+  }
+  if (life.friend) bond(life.friend, 10);
+  return lines;
 }

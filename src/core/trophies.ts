@@ -24,10 +24,11 @@
  *    everything else falls out of the season and career lines that already
  *    exist. Nothing here knows what a `GameSim` is.
  *
- * Thresholds are tuned for a 24-game season, not a 162-game one. `SEASON_GAMES`
- * is short on purpose, so a season is roughly a hundred plate appearances: five
- * home runs is a real power year here and forty would be unreachable. If the
- * schedule ever lengthens, the season tier below is the part that has to move.
+ * Thresholds are tuned for a short season, not a 162-game one. A year runs
+ * 28 games in Single-A and 44 in the Majors (see `LEVELS`), so a season is
+ * a hundred-odd plate appearances: five home runs is a real power year here
+ * and forty would be unreachable. If the schedule ever lengthens again, the
+ * season tier below is the part that has to move.
  */
 import type { BattingStats, PlayerProfile } from './types';
 

@@ -1,9 +1,9 @@
 import type { App } from '../app';
 import {
   LEVELS,
-  SEASON_GAMES,
   playoffSeedOrder,
   regularSeasonGames,
+  seasonGames,
   teamKit,
 } from '../core/league';
 import { syncOtherLevels, tableStandings } from '../core/otherLeagues';
@@ -59,9 +59,9 @@ export function renderStandings(app: App, mount: HTMLElement): void {
 
   const played = regularSeasonGames(league).filter((g) => g.played).length;
   const seasonLine =
-    played >= SEASON_GAMES
+    played >= seasonGames(league)
       ? 'Regular season complete at every level.'
-      : `${played} of ${SEASON_GAMES} games played at every level.`;
+      : `${played} of ${seasonGames(league)} games played in your league; the other levels keep pace through their own seasons.`;
 
   // Top of the ladder first: the place you're playing to get to.
   const levelsHtml = [...LEVELS]

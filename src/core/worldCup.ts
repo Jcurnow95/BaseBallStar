@@ -41,7 +41,7 @@ import type {
   ScheduledGame,
   Team,
 } from './league';
-import { randomName, recordResult, runDiff, winChance, winningPct } from './league';
+import { LEVELS, randomName, recordResult, runDiff, winChance, winningPct } from './league';
 import type { Nation } from './nations';
 import { NATIONS, nationById } from './nations';
 import { ROOKIE_AGE } from './player';
@@ -529,6 +529,9 @@ export function cupLevel(opponent: Team): LeagueLevel {
     id: 3,
     name: 'World Tournament',
     short: 'WT',
+    // Not a club circuit; these only say it's the biggest stage there is.
+    teams: LEVELS[LEVELS.length - 1].teams,
+    games: LEVELS[LEVELS.length - 1].games,
     pitcherRating: nationPitching(strength),
     defenseRating: clamp(50 + strength * 0.34, 30, 92),
     promotionOverall: 999,

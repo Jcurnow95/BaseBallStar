@@ -116,7 +116,13 @@ for (const seed of [1, 7, 99, 2024, 555]) {
     `${label}: seeds are the top of the table`,
     p.seeds.join() === playoffSeedOrder(league).slice(0, PLAYOFF_TEAMS).map((t) => t.id).join(),
   );
-  check(`${label}: three series played`, p.series.length === 3 && p.series.every(seriesOver));
+  check(`${label}: five series played`, p.series.length === 5 && p.series.every(seriesOver));
+  check(
+    `${label}: top two seeds skipped the wildcard round`,
+    p.series
+      .filter((s) => s.round === 'wildcard')
+      .every((s) => !p.seeds.slice(0, 2).includes(s.highId) && !p.seeds.slice(0, 2).includes(s.lowId)),
+  );
   check(
     `${label}: series winners reached the mark and nobody overshot`,
     p.series.every((s) => {
@@ -178,11 +184,13 @@ console.log('\n=== Playoffs: forced outcomes ===\n');
   check('day after the last game is a workout day', nextGame(league) === null && !isGameDay(league));
   check('the year is not over while the playoffs run', !isSeasonOver(league));
   let played = 0;
+  let idle = 0;
   let guard = 0;
-  while (!isSeasonOver(league) && guard++ < 20) {
+  while (!isSeasonOver(league) && guard++ < 60) {
     const g = nextGame(league);
     if (!g) {
       advanceDay(league);
+      idle++;
       continue;
     }
     check(`playoff game ${played + 1} is a playoff game`, !!g.playoff);
@@ -191,15 +199,19 @@ console.log('\n=== Playoffs: forced outcomes ===\n');
     recordPlayoffGame(league, g, true, rng);
     played++;
   }
-  check('sweep takes five games', played === 5, `${played} played`);
+  check('sweep takes seven games (3 in the semi, 4 in the final)', played === 7, `${played} played`);
+  check('the bye cost a few workout days while the wildcards played', idle >= 3 && idle <= 8, `${idle} idle days`);
   check('player is champion', p.playerResult === 'champion' && p.championId === league.playerTeamId);
   check('season is over after the trophy', isSeasonOver(league));
-  const semi = p.series[0];
-  check('1 seed hosted games 1 and 3 of the semi', semi.highId === league.playerTeamId);
+  const semi = p.series.find((s) => s.round === 'semifinal' && s.highId === league.playerTeamId);
+  check('1 seed is the high side of its semi', !!semi);
+  const wildcardWinners = p.series.filter((s) => s.round === 'wildcard').map((s) => s.winnerId);
+  const lowestSurvivor = [...p.seeds].reverse().find((id) => id === p.seeds[1] || wildcardWinners.includes(id));
+  check('reseeding: the 1 seed drew the lowest survivor', semi?.lowId === lowestSurvivor);
   const myGames = league.schedule.filter((g) => g.playoff);
   check(
-    'home/away pattern: semi H-A, final H-H-A',
-    myGames.map((g) => (g.home ? 'H' : 'A')).join('') === 'HAHHA',
+    'home/away pattern: semi H-H-A, final H-H-A-A',
+    myGames.map((g) => (g.home ? 'H' : 'A')).join('') === 'HHAHHAA',
     myGames.map((g) => (g.home ? 'H' : 'A')).join(''),
   );
 
@@ -213,15 +225,17 @@ console.log('\n=== Playoffs: forced outcomes ===\n');
     t.losses = seasonGames(l2) - t.wins;
   });
   startPlayoffs(l2, rng2);
-  const results = [true, false, false];
+  const results = [true, false, false, false];
   for (const won of results) {
-    while (!nextGame(l2)) advanceDay(l2);
+    let wait = 0;
+    while (!nextGame(l2) && wait++ < 20) advanceDay(l2);
     const g = nextGame(l2)!;
     g.played = true;
     advanceDay(l2);
     recordPlayoffGame(l2, g, won, rng2);
   }
-  check('losing the semi 1-2 eliminates you', l2.playoffs!.playerResult === 'eliminated');
+  check('losing the semi 1-3 eliminates you', l2.playoffs!.playerResult === 'eliminated');
+  check('and says which round it was', l2.playoffs!.eliminatedIn === 'semifinal');
   check('elimination finishes the bracket', isSeasonOver(l2) && !!l2.playoffs!.championId);
   check('no further games are scheduled', nextGame(l2) === null && l2.day >= l2.calendar.length);
 

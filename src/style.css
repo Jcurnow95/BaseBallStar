@@ -3116,3 +3116,14 @@ table.standings.fixtures tr.ahead td {
   background: var(--accent);
   color: #05210f;
 }
+
+/* A bye in the wildcard block: a single-row card, quieter than a series. */
+.series-card.bye {
+  background: transparent;
+  border-style: dashed;
+}
+
+.series-card.bye .series-row {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}

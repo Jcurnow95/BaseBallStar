@@ -7,6 +7,7 @@ import { TEAM_KITS, kitFor } from './uniforms';
 import type { Weather } from './weather';
 import { rollWeather } from './weather';
 import type { Playoffs } from './playoffs';
+import { advancePlayoffs } from './playoffs';
 
 /**
  * Demo season length. A real season would be 140+ games at each level; 24
@@ -574,6 +575,10 @@ export function daysRemaining(league: LeagueState): number {
  */
 export function advanceDay(league: LeagueState, rng?: Rng): void {
   league.day = Math.min(league.calendar.length, league.day + 1);
+  // The bracket turns with the calendar whether or not anyone handed in an
+  // rng: a postseason that stalls because a tool forgot one is worse than
+  // one whose simulated games came off a seed.
+  advancePlayoffs(league, rng ?? new Rng(league.day * 7919 + league.schedule.length));
   if (!rng) return;
   const move = maybeRosterMove(league, rng);
   if (move) (league.news ??= []).push(move);

@@ -1,9 +1,13 @@
 /**
- * The postseason. When the regular season ends the top four clubs go into a
- * two-round bracket: two best-of-three semifinals (1 v 4, 2 v 3) and a
- * best-of-five championship series. Your games are played for real, laid onto
- * the calendar one at a time as each series demands them; every other series
- * is simulated off the clubs' strengths.
+ * The postseason. When the regular season ends the top six clubs go into a
+ * three-round bracket. Seeds 1 and 2 sit out a best-of-three wildcard round
+ * (3 v 6, 4 v 5); the semifinals are reseeded, so the top seed gets the
+ * lowest survivor, and go best-of-five; the championship series is best of
+ * seven. Your games are played for real, laid onto the calendar one at a
+ * time as each series demands them. Every series you aren't in plays one
+ * game a day as the calendar turns (see `advancePlayoffs`), so a bye is a
+ * few workout days while the wildcard round sorts itself out, not a
+ * bracket that has already decided itself.
  *
  * Playoff results never touch the regular-season table. Wins and losses in a
  * series live on the series.
@@ -14,13 +18,24 @@ import type { Rng } from './rng';
 import { rollWeather } from './weather';
 
 /** How many clubs make it. */
-export const PLAYOFF_TEAMS = 4;
+export const PLAYOFF_TEAMS = 6;
+/** How many of them skip the first round. */
+export const BYE_SEEDS = 2;
 
-export type PlayoffRound = 'semifinal' | 'final';
+export type PlayoffRound = 'wildcard' | 'semifinal' | 'final';
+
+export const ROUND_ORDER: PlayoffRound[] = ['wildcard', 'semifinal', 'final'];
 
 export const ROUND_LABEL: Record<PlayoffRound, string> = {
+  wildcard: 'Wildcard Round',
   semifinal: 'Semifinal',
   final: 'Championship Series',
+};
+
+export const ROUND_BEST_OF: Record<PlayoffRound, 3 | 5 | 7> = {
+  wildcard: 3,
+  semifinal: 5,
+  final: 7,
 };
 
 export interface PlayoffSeries {
@@ -31,7 +46,7 @@ export interface PlayoffSeries {
   lowId: string;
   highSeed: number;
   lowSeed: number;
-  bestOf: 3 | 5;
+  bestOf: 3 | 5 | 7;
   highWins: number;
   lowWins: number;
   winnerId?: string;
@@ -54,16 +69,21 @@ export const winsNeeded = (series: PlayoffSeries): number => Math.ceil(series.be
 
 export const seriesOver = (series: PlayoffSeries): boolean => series.winnerId != null;
 
+const involves = (series: PlayoffSeries, id: string): boolean =>
+  series.highId === id || series.lowId === id;
+
+/** Whether a club skipped the wildcard round. */
+export const hasBye = (p: Playoffs, id: string): boolean => {
+  const at = p.seeds.indexOf(id);
+  return at >= 0 && at < BYE_SEEDS;
+};
+
 /** The series the player's club is in this round, if any. */
 export function playerSeries(league: LeagueState): PlayoffSeries | null {
   const p = league.playoffs;
   if (!p) return null;
   const me = league.playerTeamId;
-  return (
-    [...p.series]
-      .reverse()
-      .find((s) => s.highId === me || s.lowId === me) ?? null
-  );
+  return [...p.series].reverse().find((s) => involves(s, me)) ?? null;
 }
 
 /** Games in a series that were already played, from the player's schedule. */
@@ -71,13 +91,16 @@ export function seriesGamesPlayed(series: PlayoffSeries): number {
   return series.highWins + series.lowWins;
 }
 
-/**
- * Who hosts game `n` (1-based). Best-of-three goes high, low, high; best-of-
- * five goes 2-2-1 with the higher seed at home for the decider.
- */
+/** Who the higher seed hosts, game by game: 1-1-1, 2-2-1 and 2-2-1-1-1. */
+const HOST_PATTERN: Record<3 | 5 | 7, boolean[]> = {
+  3: [true, false, true],
+  5: [true, true, false, false, true],
+  7: [true, true, false, false, true, false, true],
+};
+
+/** Who hosts game `n` (1-based). The higher seed always has the decider. */
 export function hostForGame(series: PlayoffSeries, gameNo: number): string {
-  const highHosts =
-    series.bestOf === 3 ? [true, false, true][gameNo - 1] : [true, true, false, false, true][gameNo - 1];
+  const highHosts = HOST_PATTERN[series.bestOf][gameNo - 1] ?? true;
   return highHosts ? series.highId : series.lowId;
 }
 
@@ -95,9 +118,10 @@ export function seriesOpponent(league: LeagueState, series: PlayoffSeries): Team
 }
 
 /**
- * Seed the bracket. Called once, right after the last regular-season game. If
- * the player's club is in, the first game goes on the calendar after a workout
- * day; if not, the whole postseason plays out on the spot.
+ * Seed the bracket. Called once, right after the last regular-season game.
+ * A club in the wildcard round gets a day off and then game one; a club
+ * with a bye gets the day off and then waits on the wildcards, a game a
+ * day. A club that missed out watches the whole thing play out on the spot.
  */
 export function startPlayoffs(league: LeagueState, rng: Rng): Playoffs {
   if (league.playoffs) return league.playoffs;
@@ -105,42 +129,42 @@ export function startPlayoffs(league: LeagueState, rng: Rng): Playoffs {
   const seeds = playoffSeedOrder(league).slice(0, PLAYOFF_TEAMS).map((t) => t.id);
   const playoffs: Playoffs = {
     seeds,
-    series: [
-      makeSeries('semi-a', 'semifinal', seeds, 1, 4, 3),
-      makeSeries('semi-b', 'semifinal', seeds, 2, 3, 3),
-    ],
+    series: [],
     complete: false,
     playerResult: seeds.includes(league.playerTeamId) ? 'alive' : 'missed',
   };
+  // 3 v 6 and 4 v 5; the top two watch.
+  playoffs.series.push(
+    makeSeries(playoffs, 'wc-a', 'wildcard', seeds[BYE_SEEDS], seeds[PLAYOFF_TEAMS - 1]),
+    makeSeries(playoffs, 'wc-b', 'wildcard', seeds[BYE_SEEDS + 1], seeds[PLAYOFF_TEAMS - 2]),
+  );
   league.playoffs = playoffs;
   league.regularDays = league.regularDays ?? league.calendar.length;
 
   if (playoffs.playerResult === 'missed') {
     simulateRemaining(league, rng);
-  } else {
-    // A day off to catch your breath, then game one.
-    league.calendar.push({ gameIndex: null });
-    scheduleNextGame(league, rng);
+    return playoffs;
   }
+
+  // A day off to catch your breath, then game one — or, on a bye, then the
+  // wait while the wildcards play.
+  league.calendar.push({ gameIndex: null });
+  if (playerSeries(league)) scheduleNextGame(league, rng);
   return playoffs;
 }
 
-function makeSeries(
-  id: string,
-  round: PlayoffRound,
-  seeds: string[],
-  highSeed: number,
-  lowSeed: number,
-  bestOf: 3 | 5,
-): PlayoffSeries {
+function makeSeries(p: Playoffs, id: string, round: PlayoffRound, a: string, b: string): PlayoffSeries {
+  const seedOf = (teamId: string): number => p.seeds.indexOf(teamId) + 1;
+  // The better seed is always the high side, whoever was handed in first.
+  const [highId, lowId] = seedOf(a) <= seedOf(b) ? [a, b] : [b, a];
   return {
     id,
     round,
-    highId: seeds[highSeed - 1],
-    lowId: seeds[lowSeed - 1],
-    highSeed,
-    lowSeed,
-    bestOf,
+    highId,
+    lowId,
+    highSeed: seedOf(highId),
+    lowSeed: seedOf(lowId),
+    bestOf: ROUND_BEST_OF[round],
     highWins: 0,
     lowWins: 0,
   };
@@ -173,43 +197,104 @@ function creditWin(series: PlayoffSeries, winnerId: string): void {
   else if (series.lowWins >= need) series.winnerId = series.lowId;
 }
 
-/** Play out a series with nobody watching. */
-function simulateSeries(league: LeagueState, series: PlayoffSeries, rng: Rng): void {
+/** One game of a series nobody is watching. A little home cooking for the host. */
+function simulateGame(league: LeagueState, series: PlayoffSeries, rng: Rng): void {
+  if (seriesOver(series)) return;
   const high = teamById(league, series.highId);
   const low = teamById(league, series.lowId);
+  const highHosts = hostForGame(series, seriesGamesPlayed(series) + 1) === series.highId;
+  const p = winChance(high, low) + (highHosts ? 0.04 : -0.04);
+  creditWin(series, rng.chance(p) ? series.highId : series.lowId);
+}
+
+/** Play out a series with nobody watching. */
+function simulateSeries(league: LeagueState, series: PlayoffSeries, rng: Rng): void {
   let guard = 0;
-  while (!seriesOver(series) && guard++ < 20) {
-    // A little home cooking: the host gets a nudge.
-    const highHosts = hostForGame(series, seriesGamesPlayed(series) + 1) === series.highId;
-    const p = winChance(high, low) + (highHosts ? 0.04 : -0.04);
-    creditWin(series, rng.chance(p) ? series.highId : series.lowId);
+  while (!seriesOver(series) && guard++ < 20) simulateGame(league, series, rng);
+}
+
+/**
+ * Build whatever round the finished ones allow: the semifinals once both
+ * wildcards are settled, reseeded so the top seed meets the lowest
+ * survivor; the final once both semifinals are. Returns true when a new
+ * series was made. Idempotent — a round is only ever built once.
+ */
+function ensureRounds(p: Playoffs): boolean {
+  const seedOf = (id: string): number => p.seeds.indexOf(id) + 1;
+  const bySeed = (ids: string[]): string[] => [...ids].sort((x, y) => seedOf(x) - seedOf(y));
+  const inRound = (round: PlayoffRound): PlayoffSeries[] => p.series.filter((s) => s.round === round);
+
+  const wildcards = inRound('wildcard');
+  if (inRound('semifinal').length === 0) {
+    if (!wildcards.every(seriesOver)) return false;
+    const survivors = bySeed([
+      ...p.seeds.slice(0, BYE_SEEDS),
+      ...wildcards.map((s) => s.winnerId as string),
+    ]);
+    p.series.push(
+      makeSeries(p, 'semi-a', 'semifinal', survivors[0], survivors[3]),
+      makeSeries(p, 'semi-b', 'semifinal', survivors[1], survivors[2]),
+    );
+    return true;
+  }
+
+  const semis = inRound('semifinal');
+  if (inRound('final').length === 0) {
+    if (!semis.every(seriesOver)) return false;
+    const [a, b] = bySeed(semis.map((s) => s.winnerId as string));
+    p.series.push(makeSeries(p, 'final', 'final', a, b));
+    return true;
+  }
+  return false;
+}
+
+/** Hand out the trophy once the final is settled. */
+function settle(league: LeagueState): void {
+  const p = league.playoffs;
+  if (!p) return;
+  const final = p.series.find((s) => s.round === 'final');
+  if (final && seriesOver(final)) {
+    p.complete = true;
+    p.championId = final.winnerId;
+    if (p.championId === league.playerTeamId) p.playerResult = 'champion';
   }
 }
 
-/** Once both semifinals are settled, the final exists. */
-function ensureFinal(league: LeagueState): PlayoffSeries | null {
+/**
+ * If the player's last series is won and the next round has just formed,
+ * give them a day off and put game one on the calendar.
+ */
+function lineUpPlayer(league: LeagueState, rng: Rng): void {
+  const series = playerSeries(league);
+  if (!series || seriesOver(series)) return;
+  // Already on the calendar? Then nothing to do.
+  const scheduled = league.schedule.some(
+    (g) => !g.played && g.playoff?.seriesId === series.id,
+  );
+  if (scheduled) return;
+  league.calendar.push({ gameIndex: null });
+  scheduleNextGame(league, rng);
+}
+
+/**
+ * A day passes in the postseason. Every series the player isn't in plays a
+ * game, and when a round is settled the next one is built and the player's
+ * game goes on the calendar. Called from `advanceDay`, so a bye seed's
+ * workout days and a wildcard club's own game days both move the bracket.
+ */
+export function advancePlayoffs(league: LeagueState, rng: Rng): void {
   const p = league.playoffs;
-  if (!p) return null;
-  const existing = p.series.find((s) => s.round === 'final');
-  if (existing) return existing;
-  const semis = p.series.filter((s) => s.round === 'semifinal');
-  if (!semis.every(seriesOver)) return null;
-  const winners = semis.map((s) => s.winnerId as string);
-  const seedOf = (id: string): number => p.seeds.indexOf(id) + 1;
-  const [a, b] = [...winners].sort((x, y) => seedOf(x) - seedOf(y));
-  const final: PlayoffSeries = {
-    id: 'final',
-    round: 'final',
-    highId: a,
-    lowId: b,
-    highSeed: seedOf(a),
-    lowSeed: seedOf(b),
-    bestOf: 5,
-    highWins: 0,
-    lowWins: 0,
-  };
-  p.series.push(final);
-  return final;
+  if (!p || p.complete || p.playerResult !== 'alive') return;
+  const me = league.playerTeamId;
+  for (const s of p.series) {
+    if (!seriesOver(s) && !involves(s, me)) simulateGame(league, s, rng);
+  }
+  // Our own series is on the calendar game by game; only a finished one
+  // (or none at all, on a bye) means there's a round to move on to.
+  const mine = playerSeries(league);
+  if (mine && !seriesOver(mine)) return;
+  ensureRounds(p);
+  lineUpPlayer(league, rng);
 }
 
 /** Simulate every series the player isn't in, through to the trophy. */
@@ -217,17 +302,12 @@ function simulateRemaining(league: LeagueState, rng: Rng): void {
   const p = league.playoffs;
   if (!p) return;
   const me = league.playerTeamId;
-  for (const s of p.series) {
-    if (!seriesOver(s) && s.highId !== me && s.lowId !== me) simulateSeries(league, s, rng);
-  }
-  const final = ensureFinal(league);
-  if (final && !seriesOver(final) && final.highId !== me && final.lowId !== me) {
-    simulateSeries(league, final, rng);
-  }
-  if (final && seriesOver(final)) {
-    p.complete = true;
-    p.championId = final.winnerId;
-    if (p.championId === me) p.playerResult = 'champion';
+  let guard = 0;
+  while (!p.complete && guard++ < 8) {
+    for (const s of p.series) {
+      if (!seriesOver(s) && !involves(s, me)) simulateSeries(league, s, rng);
+    }
+    if (!ensureRounds(p)) settle(league);
   }
 }
 
@@ -245,8 +325,8 @@ export interface PlayoffGameOutcome {
 
 /**
  * Record the result of a playoff game the player just played, and move the
- * bracket along: schedule the next game of the series, or settle the round and
- * line up the next one, or hand out the trophy.
+ * bracket along: schedule the next game of the series, or settle the round
+ * and line up the next one if it's ready, or hand out the trophy.
  */
 export function recordPlayoffGame(
   league: LeagueState,
@@ -278,18 +358,13 @@ export function recordPlayoffGame(
   }
 
   if (series.round === 'final') {
-    p.complete = true;
-    p.championId = me;
-    p.playerResult = 'champion';
+    settle(league);
     return { ...base, seriesOver: true, status: 'champion' };
   }
 
-  // Through to the final. Settle the other semi, then a day off, then game one.
-  for (const s of p.series) {
-    if (s.round === 'semifinal' && !seriesOver(s)) simulateSeries(league, s, rng);
-  }
-  ensureFinal(league);
-  league.calendar.push({ gameIndex: null });
-  scheduleNextGame(league, rng);
+  // Through. If the other series in the round is done the next one starts
+  // after a day off; if not, the calendar carries it a game a day.
+  ensureRounds(p);
+  lineUpPlayer(league, rng);
   return { ...base, seriesOver: true, status: 'advanced' };
 }

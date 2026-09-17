@@ -7,7 +7,7 @@ import { createSurface, pointerPos, vibrate } from '../ui/canvas';
 import type { Surface } from '../ui/canvas';
 import type { Uniform } from '../core/uniforms';
 import { Camera, RISE, TILT } from '../gfx/camera';
-import { ParkRenderer } from '../gfx/park';
+import { ParkRenderer, stadiumForLevel } from '../gfx/park';
 import type { Lighting } from '../gfx/palette';
 import { CUE_GOLD, CUE_RED, lightingFor, skinFor } from '../gfx/palette';
 import type { FigureAnim } from '../gfx/figure';
@@ -37,6 +37,11 @@ export interface PlayViewOptions {
   battingKit: PlayerColors;
   /** How full the stands are, 0-1. Comes from the level being played. */
   crowd: number;
+  /**
+   * How much stadium there is, as the rung of the ladder (0 = Single-A,
+   * 3 = the Majors). See `stadiumForLevel`. Left out, the old single-deck park.
+   */
+  stadium?: number;
   /**
    * Which of the two sides is the home team. Home takes the first-base
    * dugout, the visitors sit on the third-base side.
@@ -126,7 +131,10 @@ export class PlayView {
     this.root.innerHTML = '';
 
     this.surface = createSurface(this.root);
-    this.park = new ParkRenderer(this.sim.park);
+    this.park = new ParkRenderer(
+      this.sim.park,
+      opts.stadium == null ? undefined : stadiumForLevel(opts.stadium),
+    );
     this.light = lightingFor(this.sim.weather);
 
     this.banner = document.createElement('div');

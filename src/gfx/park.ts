@@ -27,22 +27,64 @@ const BOWL_STEPS = 80;
 const TRACK = 16;
 /** Concrete apron between the wall and the first row. */
 const STAND_GAP = 5;
-const STAND_ROWS = 8;
 const ROW_DEPTH = 8;
 /** Height gained per row, feet. */
 const ROW_RISE = 2.6;
-const SEAT_COUNT = 1700;
+/** People per row of each section: the bowl is long, the sides and the backstop shorter. */
+const BOWL_SEATS_PER_ROW = 210;
+const SIDE_SEATS_PER_ROW = 95;
+const HOME_SEATS_PER_ROW = 80;
+/** A second deck: how far it sits above the lower deck's top row, and how far it hangs over it. */
+const DECK_RISE = 9;
+const DECK_OVERHANG = 12;
+/** Seats behind the plate wrap this far round (radians) from dead behind, to meet the grandstands. */
+const HOME_HALF_SPAN = 1.22;
+const HOME_STEPS = 40;
 
-/** Grandstands down each line: where they start along the line, how far off it, their tiers. */
+/** Grandstands down each line: where they start along the line, how far off it. */
 const SIDE_ALONG0 = 24;
 const SIDE_OFFSET = 62;
-const SIDE_ROWS = 4;
-const SIDE_SEATS = 380;
+
+/**
+ * How much stadium there is. Single-A is a few rows of bleachers past the
+ * wall; the Majors is a bowl all the way round with a second deck on top.
+ * It is the quickest read on where a career has got to, so each rung of the
+ * ladder gets its own silhouette rather than the same park with more people.
+ */
+export interface StadiumSpec {
+  /** Rows of seats round the outfield, past the wall. */
+  bowlRows: number;
+  /** Rows down each foul line. */
+  sideRows: number;
+  /** Rows wrapping behind the plate, joining the two grandstands. 0 for none. */
+  homeRows: number;
+  /** Rows in a second deck over every section. 0 for a single-deck park. */
+  upperRows: number;
+}
+
+/** The park a rung of the ladder plays in. */
+export function stadiumForLevel(levelId: number): StadiumSpec {
+  switch (Math.max(0, Math.round(levelId))) {
+    case 0:
+      return { bowlRows: 4, sideRows: 2, homeRows: 0, upperRows: 0 };
+    case 1:
+      return { bowlRows: 6, sideRows: 3, homeRows: 3, upperRows: 0 };
+    case 2:
+      return { bowlRows: 8, sideRows: 4, homeRows: 5, upperRows: 0 };
+    default:
+      return { bowlRows: 8, sideRows: 5, homeRows: 6, upperRows: 6 };
+  }
+}
+
+/** What the renderer draws when nobody says: the old single-deck park. */
+const DEFAULT_STADIUM: StadiumSpec = { bowlRows: 8, sideRows: 4, homeRows: 0, upperRows: 0 };
 
 /** Foul-ground wall down each line — the edge of the playing surface. */
 const SIDE_WALL_OFFSET = SIDE_OFFSET - 2;
 /** Backstop radius from the plate. */
 const BACKSTOP = 64;
+/** Where the first row behind the plate starts: just past the backstop. */
+const HOME_GAP = BACKSTOP + 2;
 /** Height of the low wall round foul ground. */
 const SIDE_WALL_HEIGHT = 4;
 
@@ -77,14 +119,16 @@ const dirAt = (angle: number): Vec2 => ({ x: Math.sin(angle), y: Math.cos(angle)
 
 export class ParkRenderer {
   readonly park: Ballpark;
+  readonly spec: StadiumSpec;
   private readonly wallBearings: Vec2[] = [];
   private readonly bowlBearings: Vec2[] = [];
   /** How far down each line the grandstand runs before it meets the bowl. */
   private readonly sideEnd: Record<1 | -1, number>;
   private readonly seats: Seat[];
 
-  constructor(park: Ballpark) {
+  constructor(park: Ballpark, spec: StadiumSpec = DEFAULT_STADIUM) {
     this.park = park;
+    this.spec = spec;
     for (let i = 0; i <= WALL_STEPS; i++) {
       this.wallBearings.push(dirAt(-Math.PI / 4 + (i / WALL_STEPS) * (Math.PI / 2)));
     }
@@ -125,6 +169,30 @@ export class ParkRenderer {
   private meetAngle(side: 1 | -1, extra: number, o: number): number {
     const a = this.meetAlong(side, extra, o);
     return Math.atan2(a + o, a - o);
+  }
+
+  /* ----------------------------------------------------- stadium extents */
+
+  /** How much further out a second deck pushes the back of every section. */
+  private upperExtra(): number {
+    return this.spec.upperRows > 0 ? Math.max(0, this.spec.upperRows * ROW_DEPTH - DECK_OVERHANG) : 0;
+  }
+
+  /** Radial offset past the wall to the back of the outfield seating. */
+  private bowlBack(): number {
+    return STAND_GAP + this.spec.bowlRows * ROW_DEPTH + this.upperExtra();
+  }
+
+  /** Offset off each foul line to the back of the grandstands. */
+  private sideBack(): number {
+    return SIDE_OFFSET + this.spec.sideRows * ROW_DEPTH + this.upperExtra();
+  }
+
+  /** Radius from the plate to the back of whatever is behind it. */
+  private homeBack(): number {
+    return this.spec.homeRows > 0
+      ? HOME_GAP + this.spec.homeRows * ROW_DEPTH + this.upperExtra()
+      : BACKSTOP;
   }
 
   /** The ball or a player is past the fence, out of the playing field. */
@@ -173,17 +241,18 @@ export class ParkRenderer {
 
   /** Concourse and trees around the park. World transform is active. */
   private drawSurroundings(ctx: CanvasRenderingContext2D, cam: Camera, light: Lighting): void {
-    const bowlBack = STAND_GAP + STAND_ROWS * ROW_DEPTH;
-    const sideBack = SIDE_OFFSET + SIDE_ROWS * ROW_DEPTH;
+    const bowlBack = this.bowlBack();
+    const sideBack = this.sideBack();
+    const homeBack = this.homeBack();
     ctx.fillStyle = light.concrete;
     ctx.beginPath();
-    this.traceFootprint(ctx, bowlBack + 18, sideBack + 18, BACKSTOP + 30);
+    this.traceFootprint(ctx, bowlBack + 18, sideBack + 18, homeBack + 30);
     ctx.fill();
     // Paving lines, faint.
     ctx.strokeStyle = alpha('#000000', 0.06);
     ctx.lineWidth = 0.6;
     ctx.beginPath();
-    this.traceFootprint(ctx, bowlBack + 9, sideBack + 9, BACKSTOP + 22);
+    this.traceFootprint(ctx, bowlBack + 9, sideBack + 9, homeBack + 22);
     ctx.stroke();
 
     const b = cam.bounds(30);
@@ -213,16 +282,16 @@ export class ParkRenderer {
 
   /** Radius to the outside edge of the concourse along a bearing. */
   private outsideRadius(dir: Vec2): number {
-    const bowlBack = STAND_GAP + STAND_ROWS * ROW_DEPTH + 18;
+    const bowlBack = this.bowlBack() + 18;
     const angle = Math.atan2(dir.x, dir.y);
     const side: 1 | -1 = angle >= 0 ? 1 : -1;
-    const limit = this.meetAngle(side, bowlBack, SIDE_OFFSET + SIDE_ROWS * ROW_DEPTH + 18);
+    const o = this.sideBack() + 18;
+    const limit = this.meetAngle(side, bowlBack, o);
     if (Math.abs(angle) <= limit) return this.radiusAt(dir, bowlBack);
     // Beyond the corner the edge runs down the side to the backstop.
-    const o = SIDE_OFFSET + SIDE_ROWS * ROW_DEPTH + 18;
     const t = (Math.abs(angle) - limit) / (Math.PI - limit);
     const corner = this.radiusAt(dirAt(side * limit), bowlBack);
-    return corner * (1 - t) + (BACKSTOP + 30 + o * 0.2) * t;
+    return corner * (1 - t) + (this.homeBack() + 30 + o * 0.2) * t;
   }
 
   private drawGrass(ctx: CanvasRenderingContext2D, cam: Camera, light: Lighting): void {
@@ -463,67 +532,165 @@ export class ParkRenderer {
 
   /* ------------------------------------------------------------- stands */
 
+  /**
+   * Where the people sit. Each section is scattered row by row: `place`
+   * turns a row's offset from the section's front and a 0-1 position along
+   * it into a spot on the ground, and the height comes from the row. A park
+   * with a second deck gets the same scatter again, further out and up.
+   */
   private buildSeats(): Seat[] {
     const seats: (Seat & { order: number })[] = [];
-    const add = (x: number, y: number, z: number, h: number) =>
+    const spec = this.spec;
+    const add = (p: Vec2, z: number, h: number) =>
       seats.push({
-        x,
-        y,
+        x: p.x,
+        y: p.y,
         z,
         colour: CROWD_COLOURS[h % CROWD_COLOURS.length],
         order: Math.imul(h ^ 0x9e3779b9, 2246822519) >>> 0,
       });
 
+    let salt = 0;
+    const scatter = (
+      rows: number,
+      perRow: number,
+      o0: number,
+      z0: number,
+      place: (o: number, u: number) => Vec2,
+    ): void => {
+      salt += 100003;
+      for (let i = 0; i < rows * perRow; i++) {
+        const h = hash(i + salt);
+        const row = (h >>> 4) % rows;
+        const o = o0 + row * ROW_DEPTH + 2 + unit(h, 9) * (ROW_DEPTH - 4);
+        add(place(o, unit(h)), z0 + row * ROW_RISE + 2.2, h);
+      }
+    };
+    const section = (
+      rows: number,
+      perRow: number,
+      o0: number,
+      place: (o: number, u: number) => Vec2,
+    ): void => {
+      if (rows <= 0) return;
+      scatter(rows, perRow, o0, 0, place);
+      if (spec.upperRows > 0) {
+        const back = o0 + rows * ROW_DEPTH;
+        scatter(spec.upperRows, perRow, back - DECK_OVERHANG, rows * ROW_RISE + DECK_RISE, place);
+      }
+    };
+
     const left = Math.atan2(this.bowlBearings[0].x, this.bowlBearings[0].y);
     const right = Math.atan2(this.bowlBearings[BOWL_STEPS].x, this.bowlBearings[BOWL_STEPS].y);
-    for (let i = 0; i < SEAT_COUNT; i++) {
-      const h = hash(i);
-      const dir = dirAt(left + unit(h) * (right - left));
-      const row = (h >>> 4) % STAND_ROWS;
-      const radius = this.radiusAt(dir, STAND_GAP + row * ROW_DEPTH + 2 + unit(h, 9) * (ROW_DEPTH - 4));
-      add(dir.x * radius, dir.y * radius, row * ROW_RISE + 2.2, h);
-    }
+    section(spec.bowlRows, BOWL_SEATS_PER_ROW, STAND_GAP, (o, u) =>
+      this.pointAt(dirAt(left + u * (right - left)), o),
+    );
     for (const side of [-1, 1] as const) {
-      for (let i = 0; i < SIDE_SEATS; i++) {
-        const h = hash(i + (side > 0 ? 70001 : 40009));
-        const a = SIDE_ALONG0 + 3 + unit(h) * (this.sideEnd[side] - SIDE_ALONG0 - 6);
-        const row = (h >>> 4) % SIDE_ROWS;
-        const o = SIDE_OFFSET + row * ROW_DEPTH + 2 + unit(h, 9) * (ROW_DEPTH - 4);
-        const p = ParkRenderer.sideAt(side, a, o);
-        add(p.x, p.y, row * ROW_RISE + 2.2, h);
-      }
+      section(spec.sideRows, SIDE_SEATS_PER_ROW, SIDE_OFFSET, (o, u) =>
+        ParkRenderer.sideAt(side, SIDE_ALONG0 + 3 + u * (this.sideEnd[side] - SIDE_ALONG0 - 6), o),
+      );
     }
+    section(spec.homeRows, HOME_SEATS_PER_ROW, HOME_GAP, (o, u) => {
+      const dir = dirAt(Math.PI - HOME_HALF_SPAN + u * 2 * HOME_HALF_SPAN);
+      return { x: dir.x * o, y: dir.y * o };
+    });
     seats.sort((p, q) => p.order - q.order);
     return seats;
   }
 
-  /** Tiers of seats behind the wall and down both lines, with the crowd in them. */
+  /**
+   * Tiers of seats behind the wall, down both lines and — in the bigger
+   * parks — round behind the plate, with a second deck over the lot in the
+   * biggest, and the crowd in them.
+   */
   drawStands(ctx: CanvasRenderingContext2D, cam: Camera, light: Lighting, crowd: number): void {
-    // Grandstands first: the bowl's corners overlap their far ends.
-    for (const side of [-1, 1] as const) {
-      const end = this.sideEnd[side];
-      this.fillSideBand(ctx, cam, side, end, light.concreteDark, SIDE_OFFSET - 4, SIDE_OFFSET, 0, 0);
-      for (let row = 0; row < SIDE_ROWS; row++) {
-        const o0 = SIDE_OFFSET + row * ROW_DEPTH;
-        const z = row * ROW_RISE;
-        if (row > 0) this.fillSideBand(ctx, cam, side, end, shade(light.seats, 0.55), o0, o0, z - ROW_RISE, z);
-        this.fillSideBand(ctx, cam, side, end, row % 2 === 0 ? light.seats : light.seatsAlt, o0, o0 + ROW_DEPTH, z, z);
-      }
-      const back = SIDE_OFFSET + SIDE_ROWS * ROW_DEPTH;
-      this.fillSideBand(ctx, cam, side, end, shade(light.concrete, 0.8), back, back, SIDE_ROWS * ROW_RISE - ROW_RISE, SIDE_ROWS * ROW_RISE + 1);
-    }
+    type Band = (colour: string, o0: number, o1: number, z0: number, z1: number) => void;
+    const spec = this.spec;
 
-    this.fillArcBand(ctx, cam, light.concreteDark, 0, STAND_GAP, 0, 0);
-    for (let row = 0; row < STAND_ROWS; row++) {
-      const r0 = STAND_GAP + row * ROW_DEPTH;
-      const z = row * ROW_RISE;
-      if (row > 0) this.fillArcBand(ctx, cam, shade(light.seats, 0.55), r0, r0, z - ROW_RISE, z);
-      this.fillArcBand(ctx, cam, row % 2 === 0 ? light.seats : light.seatsAlt, r0, r0 + ROW_DEPTH, z, z);
+    // Rows from `o0` outward and `z0` upward: riser, tread, riser, tread,
+    // then the wall along the back. Returns how high the back row got.
+    const tier = (band: Band, rows: number, o0: number, z0: number): number => {
+      for (let row = 0; row < rows; row++) {
+        const o = o0 + row * ROW_DEPTH;
+        const z = z0 + row * ROW_RISE;
+        if (row > 0) band(shade(light.seats, 0.55), o, o, z - ROW_RISE, z);
+        band(row % 2 === 0 ? light.seats : light.seatsAlt, o, o + ROW_DEPTH, z, z);
+      }
+      const back = o0 + rows * ROW_DEPTH;
+      const top = z0 + rows * ROW_RISE;
+      band(shade(light.concrete, 0.8), back, back, top - ROW_RISE, top + 1);
+      return top;
+    };
+    // A whole section: the apron in front, the lower deck, and where the
+    // park has one, a concrete facade and a second deck hanging over the top.
+    const section = (band: Band, rows: number, o0: number, apron: number): void => {
+      if (rows <= 0) return;
+      band(light.concreteDark, apron, o0, 0, 0);
+      const top = tier(band, rows, o0, 0);
+      if (spec.upperRows > 0) {
+        const back = o0 + rows * ROW_DEPTH;
+        const front = back - DECK_OVERHANG;
+        const floor = top + DECK_RISE;
+        band(shade(light.concreteDark, 0.85), back, back, top, floor);
+        band(shade(light.concrete, 0.6), front, front, floor - 3, floor);
+        tier(band, spec.upperRows, front, floor);
+      }
+    };
+
+    // Behind the plate first, then the grandstands over its ends, then the
+    // bowl over theirs: nearest the camera to farthest, so the overlaps land
+    // the right way round.
+    section(
+      (c, o0, o1, z0, z1) => this.fillHomeBand(ctx, cam, c, o0, o1, z0, z1),
+      spec.homeRows,
+      HOME_GAP,
+      BACKSTOP,
+    );
+    for (const side of [-1, 1] as const) {
+      section(
+        (c, o0, o1, z0, z1) => this.fillSideBand(ctx, cam, side, this.sideEnd[side], c, o0, o1, z0, z1),
+        spec.sideRows,
+        SIDE_OFFSET,
+        SIDE_OFFSET - 4,
+      );
     }
-    const backR = STAND_GAP + STAND_ROWS * ROW_DEPTH;
-    this.fillArcBand(ctx, cam, shade(light.concrete, 0.8), backR, backR, STAND_ROWS * ROW_RISE - ROW_RISE, STAND_ROWS * ROW_RISE + 1);
+    section(
+      (c, o0, o1, z0, z1) => this.fillArcBand(ctx, cam, c, o0, o1, z0, z1),
+      spec.bowlRows,
+      STAND_GAP,
+      0,
+    );
 
     this.drawCrowd(ctx, cam, crowd);
+  }
+
+  /** A band of the seating behind the plate, between two radii, at two heights (front, back). */
+  private fillHomeBand(
+    ctx: CanvasRenderingContext2D,
+    cam: Camera,
+    colour: string,
+    r0: number,
+    r1: number,
+    z0: number,
+    z1: number,
+  ): void {
+    const at = (i: number, r: number, z: number): Vec2 => {
+      const dir = dirAt(Math.PI - HOME_HALF_SPAN + (i / HOME_STEPS) * 2 * HOME_HALF_SPAN);
+      return cam.project({ x: dir.x * r, y: dir.y * r }, z);
+    };
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    for (let i = 0; i <= HOME_STEPS; i++) {
+      const p = at(i, r0, z0);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    for (let i = HOME_STEPS; i >= 0; i--) {
+      const p = at(i, r1, z1);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
 
   /** A band between two radial offsets from the wall, at two heights (front, back). */

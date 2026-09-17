@@ -749,6 +749,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // October packs the place, whatever the level. So does a name people
       // have heard of.
       crowd: Math.min(1, level.crowd + (scheduled.playoff ? 0.35 : 0) + fameCrowdBoost(life.fame)),
+      // The park grows with the rung: bleachers in Single-A, a second deck
+      // all the way round in the Majors. The world stage plays in the biggest.
+      stadium: cup ? LEVELS.length - 1 : league.levelId,
       // Home fills the first-base dugout: that's us when we're hosting and in
       // the field, or when we're visiting and at bat.
       homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',

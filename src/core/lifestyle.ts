@@ -46,6 +46,8 @@ export interface LifestyleState {
   /** Calendar day the activity list was last reset on, and what's been done. */
   dayStamp: number;
   doneToday: string[];
+  /** Ids of the things built back home. See `PROJECTS`. */
+  projects: string[];
   /**
    * Things that happened off the field since the clubhouse last looked, shown
    * once on the hub then cleared — same shape as the league's own news.
@@ -76,6 +78,7 @@ export function createLifestyle(): LifestyleState {
     requests: [],
     dayStamp: -1,
     doneToday: [],
+    projects: [],
     notices: [],
     log: [],
   };
@@ -106,6 +109,7 @@ export function normaliseLifestyle(life: Partial<LifestyleState> | undefined): L
     requests: Array.isArray(life.requests) ? life.requests : [],
     dayStamp: typeof life.dayStamp === 'number' ? life.dayStamp : -1,
     doneToday: Array.isArray(life.doneToday) ? life.doneToday : [],
+    projects: Array.isArray(life.projects) ? life.projects.filter((id) => !!projectById(id)) : [],
     notices: Array.isArray(life.notices) ? life.notices : [],
     log: Array.isArray(life.log) ? life.log : [],
   };
@@ -1132,3 +1136,77 @@ export function lifeOffseason(life: LifestyleState, roll: () => number): string[
   if (life.friend) bond(life.friend, 10);
   return lines;
 }
+
+/* ------------------------------------------------------------------ legacy */
+
+export interface ProjectDef {
+  id: string;
+  name: string;
+  icon: string;
+  blurb: string;
+  price: number;
+  /** Points on the home nation's strength at the next World Trophy. */
+  nationBoost: number;
+  /** A name that builds things is a name people say. */
+  fame: number;
+}
+
+/**
+ * Money sent home. Each project makes the country a better baseball country,
+ * which the tournament reads as team strength the next time it comes round —
+ * without lowering the bar to get picked, since a stronger side is a harder
+ * squad to crack. That is the trade the flag was chosen on at eighteen.
+ */
+export const PROJECTS: ProjectDef[] = [
+  {
+    id: 'field',
+    name: 'Youth Field',
+    icon: '🌱',
+    blurb: 'Lights, a backstop, real bases. The kids stop playing on gravel.',
+    price: 8000,
+    nationBoost: 2,
+    fame: 3,
+  },
+  {
+    id: 'academy',
+    name: 'Baseball Academy',
+    icon: '🏫',
+    blurb: 'Coaches, a cage, a bus. The best kids in the country come through it.',
+    price: 40000,
+    nationBoost: 4,
+    fame: 6,
+  },
+  {
+    id: 'program',
+    name: 'National Program',
+    icon: '🏟️',
+    blurb: 'A stadium and a league to play in it. Your name is on the gate.',
+    price: 150000,
+    nationBoost: 6,
+    fame: 10,
+  },
+];
+
+export const projectById = (id: string): ProjectDef | undefined =>
+  PROJECTS.find((p) => p.id === id);
+
+export const hasProject = (life: LifestyleState, id: string): boolean =>
+  life.projects.includes(id);
+
+export function fundProject(player: PlayerProfile, life: LifestyleState, id: string): boolean {
+  const def = projectById(id);
+  if (!def || hasProject(life, id) || player.money < def.price) return false;
+  player.money -= def.price;
+  life.projects.push(id);
+  addFame(life, def.fame);
+  noteLife(life, `You built the ${def.name} back home.`, false);
+  return true;
+}
+
+/** What the projects add to the home nation at the next tournament. */
+export function nationStrengthBonus(life: LifestyleState): number {
+  return life.projects.reduce((sum, id) => sum + (projectById(id)?.nationBoost ?? 0), 0);
+}
+
+/** Whether there's somewhere to put the hardware where people can see it. */
+export const hasTrophyRoom = (life: LifestyleState): boolean => homeById(life.home).trophyRoom;

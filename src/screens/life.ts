@@ -24,19 +24,30 @@ import {
   fameCrowdBoost,
   fameLabel,
   fireAgent,
+  fundProject,
   gameStaminaGuard,
+  hasProject,
+  hasTrophyRoom,
   hireAgent,
   homeById,
   homeUpgrades,
   moraleEnergyBonus,
+  nationStrengthBonus,
   overnightEnergyBonus,
   ownsToy,
+  PROJECTS,
+  projectById,
   signDeal,
   sponsorById,
   teammateBoost,
+  toyById,
   upkeepPerGame,
 } from '../core/lifestyle';
 import { lifestyleOf } from '../core/save';
+import { TROPHIES } from '../core/trophies';
+import { mvpSeasons } from '../core/awards';
+import { LEVELS } from '../core/league';
+import { nationById } from '../core/nations';
 import { esc, meterHtml, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
@@ -258,6 +269,74 @@ export function renderLife(app: App, mount: HTMLElement): void {
         </div>`;
     }).join('');
 
+    // ---- Legacy: what's been built back home, and what it's doing.
+    const nation = nationById(player.country);
+    const homeBoost = nationStrengthBonus(life);
+    const legacyHtml = `
+      <p class="tiny muted" style="margin:0 0 10px">
+        ${nation.flag} ${esc(nation.name)} plays the World Trophy at ${nation.strength}${
+          homeBoost > 0 ? ` <b style="color:var(--accent)">+${homeBoost}</b>` : ''
+        } strength. What you build here lifts the side the next time it's played;
+        the bar to be picked stays where it is.
+      </p>
+      ${PROJECTS.map((p) => {
+        const built = hasProject(life, p.id);
+        const affordable = player.money >= p.price;
+        return `
+        <div class="gear-card ${built ? 'on' : ''}">
+          <div class="info">
+            <strong>${p.icon} ${esc(p.name)}</strong>
+            <span>${esc(p.blurb)}</span>
+            <span class="gear-bonus">+${p.nationBoost} nation strength · +${p.fame} fame</span>
+          </div>
+          ${
+            built
+              ? '<button class="buy" disabled>Built</button>'
+              : `<button class="buy" data-project="${p.id}" ${affordable ? '' : 'disabled'}>${formatMoney(p.price)}</button>`
+          }
+        </div>`;
+      }).join('')}`;
+
+    // ---- The trophy room: everything the career has to show, in one place,
+    // once there's a house with a room to show it in.
+    const earned = save.trophies;
+    const mvps = mvpSeasons(save.awards);
+    const cups = (save.cupHistory ?? []).filter(
+      (c) => c.playerResult === 'champion' || c.playerResult === 'eliminated',
+    );
+    const roomHtml = hasTrophyRoom(life)
+      ? `
+        <div class="statline">
+          <div><b>${earned.length}</b><span>Trophies</span></div>
+          <div><b>${mvps.length}</b><span>MVPs</span></div>
+          <div><b>${cups.filter((c) => c.playerResult === 'champion').length}</b><span>World titles</span></div>
+          <div><b>${life.projects.length}</b><span>Built at home</span></div>
+        </div>
+        <div class="room-shelf">
+          ${earned
+            .map((u) => {
+              const t = TROPHIES.find((x) => x.id === u.id);
+              return t
+                ? `<span class="room-item" title="${esc(t.name)} · Season ${u.seasonYear} · ${esc(LEVELS[u.levelId]?.short ?? '')}">${t.icon}</span>`
+                : '';
+            })
+            .join('')}
+          ${mvps.map((m) => `<span class="room-item" title="MVP · Season ${m.year} · ${esc(LEVELS[m.levelId].name)}">🏆</span>`).join('')}
+          ${cups
+            .map(
+              (c) =>
+                `<span class="room-item" title="World Trophy ${c.year} · ${c.playerResult === 'champion' ? 'Champions' : 'Played'}">${c.playerResult === 'champion' ? '🥇' : '🎖️'}</span>`,
+            )
+            .join('')}
+          ${life.toys.map((id) => toyById(id)).filter((t): t is NonNullable<typeof t> => !!t).map((t) => `<span class="room-item" title="${esc(t.name)}">${t.icon}</span>`).join('')}
+          ${life.projects.map((id) => projectById(id)).filter((p): p is NonNullable<typeof p> => !!p).map((p) => `<span class="room-item" title="${esc(p.name)}">${p.icon}</span>`).join('')}
+          ${earned.length + mvps.length + cups.length + life.toys.length + life.projects.length === 0 ? '<span class="tiny muted">Empty shelves. For now.</span>' : ''}
+        </div>
+        <p class="tiny muted" style="margin:10px 0 0">Hold a tile for what it is. The full case is in the clubhouse.</p>`
+      : `<p class="tiny muted" style="margin:0">
+           ${earned.length + mvps.length} piece${earned.length + mvps.length === 1 ? '' : 's'} of hardware in a box under the bed. Buy a house and there's a room for it.
+         </p>`;
+
     mount.innerHTML = `
       <div class="scroll">
         <div class="panel">
@@ -323,6 +402,16 @@ export function renderLife(app: App, mount: HTMLElement): void {
         <div class="panel">
           <h2>Garage &amp; toys</h2>
           ${toysHtml}
+        </div>
+
+        <div class="panel">
+          <h2>Trophy room</h2>
+          ${roomHtml}
+        </div>
+
+        <div class="panel">
+          <h2>Back home</h2>
+          ${legacyHtml}
         </div>
 
         <div class="panel">
@@ -468,6 +557,24 @@ export function renderLife(app: App, mount: HTMLElement): void {
         });
         if (!ok) return;
         if (buyToy(player, life, id)) {
+          app.persist();
+          draw();
+        }
+      });
+    }
+
+    for (const button of qa<HTMLButtonElement>(mount, '[data-project]')) {
+      button.addEventListener('click', async () => {
+        const def = projectById(button.dataset.project!);
+        if (!def) return;
+        const ok = await showDialog({
+          title: `Build the ${def.name}?`,
+          body: `${formatMoney(def.price)}, sent home. ${nation.name} plays ${def.nationBoost} stronger at the next World Trophy, and the name travels: +${def.fame} fame.`,
+          confirmLabel: 'Build it',
+          cancelLabel: 'Not yet',
+        });
+        if (!ok) return;
+        if (fundProject(player, life, def.id)) {
           app.persist();
           draw();
         }

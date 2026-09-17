@@ -48,6 +48,8 @@ import { ROOKIE_AGE } from './player';
 import type { Rng } from './rng';
 import { clamp } from './rng';
 import type { SaveData } from './save';
+import { lifestyleOf } from './save';
+import { nationStrengthBonus } from './lifestyle';
 import { TEAM_KITS } from './uniforms';
 import { rollWeather } from './weather';
 
@@ -617,7 +619,18 @@ export function startWorldCup(save: SaveData, rng: Rng, overall: number): CupInt
   const { player, league } = save;
   const nation = nationById(player.country);
 
-  const teams = NATIONS.map((n, i) => nationTeam(n, i, rng));
+  // Money sent home shows up here: the player's country fields a stronger
+  // side for what they built, though the bar to be picked stays where it was.
+  const homeBoost = nationStrengthBonus(lifestyleOf(save));
+  const teams = NATIONS.map((n, i) =>
+    nationTeam(
+      n.id === nation.id && homeBoost > 0
+        ? { ...n, strength: clamp(n.strength + homeBoost, 20, 99) }
+        : n,
+      i,
+      rng,
+    ),
+  );
   const groups = drawGroups(teams, rng);
 
   const bar = squadBar(nation);

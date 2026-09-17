@@ -354,7 +354,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
         devEnabled
           ? `<div class="dev-bar">
                <span>DEV BUILD</span>
-               <button id="devmenu">Player stats</button>
+               <button id="devmenu">Dev menu</button>
              </div>`
           : ''
       }

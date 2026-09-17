@@ -63,7 +63,8 @@ import { ensurePeople, fameLabel, homeById } from '../core/lifestyle';
 import { randomName } from '../core/league';
 import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q } from '../ui/dom';
-import { showDialog } from '../ui/modal';
+import { showDialog, wireHints } from '../ui/modal';
+import { HINTS } from '../ui/hints';
 import { devMenuEnabled } from './dev';
 import { openDerby } from './derby';
 import { howtoSeen, openHowto } from './howto';
@@ -378,9 +379,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
             <span>OVR</span>
           </div>
         </div>
-        ${meterHtml('Stamina', player.stamina, 100, '', 'big')}
-        ${meterHtml('Energy', player.energy, 100, 'xp')}
-        ${meterHtml('XP to next level', player.xp, xpForLevel(player.level), 'xp', 'slim')}
+        ${meterHtml('Stamina', player.stamina, 100, '', 'big', HINTS.stamina)}
+        ${meterHtml('Energy', player.energy, 100, 'xp', '', HINTS.energy)}
+        ${meterHtml('XP to next level', player.xp, xpForLevel(player.level), 'xp', 'slim', HINTS.xp)}
       </div>
 
       ${
@@ -545,6 +546,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
     </div>
   `;
 
+  wireHints(mount);
   if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('awards'));
   else if (upcoming) {
     // First game ever goes by way of the how-to; after that, straight in.

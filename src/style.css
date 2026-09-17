@@ -3092,3 +3092,27 @@ table.standings.fixtures tr.ahead td {
   background: var(--panel-2);
   border: 1px solid var(--line);
 }
+
+/* The "?" beside a meter's label: small, round, and clearly a button. */
+.meter-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font: 700 10px/1 system-ui, sans-serif;
+  letter-spacing: 0;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.meter-hint:active {
+  background: var(--accent);
+  color: #05210f;
+}

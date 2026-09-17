@@ -49,7 +49,8 @@ import { mvpSeasons } from '../core/awards';
 import { LEVELS } from '../core/league';
 import { nationById } from '../core/nations';
 import { esc, meterHtml, q, qa } from '../ui/dom';
-import { showDialog } from '../ui/modal';
+import { showDialog, wireHints } from '../ui/modal';
+import { HINTS } from '../ui/hints';
 
 const signed = (n: number): string => (n > 0 ? `+${n}` : `${n}`);
 
@@ -98,7 +99,7 @@ export function renderLife(app: App, mount: HTMLElement): void {
     const crowdPct = Math.round(fameCrowdBoost(life.fame) * 100);
     const bonusPct = Math.round((fameBonusMult(life.fame) - 1) * 100);
     const fameHtml = `
-      ${meterHtml(`Fame · ${fameLabel(life.fame)}`, life.fame, 100, 'fame', 'big')}
+      ${meterHtml(`Fame · ${fameLabel(life.fame)}`, life.fame, 100, 'fame', 'big', HINTS.fame)}
       <div class="statline" style="margin-top:12px">
         <div><b>+${crowdPct}%</b><span>Stands filled</span></div>
         <div><b>+${bonusPct}%</b><span>Bonus money</span></div>
@@ -199,17 +200,17 @@ export function renderLife(app: App, mount: HTMLElement): void {
 
     const boost = teammateBoost(life);
     const peopleHtml = `
-      ${meterHtml('Morale', life.morale, 100, life.morale < 35 ? 'low' : life.morale < 55 ? 'warn' : '')}
+      ${meterHtml('Morale', life.morale, 100, life.morale < 35 ? 'low' : life.morale < 55 ? 'warn' : '', '', HINTS.morale)}
       <p class="tiny muted" style="margin:4px 0 0">
         ${signed(moraleEnergyBonus(life))} energy a night · games teach ${Math.round((0.9 + life.morale / 500) * 100)}% of what they could.
       </p>
-      ${meterHtml('Clubhouse standing', life.clubhouse, 100, life.clubhouse < 35 ? 'low' : life.clubhouse < 55 ? 'warn' : '')}
+      ${meterHtml('Clubhouse standing', life.clubhouse, 100, life.clubhouse < 35 ? 'low' : life.clubhouse < 55 ? 'warn' : '', '', HINTS.clubhouse)}
       <p class="tiny muted" style="margin:4px 0 12px">
         Teammates play ${boost === 0 ? 'at their rating' : `${signed(boost)} on their rating`} behind you. Wins, training and a dinner lift it; losses and a big mouth cost it.
       </p>
       ${
         life.partner
-          ? `${meterHtml(`${life.partner.name} · at home`, life.partner.bond, 100, life.partner.bond < 30 ? 'low' : life.partner.bond < 55 ? 'warn' : '')}
+          ? `${meterHtml(`${life.partner.name} · at home`, life.partner.bond, 100, life.partner.bond < 30 ? 'low' : life.partner.bond < 55 ? 'warn' : '', '', HINTS.bond)}
              <p class="tiny muted" style="margin:4px 0 0">
                ${life.kids > 0 ? `${life.kids} kid${life.kids === 1 ? '' : 's'} at home · ` : ''}Every game on the road costs a little. Family time on an off day puts it back${life.kids === 0 ? '; keep it high through a winter and it might become a family' : ''}.
              </p>`
@@ -217,7 +218,7 @@ export function renderLife(app: App, mount: HTMLElement): void {
       }
       ${
         life.friend
-          ? `${meterHtml(`${life.friend.name} · from back home`, life.friend.bond, 100, life.friend.bond < 30 ? 'low' : life.friend.bond < 55 ? 'warn' : '')}
+          ? `${meterHtml(`${life.friend.name} · from back home`, life.friend.bond, 100, life.friend.bond < 30 ? 'low' : life.friend.bond < 55 ? 'warn' : '', '', HINTS.bond)}
              <p class="tiny muted" style="margin:4px 0 0">The friend who knew you before the number. Asks for tickets now and then. Say yes.</p>`
           : ''
       }`;
@@ -427,6 +428,7 @@ export function renderLife(app: App, mount: HTMLElement): void {
       <button class="btn primary" id="done">Back to Clubhouse</button>
     `;
     q(mount, '.scroll').scrollTop = scrollTop;
+    wireHints(mount);
 
     for (const button of qa<HTMLButtonElement>(mount, '[data-accept]')) {
       button.addEventListener('click', async () => {

@@ -13,6 +13,25 @@ export interface DialogOptions {
   danger?: boolean;
 }
 
+/**
+ * Every "?" a screen drew (see `meterHtml`) opens its explanation on tap.
+ * A dialog rather than a hover tooltip, because this is a phone game and a
+ * thumb can't hover.
+ */
+export function wireHints(root: ParentNode): void {
+  for (const button of Array.from(root.querySelectorAll<HTMLButtonElement>('[data-hint]'))) {
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void showDialog({
+        title: button.dataset.hintTitle ?? 'What this does',
+        body: button.dataset.hint ?? '',
+        confirmLabel: 'Got it',
+      });
+    });
+  }
+}
+
 export function showDialog(options: DialogOptions): Promise<boolean> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');

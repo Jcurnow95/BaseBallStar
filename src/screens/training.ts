@@ -38,7 +38,8 @@ import { randomName } from '../core/league';
 import { formatMoney } from '../core/gear';
 import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q, qa } from '../ui/dom';
-import { showDialog } from '../ui/modal';
+import { showDialog, wireHints } from '../ui/modal';
+import { HINTS } from '../ui/hints';
 import { runBpChallenge, runFungoFrenzy } from './trainingGames';
 import type { DrillOutcome } from './trainingGames';
 
@@ -69,9 +70,9 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
             </div>
             <div class="ovr"><b>${overallRating(player.attributes)}</b><span>OVR</span></div>
           </div>
-          ${meterHtml('Stamina', player.stamina)}
-          ${meterHtml('Energy', player.energy, 100, 'xp')}
-          ${meterHtml('XP', player.xp, xpForLevel(player.level), 'xp')}
+          ${meterHtml('Stamina', player.stamina, 100, '', '', HINTS.stamina)}
+          ${meterHtml('Energy', player.energy, 100, 'xp', '', HINTS.energy)}
+          ${meterHtml('XP', player.xp, xpForLevel(player.level), 'xp', '', HINTS.xp)}
         </div>
 
         <div class="panel">
@@ -252,6 +253,7 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
       }>Back to Clubhouse</button>
     `;
     q(mount, '.scroll').scrollTop = scrollTop;
+    wireHints(mount);
 
     for (const button of qa<HTMLButtonElement>(mount, '.up')) {
       button.addEventListener('click', async () => {

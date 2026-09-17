@@ -510,9 +510,15 @@ export function drawPitcher(
   const shoulderA: Joint = [p.shoulder[0] - 0.17, p.shoulder[1] - 0.02];
   const shoulderB: Joint = [p.shoulder[0] + 0.17, p.shoulder[1] - 0.02];
 
-  // Back (pivot) leg and the throwing arm while it's behind the body.
+  // Both legs go under the torso, so the belt and the shirt hem cover where
+  // the thighs meet the hip instead of the pants painting up over them. No
+  // pose lifts a foot above the hip, so nothing is hidden that shouldn't be.
+  // Back (pivot) leg first, the lead leg over it, then the throwing arm while
+  // it's behind the body.
   limb(p.hip, p.kneeBack, p.footBack, 0.15, kit.pants);
   shoe(ctx, p.footBack, 0.09);
+  limb(p.hip, p.kneeFront, p.footFront, 0.15, kit.pants);
+  shoe(ctx, p.footFront, 0.09);
   if (!armInFront) {
     limb(shoulderA, elbow(shoulderA, p.handA, -0.06), p.handA, 0.11, kit.shirt);
     hand(ctx, p.handA, skin, 0.045);
@@ -521,10 +527,6 @@ export function drawPitcher(
 
   // Torso.
   torso(ctx, p.hip, p.shoulder, 0.44, 0.3, kit);
-
-  // Lead leg.
-  limb(p.hip, p.kneeFront, p.footFront, 0.15, kit.pants);
-  shoe(ctx, p.footFront, 0.09);
 
   // Glove arm, always in front.
   limb(shoulderB, elbow(shoulderB, p.handB, 0.07), p.handB, 0.11, kit.shirt);
@@ -639,13 +641,14 @@ export function drawBatter(
   const elbowBack: Joint = [(backShoulder[0] + p.handA[0]) / 2 - 0.08, (backShoulder[1] + p.handA[1]) / 2 - 0.05];
   const elbowFront: Joint = [(frontShoulder[0] + p.handA[0]) / 2 + 0.02, (frontShoulder[1] + p.handA[1]) / 2 - 0.08];
 
-  // Back leg, back arm, torso, front leg, front arm, bat, head.
+  // Back leg, front leg, back arm, torso, front arm, bat, head. Both legs
+  // sit under the torso so the shirt hem covers the tops of the thighs.
   limb(p.hip, p.kneeBack, p.footBack, 0.14, kit.pants);
   shoe(ctx, p.footBack, 0.085);
-  limb(backShoulder, elbowBack, p.handA, 0.1, kit.shirt);
-  torso(ctx, p.hip, p.shoulder, 0.32, 0.26, kit);
   limb(p.hip, p.kneeFront, p.footFront, 0.14, kit.pants);
   shoe(ctx, p.footFront, 0.085);
+  limb(backShoulder, elbowBack, p.handA, 0.1, kit.shirt);
+  torso(ctx, p.hip, p.shoulder, 0.32, 0.26, kit);
   limb(frontShoulder, elbowFront, p.handA, 0.1, kit.shirt);
 
   // Bat: handle from the hands, barrel flaring toward the tip.

@@ -51,7 +51,7 @@ export interface PlayerProfile {
    */
   age: number;
   /**
-   * Nation id — the flag you play under in the Baseball World Trophy. Chosen
+   * Nation id — the flag you play under in the World Trophy. Chosen
    * once, when the player is created, and never changed: it decides how hard
    * you have to be to get picked. See `core/nations.ts`.
    */

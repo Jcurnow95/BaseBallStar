@@ -17,7 +17,7 @@ import type { BattingStats, PlayerProfile } from './types';
 import type { LeagueState, Team } from './league';
 import {
   LEVELS,
-  SEASON_GAMES,
+  seasonGames,
   ensureRosters,
   playerTeam,
   randomClubName,
@@ -127,7 +127,7 @@ export function synthesizeSeason(
   rating: number,
   levelId: number,
   rng: Rng,
-  games = SEASON_GAMES,
+  games: number,
 ): BattingStats {
   // -1 = replacement level, 0 = league average, +1 = the best bat in the league.
   const s = clamp((rating - 50) / 50, -1, 1);
@@ -236,7 +236,7 @@ function homeBallot(player: PlayerProfile, league: LeagueState, rng: Rng): MvpCa
   for (const team of league.teams) {
     const pct = winPct(team);
     for (const batter of teamBatters(team)) {
-      const stats = synthesizeSeason(batter.rating, league.levelId, rng);
+      const stats = synthesizeSeason(batter.rating, league.levelId, rng, seasonGames(league));
       candidates.push({
         name: batter.name,
         teamName: team.name,
@@ -270,7 +270,7 @@ function foreignAward(levelId: number, rng: Rng): MvpAward {
     // The same talent spread the player's own league is generated with: clubs
     // around 50, hitters scattered around their club.
     const rating = clamp(50 + rng.gaussian() * 16, 10, 99);
-    const stats = synthesizeSeason(rating, levelId, rng);
+    const stats = synthesizeSeason(rating, levelId, rng, LEVELS[levelId].games);
     field.push({
       name: '',
       teamName: '',

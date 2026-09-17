@@ -16,6 +16,8 @@ import {
 } from '../core/player';
 import { checkPromotion, offseasonAgePoints } from '../core/progression';
 import { isCupYear, startWorldCup } from '../core/worldCup';
+import { addFame, fadeFame, fameForHonors, lifeOffseason, noteLife } from '../core/lifestyle';
+import { lifestyleOf } from '../core/save';
 import { esc, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
@@ -184,7 +186,23 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     if (champion) player.money += RING_BONUS;
     if (mvp) player.money += MVP_BONUS;
 
-    // Every fourth year the world tournament comes round, and it is played
+    // The honours are what the winter remembers; the rest of the name fades
+    // a little, so a reputation has to keep being earned.
+    const life = lifestyleOf(save);
+    fadeFame(life);
+    const honorFame = fameForHonors({
+      mvp: mvp !== null,
+      champion,
+      promotedToMajors: check.promoted && check.nextLevelId === LEVELS.length - 1,
+    });
+    if (honorFame > 0) {
+      addFame(life, honorFame);
+      noteLife(life, `The winter was kind to the name: +${honorFame} fame for the honours.`);
+    }
+    // And the winter at home, which is where the people are.
+    const homeLines = lifeOffseason(life, () => app.rng.next());
+
+    // Every second year the world tournament comes round, and it is played
     // before opening day — so it is seeded here, on the new league, after the
     // player has had their birthday and their offseason points but before they
     // report to camp. `startWorldCup` puts the group games on the front of the
@@ -196,9 +214,11 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     app.lastGame = null;
     app.persist();
 
-    const newsText = clubhouseNews.length
-      ? `\n\nClubhouse news:\n${clubhouseNews.map((line) => `· ${line}`).join('\n')}`
-      : '';
+    const newsText =
+      (homeLines.length ? `\n\n${homeLines.join('\n')}` : '') +
+      (clubhouseNews.length
+        ? `\n\nClubhouse news:\n${clubhouseNews.map((line) => `· ${line}`).join('\n')}`
+        : '');
     await showDialog({
       title: `Season ${save.seasonYear} — ${LEVELS[save.league.levelId].name}`,
       body:
@@ -213,7 +233,7 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     });
     if (cupIntro) {
       await showDialog({
-        title: `Baseball World Trophy · Year ${save.seasonYear}`,
+        title: `World Trophy · Year ${save.seasonYear}`,
         body: cupIntro.lines.join('\n\n'),
         confirmLabel: cupIntro.selection === 'in' ? 'Report to the squad' : 'Back to work',
       });

@@ -25,14 +25,28 @@ import {
 } from '../core/progression';
 import type { LevelUpReport, TrainingOption } from '../core/progression';
 import { advanceDay, isGameDay, isSeasonOver } from '../core/league';
+import {
+  activitiesFor,
+  activityDone,
+  addClubhouse,
+  doActivity,
+  lifeDayTick,
+  overnightEnergyBonus,
+} from '../core/lifestyle';
+import type { ActivityDef } from '../core/lifestyle';
+import { randomName } from '../core/league';
+import { formatMoney } from '../core/gear';
+import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q, qa } from '../ui/dom';
-import { showDialog } from '../ui/modal';
+import { showDialog, wireHints } from '../ui/modal';
+import { HINTS } from '../ui/hints';
 import { runBpChallenge, runFungoFrenzy } from './trainingGames';
 import type { DrillOutcome } from './trainingGames';
 
 export function renderTraining(app: App, mount: HTMLElement): () => void {
   const save = app.requireSave();
   const { player } = save;
+  const life = lifestyleOf(save);
   // Spending points and reading your numbers works any day. Only the drills
   // themselves, which burn the day, are limited to off days.
   const offDay = !isGameDay(save.league) && !isSeasonOver(save.league);
@@ -56,9 +70,9 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
             </div>
             <div class="ovr"><b>${overallRating(player.attributes)}</b><span>OVR</span></div>
           </div>
-          ${meterHtml('Stamina', player.stamina)}
-          ${meterHtml('Energy', player.energy, 100, 'xp')}
-          ${meterHtml('XP', player.xp, xpForLevel(player.level), 'xp')}
+          ${meterHtml('Stamina', player.stamina, 100, '', '', HINTS.stamina)}
+          ${meterHtml('Energy', player.energy, 100, 'xp', '', HINTS.energy)}
+          ${meterHtml('XP', player.xp, xpForLevel(player.level), 'xp', '', HINTS.xp)}
         </div>
 
         <div class="panel">
@@ -183,6 +197,45 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
         </div>`
         }
 
+        ${
+          offDay
+            ? `<div class="panel">
+          <h2>Off the field</h2>
+          ${activitiesFor(life, save.league.day)
+            .map((act) => {
+              const cost = act.cost(save.league.levelId);
+              const done = activityDone(life, act.id);
+              const off = done || player.energy < act.energyCost || player.money < cost;
+              const effects = [
+                act.morale > 0 ? `<span class="st-up">+${act.morale} morale</span>` : '',
+                act.clubhouse > 0 ? `<span class="st-up">+${act.clubhouse} clubhouse</span>` : '',
+                act.fame > 0 ? `<span class="xp">+${act.fame} fame</span>` : '',
+                act.stamina > 0 ? `<span class="st-up">+${act.stamina} STA</span>` : act.stamina < 0 ? `<span class="st-dn">${act.stamina} STA</span>` : '',
+              ]
+                .filter(Boolean)
+                .join('<br/>');
+              return `
+              <div class="train-card" data-activity="${act.id}" data-off="${off ? 1 : 0}">
+                <div class="info">
+                  <strong>${esc(act.name)}${done ? ' <span class="tiny muted">· done today</span>' : ''}</strong>
+                  <span>${esc(act.detail)}</span>
+                </div>
+                <div class="cost">
+                  <span class="en">-${act.energyCost} EN</span><br/>
+                  ${cost > 0 ? `<span class="st-dn">-${formatMoney(cost)}</span><br/>` : ''}
+                  ${effects}
+                </div>
+              </div>`;
+            })
+            .join('')}
+          <p class="tiny muted" style="margin:10px 0 0">
+            Each once a day. Morale is what you sleep on and how much a game teaches; the clubhouse
+            is how hard the men behind you play.
+          </p>
+        </div>`
+            : ''
+        }
+
         <div class="panel">
           <h2>What the numbers do</h2>
           ${ATTRIBUTE_KEYS.map(
@@ -200,6 +253,7 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
       }>Back to Clubhouse</button>
     `;
     q(mount, '.scroll').scrollTop = scrollTop;
+    wireHints(mount);
 
     for (const button of qa<HTMLButtonElement>(mount, '.up')) {
       button.addEventListener('click', async () => {
@@ -266,7 +320,13 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
           if (!ok) return;
         }
         advanceDay(save.league, app.rng);
-        recoverOvernight(player);
+        lifeDayTick(life, {
+          levelId: save.league.levelId,
+          gameDay: false,
+          won: null,
+          roll: () => app.rng.next(),
+        });
+        recoverOvernight(player, overnightEnergyBonus(life));
         app.persist();
         app.go('hub');
       });
@@ -295,14 +355,43 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
         await outOfEnergy();
         return;
       }
+      // Putting the work in where the teammates can see it counts for something.
+      addClubhouse(life, 1);
       app.persist();
       draw();
       await maybeLevelDialog(report);
     };
 
+    const runActivity = async (activity: ActivityDef): Promise<void> => {
+      const outcome = doActivity(
+        player,
+        life,
+        activity,
+        save.league.levelId,
+        save.league.day,
+        () => app.rng.next(),
+        () => randomName(app.rng),
+      );
+      if (!outcome) {
+        await showDialog({
+          title: 'Not today',
+          body: 'Either the tank is empty, the wallet is, or you have already done that today.',
+        });
+        return;
+      }
+      app.persist();
+      draw();
+      await showDialog({
+        title: activity.name,
+        body: outcome.lines.length > 0 ? outcome.lines.join('\n') : 'A good day.',
+        confirmLabel: 'Nice',
+      });
+    };
+
     const finishDrill = async (option: TrainingOption, outcome: DrillOutcome): Promise<void> => {
       const bonus = trainingBonusXp(option, outcome.ratio);
       const report = applyTraining(player, option, bonus);
+      if (report) addClubhouse(life, 1);
       app.persist();
       draw();
       await showDialog({
@@ -349,6 +438,13 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
       } else {
         card.addEventListener('click', () => quickTrain(option));
       }
+    }
+
+    for (const card of qa(mount, '[data-activity]')) {
+      const activity = activitiesFor(life, save.league.day).find(
+        (a) => a.id === card.dataset.activity,
+      );
+      if (activity) card.addEventListener('click', () => runActivity(activity));
     }
 
     q(mount, '#done').addEventListener('click', () => app.go('hub'));

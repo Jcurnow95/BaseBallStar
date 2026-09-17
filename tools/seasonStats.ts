@@ -12,7 +12,7 @@
  * Run: npx tsx tools/seasonStats.ts
  */
 import {
-  SEASON_GAMES,
+  seasonGames,
   advanceDay,
   createLeague,
   gamesPlayed,
@@ -93,8 +93,8 @@ for (const seed of [1, 7, 13, 29, 101]) {
   const me = teamById(league, league.playerTeamId);
 
   check(
-    `seed ${seed}: every club played all ${SEASON_GAMES} games`,
-    teams.every((t) => gamesPlayed(t) === SEASON_GAMES),
+    `seed ${seed}: every club played all ${seasonGames(league)} games`,
+    teams.every((t) => gamesPlayed(t) === seasonGames(league)),
     teams.map((t) => `${t.name} ${gamesPlayed(t)}`).join(', '),
   );
 
@@ -102,8 +102,8 @@ for (const seed of [1, 7, 13, 29, 101]) {
   const decisions = teams.reduce((n, t) => n + t.wins + t.losses + (t.ties ?? 0), 0);
   check(
     `seed ${seed}: results are conserved across the league`,
-    decisions === SEASON_GAMES * teams.length,
-    `${decisions} results for ${(SEASON_GAMES * teams.length) / 2} games`,
+    decisions === seasonGames(league) * teams.length,
+    `${decisions} results for ${(seasonGames(league) * teams.length) / 2} games`,
   );
 
   const wins = teams.reduce((n, t) => n + t.wins, 0);
@@ -120,7 +120,7 @@ for (const seed of [1, 7, 13, 29, 101]) {
     `${scored} for, ${allowed} against`,
   );
 
-  check(`seed ${seed}: the log lists every fixture`, log.length === SEASON_GAMES);
+  check(`seed ${seed}: the log lists every fixture`, log.length === seasonGames(league));
   check(`seed ${seed}: every fixture was played`, log.every((f) => f.played));
 
   // The log is built from the schedule, the table from the counters. They are
@@ -266,7 +266,7 @@ console.log('\n=== An empty season ===\n');
   check('no streak before a game is played', splits.streak === null);
   check('no expected record either', splits.pythagorean.wins === 0 && splits.pythagorean.losses === 0);
   check('runs per game does not divide by zero', splits.runsPerGame === 0);
-  check('the whole card is still listed', seasonLog(league).length === SEASON_GAMES);
+  check('the whole card is still listed', seasonLog(league).length === seasonGames(league));
 }
 
 console.log(

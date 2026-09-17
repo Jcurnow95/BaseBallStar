@@ -6,6 +6,7 @@ import {
   gamesPlayed,
   generateLeagueNames,
   regularSeasonGames,
+  seasonGames,
   simulateGame,
   winningPct,
 } from './league';
@@ -37,13 +38,17 @@ export interface LevelTable {
   teams: FarmTeam[];
 }
 
-/** Everybody in a table plays every round, so any club's count is the table's. */
-const roundsPlayed = (table: LevelTable): number =>
-  table.teams[0] ? gamesPlayed(table.teams[0]) : 0;
+/**
+ * How far a table has got: the fewest games any club has played. Clubs are
+ * kept within a game of each other (see `playNext`), so this is the table's
+ * count once the day's pairings are complete.
+ */
+const tableGames = (table: LevelTable): number =>
+  table.teams.reduce((min, t) => Math.min(min, gamesPlayed(t)), Number.MAX_SAFE_INTEGER) || 0;
 
 function createLevelTable(levelId: number, rng: Rng, taken: Set<string>): LevelTable {
   const kits = [...TEAM_KITS];
-  const teams = generateLeagueNames(rng, taken).map((name) => {
+  const teams = generateLeagueNames(rng, taken, LEVELS[levelId].teams).map((name) => {
     taken.add(name);
     const kit = kits.splice(rng.int(0, kits.length - 1), 1)[0] ?? TEAM_KITS[0];
     return {
@@ -61,14 +66,17 @@ function createLevelTable(levelId: number, rng: Rng, taken: Set<string>): LevelT
   return { levelId, teams };
 }
 
-/** One day of results: random pairings, better clubs win more. */
-function playRound(table: LevelTable, rng: Rng): void {
-  const pool = [...table.teams];
-  while (pool.length >= 2) {
-    const a = pool.splice(rng.int(0, pool.length - 1), 1)[0];
-    const b = pool.splice(rng.int(0, pool.length - 1), 1)[0];
-    simulateGame(a, b, rng);
-  }
+/**
+ * One more game: the two clubs with the fewest played, ties broken at
+ * random, so a table with an odd number of clubs still ends the year with
+ * everybody on the same count. Better clubs win more.
+ */
+function playNext(table: LevelTable, rng: Rng): void {
+  if (table.teams.length < 2) return;
+  const order = [...table.teams]
+    .map((t) => ({ t, key: gamesPlayed(t) + rng.next() * 0.5 }))
+    .sort((a, b) => a.key - b.key);
+  simulateGame(order[0].t, order[1].t, rng);
 }
 
 /**
@@ -78,11 +86,16 @@ function playRound(table: LevelTable, rng: Rng): void {
  * just left), the table for the player's own level is dropped (the real
  * league covers it), a table that's ahead of the player's league can only
  * mean a season rollover so it resets, and every table behind the player's
- * games-played count catches up one simulated day at a time.
+ * point in the season catches up one simulated day at a time.
  */
 export function syncOtherLevels(save: SaveData, rng: Rng): void {
   const league = save.league;
-  const target = regularSeasonGames(league).filter((g) => g.played).length;
+  // Seasons are different lengths up the ladder, so "the same point" is the
+  // same fraction of the year, not the same number of games.
+  const played = regularSeasonGames(league).filter((g) => g.played).length;
+  const mine = Math.max(1, seasonGames(league));
+  const targetFor = (levelId: number): number =>
+    Math.round((played / mine) * LEVELS[levelId].games);
 
   const tables = (save.otherLevels ?? []).filter((t) => t.levelId !== league.levelId);
   const taken = new Set<string>(league.teams.map((t) => t.name));
@@ -97,7 +110,8 @@ export function syncOtherLevels(save: SaveData, rng: Rng): void {
   tables.sort((a, b) => a.levelId - b.levelId);
 
   for (const table of tables) {
-    if (roundsPlayed(table) > target) {
+    const target = targetFor(table.levelId);
+    if (tableGames(table) > target) {
       for (const team of table.teams) {
         team.wins = 0;
         team.losses = 0;
@@ -106,7 +120,7 @@ export function syncOtherLevels(save: SaveData, rng: Rng): void {
         team.runsAgainst = 0;
       }
     }
-    while (roundsPlayed(table) < target) playRound(table, rng);
+    while (tableGames(table) < target) playNext(table, rng);
   }
 
   save.otherLevels = tables;

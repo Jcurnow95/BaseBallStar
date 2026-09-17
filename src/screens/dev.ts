@@ -18,6 +18,9 @@ import {
   xpForLevel,
 } from '../core/progression';
 import { clamp } from '../core/rng';
+import { LEVELS, createLeague } from '../core/league';
+import { fameLabel } from '../core/lifestyle';
+import { lifestyleOf } from '../core/save';
 import type { BattingStats, Handedness, Position } from '../core/types';
 import { esc, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
@@ -25,14 +28,17 @@ import { showDialog } from '../ui/modal';
 const DEV_FLAG_KEY = 'baseball-star:dev';
 
 /**
- * The dev menu writes straight into the save, so it's only reachable on the dev
- * server. A production build (and therefore anything Capacitor ships) hides it
- * unless `baseball-star:dev` is set to `1` in localStorage, which is the escape
- * hatch for testing on a real device.
+ * The dev menu writes straight into the save, so it's only reachable where a
+ * developer is: the dev server, or any build served from localhost — which
+ * is what `npm start` and the Electron shell are. A production build on a
+ * real device hides it unless `baseball-star:dev` is set to `1` in
+ * localStorage, the escape hatch for testing on a phone.
  */
 export function devMenuEnabled(): boolean {
   if (import.meta.env.DEV) return true;
   try {
+    const host = location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') return true;
     return localStorage.getItem(DEV_FLAG_KEY) === '1';
   } catch {
     return false;
@@ -78,6 +84,7 @@ function reconcile(line: BattingStats): void {
 export function renderDev(app: App, mount: HTMLElement): void {
   const save = app.requireSave();
   const { player } = save;
+  const life = lifestyleOf(save);
   let editing: 'season' | 'career' = 'season';
   const line = (): BattingStats => (editing === 'season' ? player.season : player.career);
 
@@ -97,6 +104,52 @@ export function renderDev(app: App, mount: HTMLElement): void {
             <div><b id="dev-zone">0</b><span>C+V</span></div>
             <div><b id="dev-avg">.000</b><span>AVG</span></div>
             <div><b id="dev-ops">.000</b><span>OPS</span></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>League</h2>
+          <div class="chip-row">
+            ${LEVELS.map(
+              (lvl) =>
+                `<button class="chip ${lvl.id === save.league.levelId ? 'on' : ''}" data-level="${lvl.id}">${esc(lvl.short)}</button>`,
+            ).join('')}
+          </div>
+          <p class="tiny muted" style="margin:10px 0 0">
+            Now in <b>${esc(LEVELS[save.league.levelId].name)}</b> · season ${save.seasonYear} ·
+            day ${Math.min(save.league.day + 1, save.league.calendar.length)} of ${save.league.calendar.length}.
+            Switching builds a fresh league and schedule at that level; your player, stats and
+            life come with you, the current season's table does not.
+          </p>
+          <div class="dev-grid" style="margin-top:10px">
+            <label class="dev-num"><span>Season year</span>
+              <input type="number" min="1" max="40" step="1" inputmode="numeric"
+                     data-season="year" value="${save.seasonYear}" /></label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Life off the field</h2>
+          <div class="dev-row">
+            <span class="name">Fame <i class="tiny muted" id="dev-fame">${esc(fameLabel(life.fame))}</i></span>
+            <input type="range" min="0" max="100" step="1" data-life="fame"
+                   value="${Math.round(life.fame)}" aria-label="Fame" />
+            <input type="number" class="dev-spin" min="0" max="100" step="1"
+                   inputmode="numeric" data-life-num="fame" value="${Math.round(life.fame)}" />
+          </div>
+          <div class="dev-row">
+            <span class="name">Morale</span>
+            <input type="range" min="0" max="100" step="1" data-life="morale"
+                   value="${Math.round(life.morale)}" aria-label="Morale" />
+            <input type="number" class="dev-spin" min="0" max="100" step="1"
+                   inputmode="numeric" data-life-num="morale" value="${Math.round(life.morale)}" />
+          </div>
+          <div class="dev-row">
+            <span class="name">Clubhouse</span>
+            <input type="range" min="0" max="100" step="1" data-life="clubhouse"
+                   value="${Math.round(life.clubhouse)}" aria-label="Clubhouse standing" />
+            <input type="number" class="dev-spin" min="0" max="100" step="1"
+                   inputmode="numeric" data-life-num="clubhouse" value="${Math.round(life.clubhouse)}" />
           </div>
         </div>
 
@@ -304,6 +357,58 @@ export function renderDev(app: App, mount: HTMLElement): void {
         const value = Number(button.dataset.preset);
         for (const key of ATTRIBUTE_KEYS) player.attributes[key] = value;
         commit();
+      });
+    }
+
+    for (const button of qa<HTMLButtonElement>(mount, '[data-level]')) {
+      button.addEventListener('click', async () => {
+        const levelId = Number(button.dataset.level);
+        if (levelId === save.league.levelId) return;
+        const ok = await showDialog({
+          title: `Move to ${LEVELS[levelId].name}?`,
+          body:
+            'A new league, new clubs and a fresh schedule are built at that level, starting on ' +
+            'day one. The current season and any tournament in progress are dropped.',
+          confirmLabel: 'Move',
+          cancelLabel: 'Stay',
+        });
+        if (!ok) return;
+        save.league = createLeague(levelId, app.rng);
+        // The other levels' tables and the tournament calendar were tied to the
+        // old league; both rebuild themselves when next asked.
+        save.otherLevels = undefined;
+        if (save.worldCup && !save.worldCup.complete) save.worldCup = undefined;
+        app.lastGame = null;
+        app.persist();
+        draw();
+      });
+    }
+
+    for (const input of qa<HTMLInputElement>(mount, '[data-season]')) {
+      input.addEventListener('change', () => {
+        save.seasonYear = clamp(Math.round(readNumber(input, save.seasonYear)), 1, 40);
+        app.persist();
+        draw();
+      });
+    }
+
+    for (const slider of qa<HTMLInputElement>(mount, '[data-life]')) {
+      const key = slider.dataset.life as 'fame' | 'morale' | 'clubhouse';
+      slider.addEventListener('input', () => {
+        life[key] = clamp(Math.round(Number(slider.value)), 0, 100);
+        q<HTMLInputElement>(mount, `[data-life-num="${key}"]`).value = String(life[key]);
+        if (key === 'fame') q(mount, '#dev-fame').textContent = fameLabel(life.fame);
+        app.persist();
+      });
+    }
+    for (const input of qa<HTMLInputElement>(mount, '[data-life-num]')) {
+      const key = input.dataset.lifeNum as 'fame' | 'morale' | 'clubhouse';
+      input.addEventListener('change', () => {
+        life[key] = clamp(Math.round(readNumber(input, life[key])), 0, 100);
+        input.value = String(life[key]);
+        q<HTMLInputElement>(mount, `[data-life="${key}"]`).value = String(life[key]);
+        if (key === 'fame') q(mount, '#dev-fame').textContent = fameLabel(life.fame);
+        app.persist();
       });
     }
 

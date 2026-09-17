@@ -15,7 +15,7 @@
  * Run: npx tsx tools/awards.ts
  */
 import { BALLOT_SIZE, runSeasonAwards, synthesizeSeason } from '../src/core/awards';
-import { LEVELS, SEASON_GAMES, createLeague, playerTeam } from '../src/core/league';
+import { LEVELS, seasonGames, createLeague, playerTeam } from '../src/core/league';
 import { battingAverage, emptyBattingStats, ops } from '../src/core/player';
 import { Rng, clamp } from '../src/core/rng';
 import type { BattingStats } from '../src/core/types';
@@ -49,7 +49,7 @@ console.log('\n=== Synthesized lines are legal ===\n');
   let worst = '';
   for (let i = 0; i < 20000; i++) {
     const levelId = i % LEVELS.length;
-    const s = synthesizeSeason(clamp(10 + rng.next() * 89, 10, 99), levelId, rng);
+    const s = synthesizeSeason(clamp(10 + rng.next() * 89, 10, 99), levelId, rng, LEVELS[levelId].games);
     const legal =
       s.singles + s.doubles + s.triples + s.homeRuns === s.hits &&
       s.hits <= s.ab &&
@@ -82,7 +82,7 @@ for (let levelId = 0; levelId < LEVELS.length; levelId++) {
     let bestOps = -1;
     for (let i = 0; i < 48; i++) {
       const rating = clamp(50 + rng.gaussian() * 16, 10, 99);
-      const line = synthesizeSeason(rating, levelId, rng);
+      const line = synthesizeSeason(rating, levelId, rng, LEVELS[levelId].games);
       const value = Number(ops(line));
       if (value > bestOps) {
         bestOps = value;
@@ -122,8 +122,8 @@ for (const skill of SKILLS) {
       const league = createLeague(levelId, rng);
       // Give the clubs a plausible table to be judged against.
       for (const team of league.teams) {
-        team.wins = Math.round(clamp(SEASON_GAMES * (0.5 + rng.gaussian() * 0.14), 4, 20));
-        team.losses = SEASON_GAMES - team.wins;
+        team.wins = Math.round(clamp(seasonGames(league) * (0.5 + rng.gaussian() * 0.14), 4, 20));
+        team.losses = seasonGames(league) - team.wins;
       }
 
       const player = playerAt(levelId);
@@ -195,8 +195,8 @@ console.log('\n=== The MVP is a hitter anybody would pick ===\n');
     const levelId = season % LEVELS.length;
     const league = createLeague(levelId, rng);
     for (const team of league.teams) {
-      team.wins = Math.round(clamp(SEASON_GAMES * (0.5 + rng.gaussian() * 0.16), 3, 21));
-      team.losses = SEASON_GAMES - team.wins;
+      team.wins = Math.round(clamp(seasonGames(league) * (0.5 + rng.gaussian() * 0.16), 3, 21));
+      team.losses = seasonGames(league) - team.wins;
     }
     // Keep the player off the ballot so this measures the field alone.
     const player = playerAt(levelId);
@@ -244,7 +244,7 @@ console.log('\n=== Ballot shape ===\n');
   const league = createLeague(1, rng);
   league.teams.forEach((t, i) => {
     t.wins = 16 - i * 2;
-    t.losses = SEASON_GAMES - t.wins;
+    t.losses = seasonGames(league) - t.wins;
   });
   const player = playerAt(1);
   player.season = playSeason(player, 1, SKILLS[0], rng);
@@ -306,7 +306,7 @@ console.log('\n=== A career of award seasons ===\n');
     const league = createLeague(levelId, rng);
     league.teams.forEach((t, i) => {
       t.wins = 15 - i * 2;
-      t.losses = SEASON_GAMES - t.wins;
+      t.losses = seasonGames(league) - t.wins;
     });
     const player = playerAt(levelId);
     player.season = playSeason(player, levelId, SKILLS[0], rng);

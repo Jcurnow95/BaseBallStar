@@ -13,7 +13,7 @@
  * `tools/balance.ts` keeps its own variant of this: it reports zone and whiff
  * diagnostics per pitch, which this one deliberately throws away.
  */
-import { LEVELS, SEASON_GAMES } from '../src/core/league';
+import { LEVELS } from '../src/core/league';
 import { throwPitch } from '../src/core/pitching';
 import { IDEAL_UNDER, resolveSwing } from '../src/core/swing';
 import { resolveBattedBall } from '../src/core/outcome';
@@ -124,7 +124,7 @@ export const add = (target: BattingStats, delta: BattingStats): void => {
 export function playSeason(player: PlayerProfile, levelId: number, skill: Skill, rng: Rng): BattingStats {
   const totals = emptyBattingStats();
   // Batting second in a nine-man order is a shade over four trips a night.
-  const plateAppearances = Math.round(SEASON_GAMES * rng.range(3.8, 4.3));
+  const plateAppearances = Math.round(LEVELS[levelId].games * rng.range(3.8, 4.3));
   for (let i = 0; i < plateAppearances; i++) add(totals, simulatePA(player, levelId, skill, rng));
 
   // Runs and RBI aren't modelled by the abstract resolver, so estimate them

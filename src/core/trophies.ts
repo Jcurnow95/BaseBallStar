@@ -24,10 +24,11 @@
  *    everything else falls out of the season and career lines that already
  *    exist. Nothing here knows what a `GameSim` is.
  *
- * Thresholds are tuned for a 24-game season, not a 162-game one. `SEASON_GAMES`
- * is short on purpose, so a season is roughly a hundred plate appearances: five
- * home runs is a real power year here and forty would be unreachable. If the
- * schedule ever lengthens, the season tier below is the part that has to move.
+ * Thresholds are tuned for a short season, not a 162-game one. A year runs
+ * 28 games in Single-A and 44 in the Majors (see `LEVELS`), so a season is
+ * a hundred-odd plate appearances: five home runs is a real power year here
+ * and forty would be unreachable. If the schedule ever lengthens again, the
+ * season tier below is the part that has to move.
  */
 import type { BattingStats, PlayerProfile } from './types';
 
@@ -90,7 +91,7 @@ export function emptyGameFeats(): GameFeats {
 }
 
 /**
- * What a Baseball World Trophy game was, for the trophies only it can win.
+ * What a World Trophy game was, for the trophies only it can win.
  * Deliberately a plain shape rather than an import from `core/worldCup.ts` —
  * the tournament knows about trophies, not the other way round.
  */
@@ -320,7 +321,7 @@ export const TROPHIES: Trophy[] = [
     id: 'cup-homer',
     name: 'For the Flag',
     icon: '🎌',
-    blurb: 'Hit a home run in a Baseball World Trophy game.',
+    blurb: 'Hit a home run in a World Trophy game.',
     tier: 'moment',
     test: (c) => {
       const gc = g(c);
@@ -488,16 +489,17 @@ export const TROPHIES: Trophy[] = [
     id: 'cup-final',
     name: 'On the World Stage',
     icon: '🌍',
-    blurb: 'Reach the Baseball World Trophy final.',
+    blurb: 'Reach the World Trophy final.',
     tier: 'honor',
     headline: true,
     test: (c) => g(c)?.worldCup?.finalist === true,
   },
   {
+    // The id predates the rename and is stored in saves, so it stays.
     id: 'trough',
-    name: 'The Trough',
+    name: 'World Trophy',
     icon: '🥇',
-    blurb: 'Win the Baseball World Trophy.',
+    blurb: 'Win the World Trophy.',
     tier: 'honor',
     headline: true,
     test: (c) => g(c)?.worldCup?.champion === true,

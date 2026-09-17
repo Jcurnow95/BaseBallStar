@@ -4,6 +4,8 @@ import type { SeasonAwards } from './awards';
 import type { UnlockedTrophy } from './trophies';
 import type { LevelTable } from './otherLeagues';
 import type { CupRecord, WorldCup } from './worldCup';
+import type { LifestyleState } from './lifestyle';
+import { createLifestyle, normaliseLifestyle } from './lifestyle';
 import { DEFAULT_NATION_ID } from './nations';
 import { ROOKIE_AGE } from './player';
 import { readKey, removeKey, writeKey } from './storage';
@@ -37,12 +39,17 @@ export interface SaveData {
    */
   otherLevels?: LevelTable[];
   /**
-   * This year's Baseball World Trophy, if this is one of the years it's played.
-   * Replaced wholesale every fourth year. See `core/worldCup.ts`.
+   * This year's World Trophy, if this is one of the years it's played.
+   * Replaced wholesale every second year. See `core/worldCup.ts`.
    */
   worldCup?: WorldCup;
   /** Every tournament the career has lived through, oldest first. */
   cupHistory?: CupRecord[];
+  /**
+   * Life off the field: home, fame, people, legacy. Optional so pre-feature
+   * saves still load; a missing one starts in the team apartment.
+   */
+  lifestyle?: LifestyleState;
 }
 
 export function loadSave(slot: number): SaveData | null {
@@ -94,6 +101,13 @@ function normalise(save: SaveData): void {
   // leaving it unset would quietly keep the player out of every tournament.
   if (typeof player.country !== 'string') player.country = DEFAULT_NATION_ID;
   if (!Array.isArray(save.cupHistory)) save.cupHistory = [];
+  // A career from before there was a life off the field starts in the flat.
+  save.lifestyle = normaliseLifestyle(save.lifestyle);
+}
+
+/** The save's life state, built on the spot for anything that predates it. */
+export function lifestyleOf(save: SaveData): LifestyleState {
+  return (save.lifestyle ??= createLifestyle());
 }
 
 export function writeSave(slot: number, data: Omit<SaveData, 'version'>): void {
@@ -112,5 +126,13 @@ export function clearSave(slot: number): void {
 }
 
 export function newSave(player: PlayerProfile, league: LeagueState): SaveData {
-  return { version: SAVE_VERSION, player, league, seasonYear: 1, awards: [], trophies: [] };
+  return {
+    version: SAVE_VERSION,
+    player,
+    league,
+    seasonYear: 1,
+    awards: [],
+    trophies: [],
+    lifestyle: createLifestyle(),
+  };
 }

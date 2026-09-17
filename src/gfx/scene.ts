@@ -1,5 +1,6 @@
 import type { Weather } from '../core/weather';
 import type { Lighting } from './palette';
+import type { StadiumSpec } from './park';
 import { CROWD_COLOURS, alpha, hash, mix, scale as shade, unit } from './palette';
 import { drawClouds } from './weather';
 
@@ -104,9 +105,15 @@ export function drawSky(
   drawClouds(ctx, bleed.right - bleed.left, bleed.top, L.horizon * 0.7, light, weather, time);
 }
 
+/** The backdrop drawn when nobody says how big the park is: the old seven-row bowl. */
+const DEFAULT_FAR_STADIUM: StadiumSpec = { bowlRows: 7, sideRows: 4, homeRows: 0, upperRows: 0 };
+
 /**
  * The bowl beyond the wall, the scoreboard over centre and the light towers,
- * then the wall itself. `crowd` is how full the seats are.
+ * then the wall itself. `crowd` is how full the seats are; `stadium` is how
+ * much park there is — a few rows of bleachers in Single-A, a second deck
+ * stacked on a facade in the Majors — so the view from the plate says where
+ * the career has got to as plainly as the field view does.
  */
 export function drawFarPark(
   ctx: CanvasRenderingContext2D,
@@ -114,75 +121,132 @@ export function drawFarPark(
   bleed: SceneBleed,
   light: Lighting,
   crowd: number,
+  stadium: StadiumSpec = DEFAULT_FAR_STADIUM,
 ): void {
   const wallBase = L.proj(0, 400).y;
   const wallH = L.H * 0.03;
   const wallTop = wallBase - wallH;
-  const standsTop = L.horizon * 0.5;
-  const rows = 7;
   const width = bleed.right - bleed.left;
-
-  // Tiers, thinner toward the back. The front row sits on the wall right
-  // across the frame; the bowl wraps round toward us at the edges, so out
-  // there it's nearer and reads taller, which is what lifts the top edge.
-  const edge = (x: number): number => 1 + 0.55 * Math.pow(((x - L.cx) / L.W) * 2, 2);
-  const rowFrac = (k: number): number => 1 - Math.pow(1 - k / rows, 1.5);
-  const rowAt = (k: number, x: number): number => wallTop - (wallTop - standsTop) * rowFrac(k) * edge(x);
-  const traceBand = (kBottom: number, kTop: number) => {
-    ctx.beginPath();
-    ctx.moveTo(bleed.left, rowAt(kBottom, bleed.left));
-    for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, rowAt(kBottom, x));
-    ctx.lineTo(bleed.right, rowAt(kBottom, bleed.right));
-    ctx.lineTo(bleed.right, rowAt(kTop, bleed.right));
-    for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, rowAt(kTop, x));
-    ctx.lineTo(bleed.left, rowAt(kTop, bleed.left));
-    ctx.closePath();
-  };
-  for (let k = 0; k < rows; k++) {
-    ctx.fillStyle = k % 2 === 0 ? light.seats : light.seatsAlt;
-    traceBand(k, k + 1);
-    ctx.fill();
-    // Riser shadow along the front of each row.
-    ctx.strokeStyle = alpha('#000000', 0.22);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let x = bleed.left; x <= bleed.right; x += 24) {
-      if (x === bleed.left) ctx.moveTo(x, rowAt(k, x));
-      else ctx.lineTo(x, rowAt(k, x));
-    }
-    ctx.stroke();
-  }
-
-  // The crowd, scattered by hash so nobody moves between frames.
+  /** How tall a full eight-row deck stands over the wall at centre. */
+  const deckHeight = wallTop - L.horizon * 0.5;
   const fill = Math.max(0, Math.min(1, crowd));
-  const seats = Math.round((width / 4) * rows);
-  const taken = Math.round(seats * fill);
   const size = Math.max(1.6, L.W * 0.007);
-  for (let i = 0; i < taken; i++) {
-    const h = hash(i + 1200);
-    const row = (h >>> 3) % rows;
-    const x = bleed.left + unit(h) * width;
-    const y0 = rowAt(row + 1, x);
-    const y1 = rowAt(row, x);
-    const y = y0 + (y1 - y0) * (0.35 + unit(h, 9) * 0.5);
-    ctx.fillStyle = CROWD_COLOURS[h % CROWD_COLOURS.length];
-    ctx.fillRect(x, y - size * 1.4, size, size * 1.4);
-  }
 
-  // Back wall of the bowl, and the scoreboard sitting on it.
-  ctx.fillStyle = shade(light.concrete, 0.85);
-  ctx.beginPath();
-  ctx.moveTo(bleed.left, rowAt(rows, bleed.left));
-  for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, rowAt(rows, x));
-  ctx.lineTo(bleed.right, rowAt(rows, bleed.right));
-  ctx.lineTo(bleed.right, rowAt(rows, bleed.right) - L.H * 0.012);
-  for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, rowAt(rows, x) - L.H * 0.012);
-  ctx.closePath();
-  ctx.fill();
+  // The bowl wraps round toward us at the edges, so out there it's nearer
+  // and reads taller, which is what lifts the top edge of every deck.
+  const edge = (x: number): number => 1 + 0.55 * Math.pow(((x - L.cx) / L.W) * 2, 2);
+
+  /**
+   * One deck of `rows` tiers, thinner toward the back, standing on `baseAt`
+   * and rising `height` at centre (more at the edges). Returns where its
+   * top edge runs, for whatever stands on it next.
+   */
+  const drawDeck = (
+    rows: number,
+    baseAt: (x: number) => number,
+    height: number,
+    salt: number,
+  ): ((x: number) => number) => {
+    const rowFrac = (k: number): number => 1 - Math.pow(1 - k / rows, 1.5);
+    const rowAt = (k: number, x: number): number => baseAt(x) - height * rowFrac(k) * edge(x);
+    const traceBand = (kBottom: number, kTop: number) => {
+      ctx.beginPath();
+      ctx.moveTo(bleed.left, rowAt(kBottom, bleed.left));
+      for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, rowAt(kBottom, x));
+      ctx.lineTo(bleed.right, rowAt(kBottom, bleed.right));
+      ctx.lineTo(bleed.right, rowAt(kTop, bleed.right));
+      for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, rowAt(kTop, x));
+      ctx.lineTo(bleed.left, rowAt(kTop, bleed.left));
+      ctx.closePath();
+    };
+    for (let k = 0; k < rows; k++) {
+      ctx.fillStyle = k % 2 === 0 ? light.seats : light.seatsAlt;
+      traceBand(k, k + 1);
+      ctx.fill();
+      // Riser shadow along the front of each row.
+      ctx.strokeStyle = alpha('#000000', 0.22);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = bleed.left; x <= bleed.right; x += 24) {
+        if (x === bleed.left) ctx.moveTo(x, rowAt(k, x));
+        else ctx.lineTo(x, rowAt(k, x));
+      }
+      ctx.stroke();
+    }
+
+    // The crowd, scattered by hash so nobody moves between frames.
+    const taken = Math.round((width / 4) * rows * fill);
+    for (let i = 0; i < taken; i++) {
+      const h = hash(i + salt);
+      const row = (h >>> 3) % rows;
+      const x = bleed.left + unit(h) * width;
+      const y0 = rowAt(row + 1, x);
+      const y1 = rowAt(row, x);
+      const y = y0 + (y1 - y0) * (0.35 + unit(h, 9) * 0.5);
+      ctx.fillStyle = CROWD_COLOURS[h % CROWD_COLOURS.length];
+      ctx.fillRect(x, y - size * 1.4, size, size * 1.4);
+    }
+
+    // The wall along the back of the deck.
+    ctx.fillStyle = shade(light.concrete, 0.85);
+    ctx.beginPath();
+    ctx.moveTo(bleed.left, rowAt(rows, bleed.left));
+    for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, rowAt(rows, x));
+    ctx.lineTo(bleed.right, rowAt(rows, bleed.right));
+    ctx.lineTo(bleed.right, rowAt(rows, bleed.right) - L.H * 0.012);
+    for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, rowAt(rows, x) - L.H * 0.012);
+    ctx.closePath();
+    ctx.fill();
+    return (x: number) => rowAt(rows, x) - L.H * 0.012;
+  };
+
   // A dark facade under the front row, so the stand plants on the wall.
   ctx.fillStyle = shade(light.concreteDark, 0.75);
   ctx.fillRect(bleed.left, wallTop - L.H * 0.008, width, L.H * 0.008);
-  drawScoreboard(ctx, L, light, standsTop - L.H * 0.012);
+
+  // Two decks have to share the sky a single one had to itself, so each is
+  // drawn shallower: the same seats, steeper, which is what a big park's
+  // upper deck looks like from the plate anyway.
+  const stacked = stadium.upperRows > 0;
+  const lowerRows = Math.max(1, stadium.bowlRows);
+  let topAt = drawDeck(
+    lowerRows,
+    () => wallTop,
+    deckHeight * (lowerRows / 8) * (stacked ? 0.6 : 1),
+    1200,
+  );
+
+  if (stadium.upperRows > 0) {
+    // A concrete facade with the club's colour band along it, then the
+    // second deck stacked on top, hanging a little forward of the lower one.
+    const facadeH = L.H * 0.022;
+    const lowerTop = topAt;
+    ctx.fillStyle = shade(light.concreteDark, 0.9);
+    ctx.beginPath();
+    ctx.moveTo(bleed.left, lowerTop(bleed.left));
+    for (let x = bleed.left; x <= bleed.right; x += 24) ctx.lineTo(x, lowerTop(x));
+    ctx.lineTo(bleed.right, lowerTop(bleed.right) - facadeH);
+    for (let x = bleed.right; x >= bleed.left; x -= 24) ctx.lineTo(x, lowerTop(x) - facadeH);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = alpha(light.wallCap, 0.7);
+    ctx.lineWidth = Math.max(1, L.H * 0.003);
+    ctx.beginPath();
+    for (let x = bleed.left; x <= bleed.right; x += 24) {
+      if (x === bleed.left) ctx.moveTo(x, lowerTop(x) - facadeH * 0.5);
+      else ctx.lineTo(x, lowerTop(x) - facadeH * 0.5);
+    }
+    ctx.stroke();
+    topAt = drawDeck(
+      stadium.upperRows,
+      (x) => lowerTop(x) - facadeH,
+      deckHeight * (stadium.upperRows / 8) * 0.6,
+      4800,
+    );
+  }
+
+  const standsTop = topAt(L.cx);
+  drawScoreboard(ctx, L, light, standsTop);
   drawTowers(ctx, L, light, standsTop);
 
   // The wall: padding in the park's green, a yellow cap, a distance sign.

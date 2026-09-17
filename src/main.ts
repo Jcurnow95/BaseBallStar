@@ -19,6 +19,7 @@ import { renderWorldCup } from './screens/worldCup';
 import { renderHowto } from './screens/howto';
 import { renderTutorial } from './screens/tutorial';
 import { renderDerby } from './screens/derby';
+import { renderLife } from './screens/life';
 import { devMenuEnabled, renderDev } from './screens/dev';
 
 const root = document.getElementById('app');
@@ -42,6 +43,7 @@ app.register('worldCup', renderWorldCup);
 app.register('howto', renderHowto);
 app.register('tutorial', renderTutorial);
 app.register('derby', renderDerby);
+app.register('life', renderLife);
 if (devMenuEnabled()) app.register('dev', renderDev);
 app.start();
 

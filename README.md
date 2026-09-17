@@ -398,10 +398,10 @@ and plan whether to burn yourself down before it.
 the attribute reference are always reachable — the calendar only gates the training drills
 themselves, since those are what burn the day.
 
-## The Baseball World Trophy
+## The World Trophy
 
-Every fourth year — the year your career starts, then years 5, 9, 13 and on — the world
-stops for a tournament. Thirty-two countries. Everybody calls the trophy **the Trough**.
+Every second year — the year your career starts, then years 3, 5, 7 and on — the world
+stops for a tournament. Thirty-two countries, one trophy: the **World Trophy**.
 
 It runs in the **preseason**, before opening day, and the club season cannot tell it
 happened: tournament games stay off the league table and out of your season line, so they
@@ -439,7 +439,7 @@ whatever level you were called up from, and you report to camp rested however fa
 went.
 
 Four trophies live here: **First Cap** for playing at all, **For the Flag** for a home run
-in the tournament, **On the World Stage** for reaching the final, and **The Trough** for
+in the tournament, **On the World Stage** for reaching the final, and **World Trophy** for
 winning it.
 
 ## Attributes
@@ -554,7 +554,7 @@ src/
     gameSim.ts       Nine-inning game loop; surfaces your moments as events
     league.ts        Levels, teams, home parks, schedule, calendar, standings
     playoffs.ts      The postseason bracket, series and the trophy
-    nations.ts       The 32 countries that contest the Baseball World Trophy
+    nations.ts       The 32 countries that contest the World Trophy
     worldCup.ts      The world tournament: the draw, the groups, the bracket
     awards.ts        Award season: the MVP ballot in every league
     achievements.ts  Career milestones you claim for attribute points
@@ -598,7 +598,7 @@ The models are tuned against measurements, not by feel. All of these run without
 npx tsx tools/worldCup.ts
 ```
 
-Walks Baseball World Trophy tournaments through the same calls the screens make, on forty
+Walks World Trophy tournaments through the same calls the screens make, on forty
 seeds, and asserts what would be miserable to find by hand: all 48 group matches played
 once each, sixteen qualifiers made of the eight group winners and the eight best records
 behind them, the bracket burning down 8-4-2-1 to a single champion, the player's run

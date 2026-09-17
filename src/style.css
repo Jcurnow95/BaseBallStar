@@ -2920,7 +2920,7 @@ table.standings.fixtures tr.ahead td {
   color: var(--gold);
 }
 
-/* ------------------------------------------- the Baseball World Trophy */
+/* ------------------------------------------- the World Trophy */
 
 /*
  * Thirty-two flags have to fit on a phone, so the country picker is a dense
@@ -3044,4 +3044,86 @@ table.standings.fixtures tr.ahead td {
   height: 100%;
   z-index: 7;
   pointer-events: none;
+}
+
+/* ------------------------------------------------------- life off the field */
+
+/* Money going the other way on a payday line. */
+.reward b.down {
+  color: var(--red);
+}
+
+/* Fame reads gold, the colour of the hardware it's chasing. */
+.bar.fame > i {
+  background: var(--gold);
+}
+
+/* The three answers in the tunnel, side by side and wrapping on a narrow phone. */
+.press-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.press-btns .btn {
+  flex: 1 1 auto;
+}
+
+/* The trophy room: a shelf of tiles, one per thing worth showing. */
+.room-shelf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #7a6122;
+  background: rgba(255, 209, 102, 0.06);
+}
+
+.room-item {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+/* The "?" beside a meter's label: small, round, and clearly a button. */
+.meter-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font: 700 10px/1 system-ui, sans-serif;
+  letter-spacing: 0;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.meter-hint:active {
+  background: var(--accent);
+  color: #05210f;
+}
+
+/* A bye in the wildcard block: a single-row card, quieter than a series. */
+.series-card.bye {
+  background: transparent;
+  border-style: dashed;
+}
+
+.series-card.bye .series-row {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }

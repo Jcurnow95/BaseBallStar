@@ -37,6 +37,26 @@ import { addStats } from '../core/player';
 import { checkTrophies } from '../core/trophies';
 import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
+import {
+  addFame,
+  agentCut,
+  dealForSlot,
+  ensurePeople,
+  fameBonusMult,
+  fameCrowdBoost,
+  fameFromGame,
+  gameStaminaGuard,
+  lifeDayTick,
+  mediaMomentFor,
+  moraleXpMult,
+  overnightEnergyBonus,
+  teammateBoost,
+  tickDeals,
+  upkeepPerGame,
+} from '../core/lifestyle';
+import { randomName } from '../core/league';
+import { GEAR_SLOTS, gearById } from '../core/gear';
+import { lifestyleOf } from '../core/save';
 import { clamp } from '../core/rng';
 import type { BattedBall } from '../core/types';
 import type { PlayOutcome, UserSide } from '../core/playSim';
@@ -66,6 +86,8 @@ const FAST_DELAY = 220;
 export function renderGame(app: App, mount: HTMLElement): () => void {
   const save = app.requireSave();
   const { player, league } = save;
+  const life = lifestyleOf(save);
+  ensurePeople(life, () => randomName(app.rng));
   const level = LEVELS[league.levelId];
   const upcoming = nextGame(league);
 
@@ -89,6 +111,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const myTeam = cup ? cupPlayerTeam(cup) : playerTeam(league);
   const park = cup ? cupPark(cup, scheduled) : parkForGame(league, scheduled);
   const weather = weatherForGame(scheduled, app.rng);
+  // Who's in the seats tonight and how much park is around them. Both views
+  // — from the plate and over the field — draw the same house.
+  const crowdTonight = Math.min(
+    1,
+    level.crowd + (scheduled.playoff ? 0.35 : 0) + fameCrowdBoost(life.fame),
+  );
+  const stadiumTonight = cup ? LEVELS.length - 1 : league.levelId;
   const gameLevel = cup ? cupLevel(opponent) : level;
 
   // Home team wears its home kit, the visitor its road kit. Nations outnumber
@@ -106,10 +135,21 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   // single elimination has nowhere to put a tie.
   const mustDecide =
     !!scheduled.playoff || (!!cup && scheduled.worldCup?.round !== 'group');
+  // The clubhouse plays for you, or it doesn't: standing with the teammates
+  // is a few rating points on every one of them tonight. The club's own
+  // record isn't touched, only the men who take the field behind you.
+  const boost = cup ? 0 : teammateBoost(life);
+  const myTeamTonight =
+    boost === 0 || !myTeam.roster
+      ? myTeam
+      : {
+          ...myTeam,
+          roster: myTeam.roster.map((p) => ({ ...p, rating: clamp(p.rating + boost, 10, 99) })),
+        };
   const sim = new GameSim(
     player,
     gameLevel,
-    myTeam,
+    myTeamTonight,
     opponent,
     scheduled.home,
     app.rng,
@@ -118,14 +158,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   );
 
   // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night, or
-  // "Baseball World Trophy · Group C" on a night you're playing for a country.
+  // "World Trophy · Group C" on a night you're playing for a country.
   const series = scheduled.playoff ? playerSeries(league) : null;
   const playoffTag = (() => {
     if (cup) {
       const round = (scheduled.worldCup?.round ?? 'group') as keyof typeof CUP_ROUND_LABEL;
       const group = groupOf(cup, cup.nationId);
       const where = round === 'group' && group ? `Group ${group.id}` : CUP_ROUND_LABEL[round];
-      return `Baseball World Trophy · ${where}`;
+      return `World Trophy · ${where}`;
     }
     if (!scheduled.playoff || !series) return '';
     const line = seriesLine(league, series);
@@ -627,6 +667,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       pitcherKit: theirKit,
       batterKit: myKit,
       weather,
+      crowd: crowdTonight,
+      stadium: stadiumTonight,
       level,
       rng: app.rng,
       onCount: (c) => {
@@ -713,8 +755,10 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // it's the other way round.
       fieldingKit: side === 'offense' ? theirKit : myKit,
       battingKit: side === 'offense' ? myKit : theirKit,
-      // October packs the place, whatever the level.
-      crowd: scheduled.playoff ? Math.min(1, level.crowd + 0.35) : level.crowd,
+      // October packs the place, whatever the level. So does a name people
+      // have heard of.
+      crowd: crowdTonight,
+      stadium: stadiumTonight,
       // Home fills the first-base dugout: that's us when we're hosting and in
       // the field, or when we're visiting and at bat.
       homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',
@@ -854,7 +898,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       (a) => !metBefore.has(a.id) && isAchievementMet(a, player),
     ).map((a) => a.name);
 
-    const xp = gameXp(sim.gameStats, sim.putouts);
+    // A miserable player learns less from a night; a happy one, a little more.
+    const xp = Math.round(gameXp(sim.gameStats, sim.putouts) * moraleXpMult(life));
     const report = grantXp(player, xp);
 
     // Payday, then a game's worth of wear on everything in the bag. The world
@@ -866,19 +911,81 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       sim.gameStats,
       sim.putouts,
       sim.score.us > sim.score.them,
+      fameBonusMult(life.fame),
     );
     player.money += earnings.total;
     const wornOut = wearGear(player).map((g) => g.name);
 
+    // Life off the field sends its bill: the house and whatever is parked
+    // outside it are paid for out of tonight's cheque. The bank can go
+    // negative — a rookie who bought a boat finds out what upkeep means.
+    const upkeep = upkeepPerGame(life);
+    player.money -= upkeep;
+    const lifeNotes: string[] = [];
+
+    // The sponsors pay, and any of their kit that fell apart tonight is
+    // replaced from the truck — that is what the deal is for.
+    const deals = tickDeals(life);
+    player.money += deals.paid;
+    // The agent's share comes off everything that came in tonight.
+    const cut = agentCut(life, earnings.total + deals.paid);
+    player.money -= cut;
+    for (const brand of deals.ended) lifeNotes.push(`Your deal with ${brand.brand} has run its course.`);
+    for (const slot of GEAR_SLOTS) {
+      const sponsor = dealForSlot(life, slot);
+      const item = sponsor ? gearById(sponsor.gearId) : undefined;
+      if (sponsor && item && !player.gear[slot]) {
+        player.gear[slot] = { id: item.id, gamesLeft: item.games };
+        lifeNotes.push(`${sponsor.brand} sent over a fresh ${item.name}.`);
+      }
+    }
+
+    // A name is made on nights like this — or not, on nights like this.
+    const won = sim.score.us > sim.score.them;
+    const fameGain = addFame(
+      life,
+      fameFromGame({
+        hits: sim.gameStats.hits,
+        homeRuns: sim.gameStats.homeRuns,
+        rbi: sim.gameStats.rbi,
+        stolenBases: sim.gameStats.stolenBases,
+        walkOff: sim.feats.walkOff,
+        grandSlam: sim.feats.grandSlam,
+        insideThePark: sim.feats.insideThePark,
+        win: won,
+        playoff: !!scheduled.playoff,
+        worldCup: !!cup,
+        levelId: cup ? LEVELS.length - 1 : league.levelId,
+      }),
+    );
+    const media = mediaMomentFor(
+      {
+        homeRuns: sim.gameStats.homeRuns,
+        walkOff: sim.feats.walkOff,
+        grandSlam: sim.feats.grandSlam,
+        win: won,
+        playoff: !!scheduled.playoff,
+      },
+      () => app.rng.next(),
+    );
+
     // A game takes a real bite out of conditioning, then the day rolls over.
+    // A proper bed and no red-eye flights take a little of that bite back.
     // No front-office churn during the tournament: you are on the other side
     // of the world, and a trade rumour has nothing to do with tonight.
-    player.stamina = clamp(player.stamina - (6 + Math.round(app.rng.next() * 4)), 0, 100);
+    const wear = Math.max(2, 6 + Math.round(app.rng.next() * 4) - gameStaminaGuard(life));
+    player.stamina = clamp(player.stamina - wear, 0, 100);
     advanceDay(league, cup ? undefined : app.rng);
-    recoverOvernight(player);
+    lifeDayTick(life, {
+      levelId: league.levelId,
+      gameDay: true,
+      won: sim.score.us === sim.score.them ? null : won,
+      roll: () => app.rng.next(),
+    });
+    recoverOvernight(player, overnightEnergyBonus(life));
 
     // Move the tournament along first, so the trophy case can see a final
-    // reached or a Trough won on the game that actually did it.
+    // reached or a World Trophy won on the game that actually did it.
     let cupOutcome: CupGameOutcome | null = null;
     if (cup) {
       cupOutcome = recordCupGame(save, scheduled, sim.score.us, sim.score.them, app.rng);
@@ -887,6 +994,11 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       if (cupOutcome?.cupComplete) {
         player.stamina = 100;
         player.energy = 100;
+      }
+      // A world title is the most famous thing a ballplayer can do.
+      if (cupOutcome?.status === 'champion') {
+        addFame(life, 15);
+        lifeNotes.push('World champion. Everybody knows the name now.');
       }
     }
 
@@ -946,6 +1058,15 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.
       seasonComplete: isSeasonOver(league),
+      life: {
+        upkeep,
+        endorsements: deals.paid,
+        agentCut: cut,
+        fame: life.fame,
+        fameGain,
+        media,
+        notes: lifeNotes,
+      },
     };
 
     app.lastGame = summary;

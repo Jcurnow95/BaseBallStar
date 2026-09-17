@@ -2,7 +2,7 @@ import type { App } from '../app';
 import type { Team } from '../core/league';
 import {
   LEVELS,
-  SEASON_GAMES,
+  seasonGames,
   ensureRosters,
   gamesPlayed as clubGames,
   isRegularSeasonOver,
@@ -59,8 +59,12 @@ import {
 import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
 import { unclaimedAchievements } from '../core/achievements';
+import { ensurePeople, fameLabel, homeById } from '../core/lifestyle';
+import { randomName } from '../core/league';
+import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q } from '../ui/dom';
-import { showDialog } from '../ui/modal';
+import { showDialog, wireHints } from '../ui/modal';
+import { HINTS } from '../ui/hints';
 import { devMenuEnabled } from './dev';
 import { openDerby } from './derby';
 import { howtoSeen, openHowto } from './howto';
@@ -75,11 +79,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const clinched = (t: Team): boolean => {
     const league = app.requireSave().league;
     if (league.playoffs) return false;
-    const remaining = Math.max(0, SEASON_GAMES - clubGames(t));
+    const games = seasonGames(league);
+    const remaining = Math.max(0, games - clubGames(t));
     const threats = league.teams.filter(
-      (o) => o.id !== t.id && o.wins + Math.max(0, SEASON_GAMES - clubGames(o)) >= t.wins,
+      (o) => o.id !== t.id && o.wins + Math.max(0, games - clubGames(o)) >= t.wins,
     ).length;
-    return remaining < SEASON_GAMES && threats < PLAYOFF_TEAMS;
+    return remaining < games && threats < PLAYOFF_TEAMS;
   };
 
   const save = app.requireSave();
@@ -100,8 +105,13 @@ export function renderHub(app: App, mount: HTMLElement): void {
   // Saves from before named rosters get theirs generated on the way in, and
   // any front-office news is shown once, then cleared.
   ensureRosters(league, app.rng);
-  const news = league.news ?? [];
+  // Front-office news and life news share the one board: both are things that
+  // happened while you weren't looking, and both are shown once.
+  const life = lifestyleOf(save);
+  ensurePeople(life, () => randomName(app.rng));
+  const news = [...(league.news ?? []), ...life.notices];
   league.news = undefined;
+  life.notices = [];
   app.persist();
 
   const upcoming = nextGame(league);
@@ -217,13 +227,20 @@ export function renderHub(app: App, mount: HTMLElement): void {
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
     </button>
+    <button class="btn ghost" id="life" style="margin-top:8px">
+      Life Off the Field · ${esc(homeById(life.home).name)}${
+        life.requests.length > 0
+          ? `<span class="btn-badge">${life.requests.length} message${life.requests.length === 1 ? '' : 's'}</span>`
+          : ''
+      }
+    </button>
     <button class="btn ghost" id="trophies" style="margin-top:8px">
       Trophy Case${caseBadge}
     </button>
     ${
       cup
         ? `<button class="btn ghost" id="worldcup" style="margin-top:8px">
-             Baseball World Trophy${cupBadge}
+             World Trophy${cupBadge}
            </button>`
         : ''
     }
@@ -277,7 +294,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
       ? `World Trophy · ${cupRound === 'group' && myCupGroup ? `Group ${myCupGroup.id}` : CUP_ROUND_LABEL[cupRound]}`
       : upcoming.playoff && series
         ? `${ROUND_LABEL[series.round]} · Game ${upcoming.playoff.gameNo} of ${series.bestOf}`
-        : `Game ${gamesPlayed + 1} of ${SEASON_GAMES}`;
+        : `Game ${gamesPlayed + 1} of ${seasonGames(league)}`;
     const opponentName = cupGame
       ? (() => {
           const n = nationOfTeam(upcoming.opponentId);
@@ -339,7 +356,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
         devEnabled
           ? `<div class="dev-bar">
                <span>DEV BUILD</span>
-               <button id="devmenu">Player stats</button>
+               <button id="devmenu">Dev menu</button>
              </div>`
           : ''
       }
@@ -355,6 +372,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
               <span class="id-chip">Bats ${player.bats}</span>
               <span class="id-chip">Lv ${player.level}</span>
               <span class="id-chip">Home · ${esc(homePark.name)}</span>
+              <span class="id-chip" title="Fame ${Math.round(life.fame)}">★ ${esc(fameLabel(life.fame))}</span>
             </div>
           </div>
           <div class="ovr">
@@ -362,9 +380,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
             <span>OVR</span>
           </div>
         </div>
-        ${meterHtml('Stamina', player.stamina, 100, '', 'big')}
-        ${meterHtml('Energy', player.energy, 100, 'xp')}
-        ${meterHtml('XP to next level', player.xp, xpForLevel(player.level), 'xp', 'slim')}
+        ${meterHtml('Stamina', player.stamina, 100, '', 'big', HINTS.stamina)}
+        ${meterHtml('Energy', player.energy, 100, 'xp', '', HINTS.energy)}
+        ${meterHtml('XP to next level', player.xp, xpForLevel(player.level), 'xp', 'slim', HINTS.xp)}
       </div>
 
       ${
@@ -529,6 +547,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
     </div>
   `;
 
+  wireHints(mount);
   if (seasonDone) q(mount, '#finish').addEventListener('click', () => app.go('awards'));
   else if (upcoming) {
     // First game ever goes by way of the how-to; after that, straight in.
@@ -541,6 +560,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   q(mount, '#seasonLog').addEventListener('click', () => app.go('fixtures'));
   q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
+  q(mount, '#life').addEventListener('click', () => app.go('life'));
   q(mount, '#trophies').addEventListener('click', () => app.go('trophies'));
   if (cup) q(mount, '#worldcup').addEventListener('click', () => app.go('worldCup'));
   q(mount, '#achievements').addEventListener('click', () => app.go('achievements'));

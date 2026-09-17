@@ -517,7 +517,7 @@ interface CareerResult {
   reachedLevel: number;
   seasonsToAA: number | null;
   seasonsToAAA: number | null;
-  seasonsToMLB: number | null;
+  seasonsToMajors: number | null;
   titles: number;
 }
 
@@ -537,8 +537,8 @@ function playCareer(
   let titles = 0;
   let seasonsToAA: number | null = null;
   let seasonsToAAA: number | null = null;
-  let seasonsToMLB: number | null = null;
-  let mlbSeasons = 0;
+  let seasonsToMajors: number | null = null;
+  let majorsSeasons = 0;
 
   for (let s = 0; s < maxSeasons; s++) {
     const level = LEVELS[league.levelId];
@@ -725,7 +725,7 @@ function playCareer(
       league = createLeague(check.nextLevelId, rng);
       if (league.levelId === 1 && seasonsToAA === null) seasonsToAA = seasonYear - 1;
       if (league.levelId === 2 && seasonsToAAA === null) seasonsToAAA = seasonYear - 1;
-      if (league.levelId === 3 && seasonsToMLB === null) seasonsToMLB = seasonYear - 1;
+      if (league.levelId === 3 && seasonsToMajors === null) seasonsToMajors = seasonYear - 1;
     } else {
       rolloverSeason(league, rng);
     }
@@ -738,8 +738,8 @@ function playCareer(
     spendPoints(player);
 
     if (league.levelId === 3) {
-      mlbSeasons++;
-      if (mlbSeasons >= 3) break;
+      majorsSeasons++;
+      if (majorsSeasons >= 3) break;
     }
   }
 
@@ -750,7 +750,7 @@ function playCareer(
     reachedLevel: league.levelId,
     seasonsToAA,
     seasonsToAAA,
-    seasonsToMLB,
+    seasonsToMajors,
     titles,
   };
 }
@@ -785,14 +785,14 @@ console.log('--- Career arcs ---');
 for (const skill of SKILLS) {
   const mine = careerResults.filter((c) => c.cohort === skill.name);
   const reached = (lvl: number): number => mine.filter((c) => c.reachedLevel >= lvl).length;
-  const avgTo = (key: 'seasonsToAA' | 'seasonsToAAA' | 'seasonsToMLB'): string => {
+  const avgTo = (key: 'seasonsToAA' | 'seasonsToAAA' | 'seasonsToMajors'): string => {
     const vals = mine.map((c) => c[key]).filter((v): v is number => v !== null);
     return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length) : '—';
   };
   console.log(
     `${skill.name.padEnd(14)} reach AA ${reached(1)}/${mine.length}` +
-      ` AAA ${reached(2)}/${mine.length}  MLB ${reached(3)}/${mine.length}` +
-      `  avg seasons to AA ${avgTo('seasonsToAA')}  AAA ${avgTo('seasonsToAAA')}  MLB ${avgTo('seasonsToMLB')}` +
+      ` AAA ${reached(2)}/${mine.length}  Majors ${reached(3)}/${mine.length}` +
+      `  avg seasons to AA ${avgTo('seasonsToAA')}  AAA ${avgTo('seasonsToAAA')}  Majors ${avgTo('seasonsToMajors')}` +
       `  titles ${mine.reduce((a, c) => a + c.titles, 0)}`,
   );
 }

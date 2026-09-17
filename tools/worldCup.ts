@@ -1,5 +1,5 @@
 /**
- * Walks the Baseball World Trophy through the same calls the screens make, on
+ * Walks the World Trophy through the same calls the screens make, on
  * many seeds, and asserts the things that would be miserable to find by hand:
  *
  *  - the tournament runs *before* opening day and leaves the club season
@@ -15,7 +15,7 @@
  */
 import { Rng } from '../src/core/rng';
 import {
-  SEASON_GAMES,
+  seasonGames,
   advanceDay,
   createLeague,
   gamesPlayed,
@@ -29,6 +29,7 @@ import type { SaveData } from '../src/core/save';
 import { NATIONS } from '../src/core/nations';
 import {
   CUP_ELIGIBLE_LEVEL,
+  CUP_INTERVAL,
   GROUP_COUNT,
   GROUP_MATCHDAYS,
   KNOCKOUT_ROUNDS,
@@ -167,8 +168,8 @@ function assertTournamentSound(save: SaveData, label: string): void {
 function assertSeasonUntouched(save: SaveData, label: string): void {
   const league = save.league;
   check(
-    regularSeasonGames(league).length === SEASON_GAMES,
-    `${label}: club season is still ${SEASON_GAMES} games`,
+    regularSeasonGames(league).length === seasonGames(league),
+    `${label}: club season is still ${seasonGames(league)} games`,
   );
   check(
     regularSeasonGames(league).every((g) => !g.played),
@@ -182,7 +183,7 @@ function assertSeasonUntouched(save: SaveData, label: string): void {
 
 /* ------------------------------------------------------------------ runs */
 
-console.log('Baseball World Trophy — walking tournaments\n');
+console.log('World Trophy — walking tournaments\n');
 
 // 1. A player good enough to be picked, for a country that will have him.
 console.log('picked, plays it out:');
@@ -231,7 +232,7 @@ for (let seed = 1; seed <= 40; seed++) {
 }
 console.log(
   `  ${cupsPlayed} tournaments · ${(ownGames / cupsPlayed).toFixed(1)} games played per run · ` +
-    `${champion} won the Trough\n`,
+    `${champion} won the World Trophy\n`,
 );
 
 // 2. Not picked: too low a level, and good enough but not good enough for them.
@@ -270,8 +271,8 @@ check(Math.min(...bars) < 50, 'some country is reachable straight out of Triple-
 check(Math.max(...bars) < 90, 'no country is literally impossible');
 check(bars.every((b, i) => i === 0 || b <= bars[i - 1]), 'bars fall as strength falls');
 
-// 4. A four-year cycle, walked as a career would walk it.
-console.log('\nfour-year cycle:');
+// 4. A two-year cycle, walked as a career would walk it.
+console.log('\ntwo-year cycle:');
 {
   const save = newCareer(CUP_ELIGIBLE_LEVEL, 'gbr', 99);
   const rng = new Rng(99);
@@ -279,7 +280,7 @@ console.log('\nfour-year cycle:');
   for (let year = 1; year <= 17; year++) {
     save.seasonYear = year;
     save.player.season = emptyBattingStats();
-    if ((year - 1) % 4 === 0) {
+    if ((year - 1) % CUP_INTERVAL === 0) {
       // A fresh league every time, the way a season rollover hands one over.
       save.league = createLeague(CUP_ELIGIBLE_LEVEL, rng);
       startWorldCup(save, rng, 70);
@@ -290,8 +291,8 @@ console.log('\nfour-year cycle:');
     }
   }
   check(
-    years.join(',') === '1,5,9,13,17',
-    `tournaments land on years 1, 5, 9, 13, 17 (got ${years.join(',')})`,
+    years.join(',') === '1,3,5,7,9,11,13,15,17',
+    `tournaments land on years 1, 3, 5, 7, 9, 11, 13, 15, 17 (got ${years.join(',')})`,
   );
   console.log(`  played in years ${years.join(', ')}`);
   check((save.cupHistory ?? []).length === years.length, 'every tournament filed in history');

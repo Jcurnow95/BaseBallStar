@@ -7,6 +7,7 @@ import type { GameScore } from './core/gameSim';
 import type { PlayoffGameOutcome } from './core/playoffs';
 import type { CupGameOutcome } from './core/worldCup';
 import type { Trophy, GameFeats } from './core/trophies';
+import type { MediaMoment } from './core/lifestyle';
 
 export type Route =
   | 'title'
@@ -26,7 +27,25 @@ export type Route =
   | 'howto'
   | 'tutorial'
   | 'derby'
+  | 'life'
   | 'dev';
+
+/** What the game meant off the field. See `core/lifestyle.ts`. */
+export interface LifeSummary {
+  /** The house and the toys, charged after the game. */
+  upkeep: number;
+  /** What the sponsors paid tonight. */
+  endorsements: number;
+  /** The agent's share of all of it. */
+  agentCut: number;
+  /** Fame after the game, and how much of it the game added. */
+  fame: number;
+  fameGain: number;
+  /** A reporter waiting in the tunnel, until the player answers. */
+  media: MediaMoment | null;
+  /** Anything else worth a line on the recap. */
+  notes: string[];
+}
 
 export interface PostGameSummary {
   win: boolean;
@@ -48,13 +67,15 @@ export interface PostGameSummary {
   newAchievements: string[];
   /** Where the series stands after this game, when it was a playoff game. */
   playoff?: PlayoffGameOutcome;
-  /** Where the tournament stands, when it was a Baseball World Trophy game. */
+  /** Where the tournament stands, when it was a World Trophy game. */
   cup?: CupGameOutcome;
   /** The moments the sim spotted, so the recap can call them out every time. */
   feats: GameFeats;
   /** Anything the game just added to the trophy case, in display order. */
   unlocked: Trophy[];
   seasonComplete: boolean;
+  /** What the game meant off the field. */
+  life: LifeSummary;
 }
 
 export type ScreenRenderer = (app: App, mount: HTMLElement) => (() => void) | void;

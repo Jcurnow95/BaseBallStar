@@ -1,5 +1,5 @@
 /**
- * The Baseball World Trophy screen: your group, everybody else's group, the
+ * The World Trophy screen: your group, everybody else's group, the
  * bracket, and what the career has done in past tournaments.
  *
  * A sixteen-team bracket doesn't fit across a phone, so it isn't drawn as one.
@@ -35,8 +35,8 @@ export function renderWorldCup(app: App, mount: HTMLElement): void {
     mount.innerHTML = `
       <div class="scroll">
         <div class="panel">
-          <h2>Baseball World Trophy</h2>
-          <p class="tiny muted">No tournament this year. It is played every fourth year.</p>
+          <h2>World Trophy</h2>
+          <p class="tiny muted">No tournament this year. It is played every second year.</p>
         </div>
       </div>
       <button class="btn primary" id="back">Back to Clubhouse</button>`;
@@ -82,7 +82,7 @@ export function renderWorldCup(app: App, mount: HTMLElement): void {
           <div class="notice warn">You did not make the squad. ${why}</div>
           <p class="tiny muted" style="line-height:1.55">
             Getting picked takes ${cup.bar} overall and a place in Triple-A or the
-            majors. The next tournament is four years away — that is four
+            majors. The next tournament is two years away — that is two
             offseasons to close the gap.
           </p>
         </div>`;
@@ -219,7 +219,7 @@ export function renderWorldCup(app: App, mount: HTMLElement): void {
           champion
             ? `<div class="champion-line">
                  <span class="trophy">🥇</span>
-                 <span>${champion.flag} ${esc(champion.name)} lift the Trough${
+                 <span>${champion.flag} ${esc(champion.name)} lift the World Trophy${
                    cup.championId === me ? ' — that’s you' : ''
                  }${runnerUp ? ` · ${runnerUp.flag} ${esc(runnerUp.name)} runners-up` : ''}</span>
                </div>`
@@ -262,9 +262,9 @@ export function renderWorldCup(app: App, mount: HTMLElement): void {
     <div class="scroll">
       <div class="panel result-hero">
         <div class="verdict ${verdict.cls}">${verdict.text}</div>
-        <div class="score">Baseball World Trophy · Year ${cup.year}</div>
+        <div class="score">World Trophy · Year ${cup.year}</div>
         <div class="tiny muted" style="margin-top:6px">
-          Thirty-two countries. They call it the Trough.
+          Thirty-two countries. One trophy.
         </div>
       </div>
 

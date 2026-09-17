@@ -20,6 +20,7 @@ import { CUE_GOLD, CUE_GREEN, alpha, lightingFor } from '../gfx/palette';
 import { drawBaseball } from '../gfx/ball';
 import { PITCH_RELEASE_POINT, drawBatter, drawPitcher } from '../gfx/figure';
 import type { SceneLayout } from '../gfx/scene';
+import { stadiumForLevel } from '../gfx/park';
 import {
   STAGE_ASPECT,
   batterAnchor,
@@ -58,6 +59,16 @@ export interface AtBatOptions {
   batterKit: Uniform;
   /** The day's weather. Drawn, and used to judge whether contact stays fair. */
   weather?: Weather;
+  /**
+   * How full the stands are, 0-1, when it isn't just the level's own number:
+   * October and a famous name both fill seats. Left out, the level decides.
+   */
+  crowd?: number;
+  /**
+   * How much stadium is out past the wall, as the rung of the ladder
+   * (0 = Single-A, 3 = the Majors). Left out, the old seven-row bowl.
+   */
+  stadium?: number;
   /** Home Run Derby grooving: every pitch a fastball over the heart. */
   groove?: boolean;
   onCount(count: Count): void;
@@ -550,7 +561,14 @@ export class AtBatView {
     const bleed = { left: -L.ox, top: -L.oy, right: L.canvasW - L.ox, bottom: L.canvasH - L.oy };
 
     drawSky(ctx, L.scene, bleed, this.light, this.weather, this.clock);
-    drawFarPark(ctx, L.scene, bleed, this.light, clamp(this.opts.level.crowd, 0, 1));
+    drawFarPark(
+      ctx,
+      L.scene,
+      bleed,
+      this.light,
+      clamp(this.opts.crowd ?? this.opts.level.crowd, 0, 1),
+      this.opts.stadium == null ? undefined : stadiumForLevel(this.opts.stadium),
+    );
     drawGround(ctx, L.scene, bleed, this.light);
     drawHaze(ctx, L.scene, bleed, this.light);
 

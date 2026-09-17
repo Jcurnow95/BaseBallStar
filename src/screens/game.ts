@@ -111,6 +111,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   const myTeam = cup ? cupPlayerTeam(cup) : playerTeam(league);
   const park = cup ? cupPark(cup, scheduled) : parkForGame(league, scheduled);
   const weather = weatherForGame(scheduled, app.rng);
+  // Who's in the seats tonight and how much park is around them. Both views
+  // — from the plate and over the field — draw the same house.
+  const crowdTonight = Math.min(
+    1,
+    level.crowd + (scheduled.playoff ? 0.35 : 0) + fameCrowdBoost(life.fame),
+  );
+  const stadiumTonight = cup ? LEVELS.length - 1 : league.levelId;
   const gameLevel = cup ? cupLevel(opponent) : level;
 
   // Home team wears its home kit, the visitor its road kit. Nations outnumber
@@ -660,6 +667,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       pitcherKit: theirKit,
       batterKit: myKit,
       weather,
+      crowd: crowdTonight,
+      stadium: stadiumTonight,
       level,
       rng: app.rng,
       onCount: (c) => {
@@ -748,10 +757,8 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       battingKit: side === 'offense' ? myKit : theirKit,
       // October packs the place, whatever the level. So does a name people
       // have heard of.
-      crowd: Math.min(1, level.crowd + (scheduled.playoff ? 0.35 : 0) + fameCrowdBoost(life.fame)),
-      // The park grows with the rung: bleachers in Single-A, a second deck
-      // all the way round in the Majors. The world stage plays in the biggest.
-      stadium: cup ? LEVELS.length - 1 : league.levelId,
+      crowd: crowdTonight,
+      stadium: stadiumTonight,
       // Home fills the first-base dugout: that's us when we're hosting and in
       // the field, or when we're visiting and at bat.
       homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',

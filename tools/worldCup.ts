@@ -15,7 +15,7 @@
  */
 import { Rng } from '../src/core/rng';
 import {
-  SEASON_GAMES,
+  seasonGames,
   advanceDay,
   createLeague,
   gamesPlayed,
@@ -168,8 +168,8 @@ function assertTournamentSound(save: SaveData, label: string): void {
 function assertSeasonUntouched(save: SaveData, label: string): void {
   const league = save.league;
   check(
-    regularSeasonGames(league).length === SEASON_GAMES,
-    `${label}: club season is still ${SEASON_GAMES} games`,
+    regularSeasonGames(league).length === seasonGames(league),
+    `${label}: club season is still ${seasonGames(league)} games`,
   );
   check(
     regularSeasonGames(league).every((g) => !g.played),

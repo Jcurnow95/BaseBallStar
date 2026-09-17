@@ -2,7 +2,7 @@ import type { App } from '../app';
 import type { Team } from '../core/league';
 import {
   LEVELS,
-  SEASON_GAMES,
+  seasonGames,
   ensureRosters,
   gamesPlayed as clubGames,
   isRegularSeasonOver,
@@ -79,11 +79,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const clinched = (t: Team): boolean => {
     const league = app.requireSave().league;
     if (league.playoffs) return false;
-    const remaining = Math.max(0, SEASON_GAMES - clubGames(t));
+    const games = seasonGames(league);
+    const remaining = Math.max(0, games - clubGames(t));
     const threats = league.teams.filter(
-      (o) => o.id !== t.id && o.wins + Math.max(0, SEASON_GAMES - clubGames(o)) >= t.wins,
+      (o) => o.id !== t.id && o.wins + Math.max(0, games - clubGames(o)) >= t.wins,
     ).length;
-    return remaining < SEASON_GAMES && threats < PLAYOFF_TEAMS;
+    return remaining < games && threats < PLAYOFF_TEAMS;
   };
 
   const save = app.requireSave();
@@ -293,7 +294,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
       ? `World Trophy · ${cupRound === 'group' && myCupGroup ? `Group ${myCupGroup.id}` : CUP_ROUND_LABEL[cupRound]}`
       : upcoming.playoff && series
         ? `${ROUND_LABEL[series.round]} · Game ${upcoming.playoff.gameNo} of ${series.bestOf}`
-        : `Game ${gamesPlayed + 1} of ${SEASON_GAMES}`;
+        : `Game ${gamesPlayed + 1} of ${seasonGames(league)}`;
     const opponentName = cupGame
       ? (() => {
           const n = nationOfTeam(upcoming.opponentId);

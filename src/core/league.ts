@@ -12,12 +12,18 @@ import type { Playoffs } from './playoffs';
  * Demo season length. A real season would be 140+ games at each level; 24
  * keeps a full rise-through-the-system playthrough to a sitting or two.
  */
-export const SEASON_GAMES = 24;
-
 export interface LeagueLevel {
   id: number;
   name: string;
   short: string;
+  /**
+   * Clubs in the league, and games in a season. Both grow up the ladder:
+   * Single-A is a small circuit, the Majors a full one, so a promotion means
+   * more towns to visit and a longer summer. Every club plays every other
+   * four times, twice at home and twice away.
+   */
+  teams: number;
+  games: number;
   /** Average pitcher rating faced at this level. */
   pitcherRating: number;
   /** Average team defense behind those pitchers. */
@@ -39,6 +45,8 @@ export const LEVELS: LeagueLevel[] = [
     id: 0,
     name: 'Single-A',
     short: 'A',
+    teams: 8,
+    games: 28,
     pitcherRating: 34,
     defenseRating: 38,
     promotionOverall: 43,
@@ -49,6 +57,8 @@ export const LEVELS: LeagueLevel[] = [
     id: 1,
     name: 'Double-A',
     short: 'AA',
+    teams: 9,
+    games: 32,
     pitcherRating: 52,
     defenseRating: 54,
     promotionOverall: 47,
@@ -59,6 +69,8 @@ export const LEVELS: LeagueLevel[] = [
     id: 2,
     name: 'Triple-A',
     short: 'AAA',
+    teams: 10,
+    games: 36,
     pitcherRating: 68,
     defenseRating: 68,
     promotionOverall: 50,
@@ -69,6 +81,8 @@ export const LEVELS: LeagueLevel[] = [
     id: 3,
     name: 'The Majors',
     short: 'Majors',
+    teams: 12,
+    games: 44,
     pitcherRating: 84,
     defenseRating: 82,
     promotionOverall: 999,
@@ -80,11 +94,13 @@ export const LEVELS: LeagueLevel[] = [
 const CITY_NAMES = [
   'Riverside', 'Kingsport', 'Cedar Falls', 'Ashland', 'Glenwood', 'Fairview',
   'Brookhaven', 'Stonebridge', 'Millvale', 'Northgate', 'Harborview', 'Lakemont',
+  'Saltmarsh', 'Copper Hill', 'Eastfield', 'Pinecrest', 'Marlow', 'Westbrook',
 ];
 
 const TEAM_NICKS = [
   'Rapids', 'Ironmen', 'Sentinels', 'Coyotes', 'Mudcats', 'Thunder',
   'Rail Kings', 'Pelicans', 'Bandits', 'Voyagers', 'Hammers', 'Comets',
+  'Foxes', 'Longhorns', 'Admirals', 'Wolves', 'Miners', 'Herons',
 ];
 
 const FIRST_NAMES = [
@@ -284,33 +300,56 @@ export function ensureRosters(league: LeagueState, rng: Rng): void {
   }
 }
 
-export function createLeague(levelId: number, rng: Rng): LeagueState {
-  const cities = [...CITY_NAMES];
-  const nicks = [...TEAM_NICKS];
-  const parks = [...BALLPARKS];
-  const kits = [...TEAM_KITS];
-  const teams: Team[] = [];
+/** Games in a league's regular season: what its schedule was built with. */
+export const seasonGames = (league: LeagueState): number =>
+  regularSeasonGames(league).length;
 
-  for (let i = 0; i < 6; i++) {
-    const city = cities.splice(rng.int(0, cities.length - 1), 1)[0];
-    const nick = nicks.splice(rng.int(0, nicks.length - 1), 1)[0];
-    const park = parks.splice(rng.int(0, parks.length - 1), 1)[0] ?? BALLPARKS[0];
-    const kit = kits.splice(rng.int(0, kits.length - 1), 1)[0] ?? TEAM_KITS[i];
-    // Spread the league out: a couple of good clubs, a couple of bad ones.
-    const strength = clamp(50 + rng.gaussian() * 14, 20, 80);
-    teams.push({
-      id: `t${i}`,
-      name: `${city} ${nick}`,
-      wins: 0,
-      losses: 0,
-      ties: 0,
-      runsFor: 0,
-      runsAgainst: 0,
-      parkId: park.id,
-      kitId: kit.id,
-      strength,
-      roster: generateRoster(rng, strength, LEVELS[levelId].pitcherRating),
-    });
+/**
+ * A club for a league at `levelId`, drawing its name, park and colours from
+ * whatever is left in the pools handed in. Parks and kits fall back to a
+ * repeat when a big league has used them all up; names never repeat.
+ */
+function makeTeam(
+  id: string,
+  levelId: number,
+  rng: Rng,
+  pools: { cities: string[]; nicks: string[]; parks: Ballpark[]; kits: TeamKit[] },
+  taken: ReadonlySet<string>,
+): Team {
+  const name = pickClubName(rng, pools.cities, pools.nicks, taken);
+  const park = pools.parks.splice(rng.int(0, pools.parks.length - 1), 1)[0] ?? rng.pick(BALLPARKS);
+  const kit = pools.kits.splice(rng.int(0, pools.kits.length - 1), 1)[0] ?? rng.pick(TEAM_KITS);
+  // Spread the league out: a couple of good clubs, a couple of bad ones.
+  const strength = clamp(50 + rng.gaussian() * 14, 20, 80);
+  return {
+    id,
+    name,
+    wins: 0,
+    losses: 0,
+    ties: 0,
+    runsFor: 0,
+    runsAgainst: 0,
+    parkId: park.id,
+    kitId: kit.id,
+    strength,
+    roster: generateRoster(rng, strength, LEVELS[levelId].pitcherRating),
+  };
+}
+
+export function createLeague(levelId: number, rng: Rng): LeagueState {
+  const level = LEVELS[levelId];
+  const pools = {
+    cities: [...CITY_NAMES],
+    nicks: [...TEAM_NICKS],
+    parks: [...BALLPARKS],
+    kits: [...TEAM_KITS],
+  };
+  const taken = new Set<string>();
+  const teams: Team[] = [];
+  for (let i = 0; i < level.teams; i++) {
+    const team = makeTeam(`t${i}`, levelId, rng, pools, taken);
+    taken.add(team.name);
+    teams.push(team);
   }
 
   const playerTeamId = teams[0].id;
@@ -319,17 +358,50 @@ export function createLeague(levelId: number, rng: Rng): LeagueState {
     levelId,
     playerTeamId,
     teams,
-    schedule: buildSchedule(teams, playerTeamId, rng),
-    calendar: buildCalendar(rng),
+    schedule: buildSchedule(teams, playerTeamId, rng, level.games),
+    calendar: buildCalendar(rng, level.games),
     day: 0,
   };
 }
 
-function buildSchedule(teams: Team[], playerTeamId: string, rng: Rng): ScheduledGame[] {
+/**
+ * Bring an older league up to its level's size: a save from when every
+ * circuit had six clubs gets expansion teams over the winter, so the next
+ * schedule has the right number of towns in it.
+ */
+function expandLeague(league: LeagueState, rng: Rng): string[] {
+  const level = LEVELS[league.levelId];
+  const news: string[] = [];
+  if (league.teams.length >= level.teams) return news;
+  const taken = new Set(league.teams.map((t) => t.name));
+  const pools = {
+    cities: CITY_NAMES.filter((c) => !league.teams.some((t) => t.name.startsWith(`${c} `))),
+    nicks: TEAM_NICKS.filter((n) => !league.teams.some((t) => t.name.endsWith(` ${n}`))),
+    parks: BALLPARKS.filter((p) => !league.teams.some((t) => t.parkId === p.id)),
+    kits: TEAM_KITS.filter((k) => !league.teams.some((t) => t.kitId === k.id)),
+  };
+  let next = league.teams.length;
+  while (league.teams.length < level.teams) {
+    let id = `t${next++}`;
+    while (league.teams.some((t) => t.id === id)) id = `t${next++}`;
+    const team = makeTeam(id, league.levelId, rng, pools, taken);
+    taken.add(team.name);
+    league.teams.push(team);
+    news.push(`The league has grown: the ${team.name} join as an expansion club.`);
+  }
+  return news;
+}
+
+function buildSchedule(
+  teams: Team[],
+  playerTeamId: string,
+  rng: Rng,
+  games: number,
+): ScheduledGame[] {
   const opponents = teams.filter((t) => t.id !== playerTeamId);
   const schedule: ScheduledGame[] = [];
 
-  for (let i = 0; i < SEASON_GAMES; i++) {
+  for (let i = 0; i < games; i++) {
     schedule.push({
       index: i,
       opponentId: opponents[i % opponents.length].id,
@@ -404,8 +476,12 @@ export function rolloverSeason(league: LeagueState, rng: Rng): string[] {
     );
   }
 
-  league.schedule = buildSchedule(league.teams, league.playerTeamId, rng);
-  league.calendar = buildCalendar(rng);
+  // A league from before the circuits grew fills out to size over the winter.
+  news.push(...expandLeague(league, rng));
+
+  const games = LEVELS[league.levelId].games;
+  league.schedule = buildSchedule(league.teams, league.playerTeamId, rng, games);
+  league.calendar = buildCalendar(rng, games);
   league.day = 0;
   // Last year's postseason is history; the new year seeds its own.
   league.playoffs = undefined;
@@ -437,14 +513,14 @@ export function maybeRosterMove(league: LeagueState, rng: Rng): string | null {
  * Lay the season out day by day: short homestands and road trips of two to
  * four games, with an off day between them to train on.
  */
-function buildCalendar(rng: Rng): CalendarDay[] {
+function buildCalendar(rng: Rng, games: number): CalendarDay[] {
   const days: CalendarDay[] = [];
   let gameIndex = 0;
 
-  while (gameIndex < SEASON_GAMES) {
-    const stretch = Math.min(rng.int(2, 4), SEASON_GAMES - gameIndex);
+  while (gameIndex < games) {
+    const stretch = Math.min(rng.int(2, 4), games - gameIndex);
     for (let i = 0; i < stretch; i++) days.push({ gameIndex: gameIndex++ });
-    if (gameIndex < SEASON_GAMES) {
+    if (gameIndex < games) {
       days.push({ gameIndex: null });
       // Now and then the schedule gives you two days off in a row.
       if (rng.chance(0.28)) days.push({ gameIndex: null });
@@ -639,40 +715,64 @@ export function simulateOtherTeams(
   rng: Rng,
   excludeIds: readonly string[] = [],
 ): void {
+  // Random pairings, so in a league with an odd number of clubs it isn't
+  // always the same one sitting the day out.
   const others = league.teams.filter(
     (t) => t.id !== league.playerTeamId && !excludeIds.includes(t.id),
   );
-  for (let i = 0; i < others.length; i += 2) {
-    const a = others[i];
-    const b = others[i + 1];
-    if (!b) break;
-    simulateGame(a, b, rng);
+  for (let i = others.length - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [others[i], others[j]] = [others[j], others[i]];
+  }
+  for (let i = 0; i + 1 < others.length; i += 2) {
+    simulateGame(others[i], others[i + 1], rng);
   }
 }
 
 /**
- * Six fresh club names for a league the player isn't in. Cities and nicknames
- * are unique within the six, and no full name repeats one in `taken` — so two
- * levels of the ladder never both field a Riverside Rapids.
+ * One club name out of the pools: a city not yet used, and a nickname that
+ * doesn't make a full name already in `taken` — so two levels of the ladder
+ * never both field a Riverside Rapids. Both pools are consumed.
  */
-export function generateLeagueNames(rng: Rng, taken: ReadonlySet<string>): string[] {
+function pickClubName(
+  rng: Rng,
+  cities: string[],
+  nicks: string[],
+  taken: ReadonlySet<string>,
+): string {
+  const city =
+    cities.splice(rng.int(0, cities.length - 1), 1)[0] ?? rng.pick(CITY_NAMES);
+  let pickAt = rng.int(0, nicks.length - 1);
+  for (let tries = 0; tries < nicks.length; tries++) {
+    const at = (pickAt + tries) % nicks.length;
+    if (!taken.has(`${city} ${nicks[at]}`)) {
+      pickAt = at;
+      break;
+    }
+  }
+  const nick = nicks.splice(pickAt, 1)[0] ?? rng.pick(TEAM_NICKS);
+  return `${city} ${nick}`;
+}
+
+/**
+ * Fresh club names for a league the player isn't in, as many as that level
+ * fields. Cities and nicknames are unique within the set, and no full name
+ * repeats one in `taken`.
+ */
+export function generateLeagueNames(
+  rng: Rng,
+  taken: ReadonlySet<string>,
+  count: number,
+): string[] {
   const cities = [...CITY_NAMES];
   const nicks = [...TEAM_NICKS];
   const names: string[] = [];
-
-  for (let i = 0; i < 6; i++) {
-    const city = cities.splice(rng.int(0, cities.length - 1), 1)[0];
-    let pickAt = rng.int(0, nicks.length - 1);
-    for (let tries = 0; tries < nicks.length; tries++) {
-      const at = (pickAt + tries) % nicks.length;
-      if (!taken.has(`${city} ${nicks[at]}`)) {
-        pickAt = at;
-        break;
-      }
-    }
-    names.push(`${city} ${nicks.splice(pickAt, 1)[0]}`);
+  const used = new Set(taken);
+  for (let i = 0; i < count; i++) {
+    const name = pickClubName(rng, cities, nicks, used);
+    used.add(name);
+    names.push(name);
   }
-
   return names;
 }
 

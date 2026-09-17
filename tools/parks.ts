@@ -10,7 +10,7 @@ import { PlaySim } from '../src/core/playSim';
 import type { BattedBall, ContactQuality } from '../src/core/types';
 import { ARCHETYPES, createPlayer } from '../src/core/player';
 import { Rng, clamp } from '../src/core/rng';
-import { SEASON_GAMES, advanceDay, createLeague, isSeasonOver, nextGame } from '../src/core/league';
+import { seasonGames, advanceDay, createLeague, isSeasonOver, nextGame } from '../src/core/league';
 
 const DT = 1 / 60;
 
@@ -103,7 +103,7 @@ while (!isSeasonOver(league) && guard++ < 500) {
 }
 
 console.log(`  calendar length   ${league.calendar.length} days`);
-console.log(`  game days         ${gameDays} (schedule has ${SEASON_GAMES})`);
+console.log(`  game days         ${gameDays} (schedule has ${seasonGames(league)})`);
 console.log(`  off days          ${offDays}`);
 console.log(`  unplayed games    ${league.schedule.filter((g) => !g.played).length}`);
 console.log(`  shape             ${shape.join('')}`);

@@ -9,7 +9,7 @@
  * Run: npx tsx tools/season.ts
  */
 import {
-  SEASON_GAMES,
+  seasonGames,
   advanceDay,
   createLeague,
   isGameDay,
@@ -59,7 +59,7 @@ for (const seed of [1, 7, 99, 2024, 555]) {
     // What the post-game screen and the hub both ask.
     const over = isSeasonOver(league);
     if (over) {
-      if (gamesPlayed < SEASON_GAMES) earlyEnd = gamesPlayed;
+      if (gamesPlayed < seasonGames(league)) earlyEnd = gamesPlayed;
       break;
     }
 
@@ -96,11 +96,11 @@ for (const seed of [1, 7, 99, 2024, 555]) {
   const label = `seed ${seed}`;
   if (earlyEnd >= 0) {
     failures++;
-    console.log(`  FAIL  ${label}: season ended after only ${earlyEnd} of ${SEASON_GAMES} games`);
+    console.log(`  FAIL  ${label}: season ended after only ${earlyEnd} of ${seasonGames(league)} games`);
   } else {
     const p = league.playoffs;
     console.log(
-      `  ok    ${label}: ${gamesPlayed}/${SEASON_GAMES} games, ${offDays} off days, ` +
+      `  ok    ${label}: ${gamesPlayed}/${seasonGames(league)} games, ${offDays} off days, ` +
         `${league.calendar.length}-day calendar, ${playoffGames} playoff games, ` +
         `result ${p?.playerResult}`,
     );
@@ -150,8 +150,8 @@ for (const seed of [1, 7, 99, 2024, 555]) {
   );
   check(
     `${label}: regular-season table untouched by the postseason`,
-    regularSeasonGames(league).length === SEASON_GAMES &&
-      league.teams.every((t) => clubGames(t) === SEASON_GAMES),
+    regularSeasonGames(league).length === seasonGames(league) &&
+      league.teams.every((t) => clubGames(t) === seasonGames(league)),
   );
   check(
     `${label}: every playoff game sits on exactly one calendar day`,
@@ -170,7 +170,7 @@ console.log('\n=== Playoffs: forced outcomes ===\n');
   league.day = league.calendar.length;
   league.teams.forEach((t, i) => {
     t.wins = 20 - i * 3;
-    t.losses = SEASON_GAMES - t.wins;
+    t.losses = seasonGames(league) - t.wins;
   });
   startPlayoffs(league, rng);
   const p = league.playoffs!;
@@ -210,7 +210,7 @@ console.log('\n=== Playoffs: forced outcomes ===\n');
   l2.day = l2.calendar.length;
   l2.teams.forEach((t, i) => {
     t.wins = 20 - i * 3;
-    t.losses = SEASON_GAMES - t.wins;
+    t.losses = seasonGames(l2) - t.wins;
   });
   startPlayoffs(l2, rng2);
   const results = [true, false, false];
@@ -232,7 +232,7 @@ console.log('\n=== Playoffs: forced outcomes ===\n');
   l3.day = l3.calendar.length;
   l3.teams.forEach((t, i) => {
     t.wins = 4 + i * 3;
-    t.losses = SEASON_GAMES - t.wins;
+    t.losses = seasonGames(l3) - t.wins;
   });
   startPlayoffs(l3, rng3);
   check('worst club misses the playoffs', l3.playoffs!.playerResult === 'missed');

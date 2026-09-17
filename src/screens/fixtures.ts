@@ -1,5 +1,5 @@
 import type { App } from '../app';
-import { LEVELS, SEASON_GAMES, playerTeam, teamKit } from '../core/league';
+import { LEVELS, playerTeam, seasonGames, teamKit } from '../core/league';
 import type { Fixture, SeasonSplits, Tally } from '../core/seasonStats';
 import {
   formatDiff,
@@ -112,7 +112,7 @@ export function renderFixtures(app: App, mount: HTMLElement): void {
           <div><b>${streak}</b><span>Streak</span></div>
         </div>
         <div class="tiny muted" style="margin-top:10px">
-          ${splits.played} of ${SEASON_GAMES} games played.
+          ${splits.played} of ${seasonGames(league)} games played.
           ${splits.overall.ties > 0
             ? `${splits.overall.ties === 1 ? 'One game' : `${splits.overall.ties} games`} called level after twelve innings.`
             : ''}

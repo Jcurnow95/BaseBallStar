@@ -1,7 +1,6 @@
 /**
- * The Baseball World Trophy — "the Trough" to everyone who has ever played
- * for it. Thirty-two countries, every fourth year, starting with the year the
- * career starts.
+ * The World Trophy. Thirty-two countries, every second year, starting with
+ * the year the career starts.
  *
  * Shape of the thing:
  *
@@ -56,7 +55,7 @@ import { rollWeather } from './weather';
 /* ------------------------------------------------------------ the format */
 
 /** Years between tournaments. */
-export const CUP_INTERVAL = 4;
+export const CUP_INTERVAL = 2;
 export const CUP_TEAMS = 32;
 export const GROUP_COUNT = 8;
 export const GROUP_SIZE = 4;
@@ -84,8 +83,8 @@ export const ROUND_LABEL: Record<CupRound, string> = {
 export const KNOCKOUT_ROUNDS: CupRound[] = ['r16', 'quarter', 'semi', 'final'];
 
 /**
- * A tournament happens in the year the career starts and every fourth year
- * after: 1, 5, 9, 13. Seasons are 1-based, hence the shift.
+ * A tournament happens in the year the career starts and every second year
+ * after: 1, 3, 5, 7. Seasons are 1-based, hence the shift.
  */
 export const isCupYear = (seasonYear: number): boolean =>
   seasonYear >= 1 && (seasonYear - 1) % CUP_INTERVAL === 0;
@@ -677,7 +676,7 @@ function introLines(cup: WorldCup, nation: Nation): string[] {
 
   if (cup.selection === 'in') {
     return [
-      `You have been called up by ${nation.name} for the Baseball World Trophy.`,
+      `You have been called up by ${nation.name} for the World Trophy.`,
       group ? `Group ${group.id}: ${rivals}.` : '',
       'Three group games. Win the group, or finish among the best of the rest, and you are into the last sixteen.',
     ].filter(Boolean);
@@ -690,9 +689,9 @@ function introLines(cup: WorldCup, nation: Nation): string[] {
       : `${nation.name} wanted a ${cup.bar} overall. Your case came to ${cup.yourCase}.`;
 
   return [
-    `You did not make the ${nation.name} squad for the Baseball World Trophy.`,
+    `You did not make the ${nation.name} squad for the World Trophy.`,
     why,
-    `${champ} lifted the Trough.`,
+    `${champ} lifted the World Trophy.`,
   ];
 }
 
@@ -856,7 +855,7 @@ function finishRound(
     return {
       ...base,
       status: 'champion',
-      note: `${base.nation} are world champions. The Trough is yours.`,
+      note: `${base.nation} are world champions. The World Trophy is yours.`,
       cupComplete: true,
       championName: base.nation,
       finalist: true,
@@ -873,8 +872,8 @@ function finishRound(
     status: 'eliminated',
     note:
       base.round === 'group'
-        ? `${base.nation} go out in the group stage. ${champ} went on to lift the Trough.`
-        : `Out in the ${ROUND_LABEL[base.round]}. ${champ} lifted the Trough.`,
+        ? `${base.nation} go out in the group stage. ${champ} went on to lift the World Trophy.`
+        : `Out in the ${ROUND_LABEL[base.round]}. ${champ} lifted the World Trophy.`,
     cupComplete: true,
     championName: champ,
     finalist: base.round === 'final',

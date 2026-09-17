@@ -68,7 +68,7 @@ export const LEVELS: LeagueLevel[] = [
   {
     id: 3,
     name: 'The Majors',
-    short: 'MLB',
+    short: 'Majors',
     pitcherRating: 84,
     defenseRating: 82,
     promotionOverall: 999,
@@ -196,7 +196,7 @@ export interface ScheduledGame {
   /** Set on postseason games: which series this is game `gameNo` of. */
   playoff?: { seriesId: string; gameNo: number };
   /**
-   * Set on Baseball World Trophy games: which tournament match this is. These
+   * Set on World Trophy games: which tournament match this is. These
    * sit on the *front* of the calendar, before opening day, and are kept off
    * the club table entirely. See `core/worldCup.ts`.
    */

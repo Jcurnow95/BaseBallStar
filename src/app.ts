@@ -67,7 +67,7 @@ export interface PostGameSummary {
   newAchievements: string[];
   /** Where the series stands after this game, when it was a playoff game. */
   playoff?: PlayoffGameOutcome;
-  /** Where the tournament stands, when it was a Baseball World Trophy game. */
+  /** Where the tournament stands, when it was a World Trophy game. */
   cup?: CupGameOutcome;
   /** The moments the sim spotted, so the recap can call them out every time. */
   feats: GameFeats;

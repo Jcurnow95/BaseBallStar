@@ -39,8 +39,8 @@ export interface SaveData {
    */
   otherLevels?: LevelTable[];
   /**
-   * This year's Baseball World Trophy, if this is one of the years it's played.
-   * Replaced wholesale every fourth year. See `core/worldCup.ts`.
+   * This year's World Trophy, if this is one of the years it's played.
+   * Replaced wholesale every second year. See `core/worldCup.ts`.
    */
   worldCup?: WorldCup;
   /** Every tournament the career has lived through, oldest first. */

@@ -158,14 +158,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
   );
 
   // "Semifinal · Game 2 · Series 1-0" over the matchup on a playoff night, or
-  // "Baseball World Trophy · Group C" on a night you're playing for a country.
+  // "World Trophy · Group C" on a night you're playing for a country.
   const series = scheduled.playoff ? playerSeries(league) : null;
   const playoffTag = (() => {
     if (cup) {
       const round = (scheduled.worldCup?.round ?? 'group') as keyof typeof CUP_ROUND_LABEL;
       const group = groupOf(cup, cup.nationId);
       const where = round === 'group' && group ? `Group ${group.id}` : CUP_ROUND_LABEL[round];
-      return `Baseball World Trophy · ${where}`;
+      return `World Trophy · ${where}`;
     }
     if (!scheduled.playoff || !series) return '';
     const line = seriesLine(league, series);
@@ -985,7 +985,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     recoverOvernight(player, overnightEnergyBonus(life));
 
     // Move the tournament along first, so the trophy case can see a final
-    // reached or a Trough won on the game that actually did it.
+    // reached or a World Trophy won on the game that actually did it.
     let cupOutcome: CupGameOutcome | null = null;
     if (cup) {
       cupOutcome = recordCupGame(save, scheduled, sim.score.us, sim.score.them, app.rng);

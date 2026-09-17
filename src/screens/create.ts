@@ -129,7 +129,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
 
   // The country line spells out the trade the player is making, because it is
   // the one choice on this screen they can never revisit: a deep baseball
-  // country is a better team to win the Trough with and a harder squad to get
+  // country is a better team to win the World Trophy with and a harder squad to get
   // into at all.
   const nationDetail = q(mount, '#nationDetail');
   const paintNation = (): void => {
@@ -144,7 +144,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
       <strong>${n.flag} ${esc(n.name)}</strong>
       <div class="reward"><span>Squad bar</span><b>${bar} OVR</b></div>
       <div class="reward"><span>Also needs</span><b>${esc(LEVELS[CUP_ELIGIBLE_LEVEL].name)} or better</b></div>
-      <p class="tiny muted">${esc(hardness)} The Baseball World Trophy is played every four years, starting this one.</p>`;
+      <p class="tiny muted">${esc(hardness)} The World Trophy is played every two years, starting this one.</p>`;
   };
   paintNation();
 
@@ -181,7 +181,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
     app.save = newSave(player, league);
 
     // Year one is a tournament year. An eighteen-year-old in Single-A is never
-    // in it, but the world plays for the Trough whether or not you're there,
+    // in it, but the world plays for the World Trophy whether or not you're there,
     // and the career should start knowing that.
     const intro = startWorldCup(app.save, app.rng, overallRating(player.attributes));
     app.persist();
@@ -196,7 +196,7 @@ export function renderCreate(app: App, mount: HTMLElement): void {
       confirmLabel: "Let's go",
     });
     await showDialog({
-      title: `Baseball World Trophy · Year ${app.save.seasonYear}`,
+      title: `World Trophy · Year ${app.save.seasonYear}`,
       body: intro.lines.join('\n\n'),
       confirmLabel: 'On with the season',
     });

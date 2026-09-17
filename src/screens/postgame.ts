@@ -38,7 +38,7 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     ? `<div class="notice ${
         cup.status === 'eliminated' ? 'warn' : cup.status === 'champion' ? 'moment' : ''
       }" style="margin-bottom:12px">
-         <b>Baseball World Trophy · ${esc(CUP_ROUND_LABEL[cup.round])}</b> · ${esc(cup.note)}
+         <b>World Trophy · ${esc(CUP_ROUND_LABEL[cup.round])}</b> · ${esc(cup.note)}
        </div>`
     : '';
 

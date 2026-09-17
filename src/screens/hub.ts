@@ -239,7 +239,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
     ${
       cup
         ? `<button class="btn ghost" id="worldcup" style="margin-top:8px">
-             Baseball World Trophy${cupBadge}
+             World Trophy${cupBadge}
            </button>`
         : ''
     }

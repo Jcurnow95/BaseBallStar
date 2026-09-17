@@ -1,5 +1,5 @@
 /**
- * The thirty-two countries that contest the Baseball World Trophy.
+ * The thirty-two countries that contest the World Trophy.
  *
  * A nation is only three numbers deep, because that's all the tournament ever
  * asks of it: how good the side is, how hard it is to get into, and what to

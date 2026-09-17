@@ -179,7 +179,7 @@ function runCohort(label: string, player: PlayerProfile, levelId: number, skill:
 const PA_PER_COHORT = 4000;
 
 console.log('\n=== Hitting model balance ===');
-console.log(`${PA_PER_COHORT} plate appearances per cohort. Real MLB baseline: ~.245/.315/.410, K 22%, BB 8.5%, HR/600 ~25\n`);
+console.log(`${PA_PER_COHORT} plate appearances per cohort. Real big-league baseline: ~.245/.315/.410, K 22%, BB 8.5%, HR/600 ~25\n`);
 
 for (const skill of SKILLS) {
   console.log(`-- player skill: ${skill.name} (aim scatter ${skill.sigma}) --`);

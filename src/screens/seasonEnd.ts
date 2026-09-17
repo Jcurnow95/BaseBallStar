@@ -202,7 +202,7 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     // And the winter at home, which is where the people are.
     const homeLines = lifeOffseason(life, () => app.rng.next());
 
-    // Every fourth year the world tournament comes round, and it is played
+    // Every second year the world tournament comes round, and it is played
     // before opening day — so it is seeded here, on the new league, after the
     // player has had their birthday and their offseason points but before they
     // report to camp. `startWorldCup` puts the group games on the front of the
@@ -233,7 +233,7 @@ export function renderSeasonEnd(app: App, mount: HTMLElement): void {
     });
     if (cupIntro) {
       await showDialog({
-        title: `Baseball World Trophy · Year ${save.seasonYear}`,
+        title: `World Trophy · Year ${save.seasonYear}`,
         body: cupIntro.lines.join('\n\n'),
         confirmLabel: cupIntro.selection === 'in' ? 'Report to the squad' : 'Back to work',
       });

@@ -59,7 +59,7 @@ import {
 import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
 import { unclaimedAchievements } from '../core/achievements';
-import { homeById } from '../core/lifestyle';
+import { fameLabel, homeById } from '../core/lifestyle';
 import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
@@ -364,6 +364,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
               <span class="id-chip">Bats ${player.bats}</span>
               <span class="id-chip">Lv ${player.level}</span>
               <span class="id-chip">Home · ${esc(homePark.name)}</span>
+              <span class="id-chip" title="Fame ${Math.round(life.fame)}">★ ${esc(fameLabel(life.fame))}</span>
             </div>
           </div>
           <div class="ovr">

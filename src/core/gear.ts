@@ -291,6 +291,8 @@ export function gameEarnings(
   game: BattingStats,
   putouts: number,
   win: boolean,
+  /** What a name is worth on top: see `fameBonusMult` in `core/lifestyle.ts`. */
+  bonusMult = 1,
 ): Earnings {
   const offer = contractById(contract);
   const level = clamp(levelId, 0, LEVEL_SALARY.length - 1);
@@ -307,7 +309,7 @@ export function gameEarnings(
     putouts * 15 +
     (win ? 50 : 0);
 
-  const bonus = Math.round(raw * LEVEL_BONUS_SCALE[level] * offer.bonusMult);
+  const bonus = Math.round(raw * LEVEL_BONUS_SCALE[level] * offer.bonusMult * bonusMult);
   return { salary, bonus, total: salary + bonus };
 }
 

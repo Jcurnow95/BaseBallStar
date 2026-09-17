@@ -12,6 +12,8 @@ import {
 import { ATTRIBUTE_LABELS } from '../core/player';
 import { LEVELS } from '../core/league';
 import type { Attributes } from '../core/types';
+import { dealForSlot } from '../core/lifestyle';
+import { lifestyleOf } from '../core/save';
 import { esc, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
@@ -23,6 +25,7 @@ const bonusText = (bonuses: Partial<Attributes>): string =>
 export function renderStore(app: App, mount: HTMLElement): void {
   const save = app.requireSave();
   const { player, league } = save;
+  const life = lifestyleOf(save);
   const offer = contractById(player.contract);
 
   const draw = (): void => {
@@ -50,14 +53,25 @@ export function renderStore(app: App, mount: HTMLElement): void {
         </div>`;
     }).join('');
 
-    const shelfHtml = GEAR_SLOTS.map(
-      (slot) => `
+    const shelfHtml = GEAR_SLOTS.map((slot) => {
+      // A sponsor's slot is theirs: they supply it, and nothing else goes in
+      // it until the deal runs out.
+      const sponsor = dealForSlot(life, slot);
+      return `
       <div class="panel">
         <h2>${SLOT_LABELS[slot]}</h2>
+        ${
+          sponsor
+            ? `<div class="notice" style="margin-bottom:10px">
+                 <b>${esc(sponsor.brand)}</b> supplies your ${SLOT_LABELS[slot].toLowerCase()} for the length of the deal. Their shelf only.
+               </div>`
+            : ''
+        }
         ${gearForSlot(slot)
           .map((def) => {
             const equipped = player.gear[slot]?.id === def.id;
             const affordable = player.money >= def.price;
+            const locked = !!sponsor && sponsor.gearId !== def.id;
             return `
             <div class="gear-card ${equipped ? 'on' : ''}" data-gear="${def.id}">
               <div class="info">
@@ -65,14 +79,14 @@ export function renderStore(app: App, mount: HTMLElement): void {
                 <span>${esc(def.blurb)}</span>
                 <span class="gear-bonus">${esc(bonusText(def.bonuses))} · lasts ${def.games} games</span>
               </div>
-              <button class="buy" data-buy="${def.id}" ${equipped || !affordable ? 'disabled' : ''}>
-                ${equipped ? 'Worn' : formatMoney(def.price)}
+              <button class="buy" data-buy="${def.id}" ${equipped || !affordable || locked ? 'disabled' : ''}>
+                ${equipped ? 'Worn' : locked ? 'Sponsored' : formatMoney(def.price)}
               </button>
             </div>`;
           })
           .join('')}
-      </div>`,
-    ).join('');
+      </div>`;
+    }).join('');
 
     mount.innerHTML = `
       <div class="scroll">
@@ -108,6 +122,8 @@ export function renderStore(app: App, mount: HTMLElement): void {
         const def = gearById(button.dataset.buy!);
         if (!def) return;
         if (player.money < def.price) return;
+        const sponsor = dealForSlot(life, def.slot as GearSlot);
+        if (sponsor && sponsor.gearId !== def.id) return;
 
         // Replacing something with life left in it throws that life away.
         const current = player.gear[def.slot as GearSlot];

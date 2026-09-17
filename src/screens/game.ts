@@ -37,7 +37,19 @@ import { addStats } from '../core/player';
 import { checkTrophies } from '../core/trophies';
 import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
-import { gameStaminaGuard, overnightEnergyBonus, upkeepPerGame } from '../core/lifestyle';
+import {
+  addFame,
+  dealForSlot,
+  fameBonusMult,
+  fameCrowdBoost,
+  fameFromGame,
+  gameStaminaGuard,
+  mediaMomentFor,
+  overnightEnergyBonus,
+  tickDeals,
+  upkeepPerGame,
+} from '../core/lifestyle';
+import { GEAR_SLOTS, gearById } from '../core/gear';
 import { lifestyleOf } from '../core/save';
 import { clamp } from '../core/rng';
 import type { BattedBall } from '../core/types';
@@ -716,8 +728,9 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // it's the other way round.
       fieldingKit: side === 'offense' ? theirKit : myKit,
       battingKit: side === 'offense' ? myKit : theirKit,
-      // October packs the place, whatever the level.
-      crowd: scheduled.playoff ? Math.min(1, level.crowd + 0.35) : level.crowd,
+      // October packs the place, whatever the level. So does a name people
+      // have heard of.
+      crowd: Math.min(1, level.crowd + (scheduled.playoff ? 0.35 : 0) + fameCrowdBoost(life.fame)),
       // Home fills the first-base dugout: that's us when we're hosting and in
       // the field, or when we're visiting and at bat.
       homeSide: scheduled.home === (side === 'defense') ? 'fielding' : 'batting',
@@ -869,6 +882,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       sim.gameStats,
       sim.putouts,
       sim.score.us > sim.score.them,
+      fameBonusMult(life.fame),
     );
     player.money += earnings.total;
     const wornOut = wearGear(player).map((g) => g.name);
@@ -879,6 +893,49 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     const upkeep = upkeepPerGame(life);
     player.money -= upkeep;
     const lifeNotes: string[] = [];
+
+    // The sponsors pay, and any of their kit that fell apart tonight is
+    // replaced from the truck — that is what the deal is for.
+    const deals = tickDeals(life);
+    player.money += deals.paid;
+    for (const brand of deals.ended) lifeNotes.push(`Your deal with ${brand.brand} has run its course.`);
+    for (const slot of GEAR_SLOTS) {
+      const sponsor = dealForSlot(life, slot);
+      const item = sponsor ? gearById(sponsor.gearId) : undefined;
+      if (sponsor && item && !player.gear[slot]) {
+        player.gear[slot] = { id: item.id, gamesLeft: item.games };
+        lifeNotes.push(`${sponsor.brand} sent over a fresh ${item.name}.`);
+      }
+    }
+
+    // A name is made on nights like this — or not, on nights like this.
+    const won = sim.score.us > sim.score.them;
+    const fameGain = addFame(
+      life,
+      fameFromGame({
+        hits: sim.gameStats.hits,
+        homeRuns: sim.gameStats.homeRuns,
+        rbi: sim.gameStats.rbi,
+        stolenBases: sim.gameStats.stolenBases,
+        walkOff: sim.feats.walkOff,
+        grandSlam: sim.feats.grandSlam,
+        insideThePark: sim.feats.insideThePark,
+        win: won,
+        playoff: !!scheduled.playoff,
+        worldCup: !!cup,
+        levelId: cup ? LEVELS.length - 1 : league.levelId,
+      }),
+    );
+    const media = mediaMomentFor(
+      {
+        homeRuns: sim.gameStats.homeRuns,
+        walkOff: sim.feats.walkOff,
+        grandSlam: sim.feats.grandSlam,
+        win: won,
+        playoff: !!scheduled.playoff,
+      },
+      () => app.rng.next(),
+    );
 
     // A game takes a real bite out of conditioning, then the day rolls over.
     // A proper bed and no red-eye flights take a little of that bite back.
@@ -899,6 +956,11 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       if (cupOutcome?.cupComplete) {
         player.stamina = 100;
         player.energy = 100;
+      }
+      // A world title is the most famous thing a ballplayer can do.
+      if (cupOutcome?.status === 'champion') {
+        addFame(life, 15);
+        lifeNotes.push('World champion. Everybody knows the name now.');
       }
     }
 
@@ -958,7 +1020,14 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.
       seasonComplete: isSeasonOver(league),
-      life: { upkeep, notes: lifeNotes },
+      life: {
+        upkeep,
+        endorsements: deals.paid,
+        fame: life.fame,
+        fameGain,
+        media,
+        notes: lifeNotes,
+      },
     };
 
     app.lastGame = summary;

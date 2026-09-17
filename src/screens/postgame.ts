@@ -4,7 +4,10 @@ import { contractById, formatMoney } from '../core/gear';
 import { ROUND_LABEL } from '../core/playoffs';
 import { ROUND_LABEL as CUP_ROUND_LABEL } from '../core/worldCup';
 import { unlockedPanelHtml } from '../ui/trophyList';
-import { esc, q } from '../ui/dom';
+import { MEDIA_ANSWERS, answerMedia, fameLabel } from '../core/lifestyle';
+import type { MediaAnswer } from '../core/lifestyle';
+import { lifestyleOf } from '../core/save';
+import { esc, q, qa } from '../ui/dom';
 
 export function renderPostGame(app: App, mount: HTMLElement): void {
   const summary = app.lastGame;
@@ -127,6 +130,25 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
 
       ${unlockedPanelHtml(summary.unlocked)}
 
+      ${
+        summary.life.media
+          ? `<div class="panel" id="press">
+               <h2>In the tunnel</h2>
+               <p class="tiny" style="margin:0 0 10px; line-height:1.55">
+                 A reporter catches you on the way out. <i>"${esc(summary.life.media.question)}"</i>
+               </p>
+               <div class="press-btns">
+                 ${(Object.keys(MEDIA_ANSWERS) as MediaAnswer[])
+                   .map(
+                     (key) =>
+                       `<button class="btn ghost tiny" data-answer="${key}">${esc(MEDIA_ANSWERS[key].label)}</button>`,
+                   )
+                   .join('')}
+               </div>
+             </div>`
+          : ''
+      }
+
       <div class="panel">
         <h2>Your line</h2>
         <div class="statline">
@@ -150,6 +172,11 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
         <h2>Payday</h2>
         <div class="reward"><span>${esc(contractById(save.player.contract).name)}</span><b>${formatMoney(summary.earnings.salary)}</b></div>
         <div class="reward"><span>Performance bonus</span><b>${formatMoney(summary.earnings.bonus)}</b></div>
+        ${
+          summary.life.endorsements > 0
+            ? `<div class="reward"><span>Endorsements</span><b>${formatMoney(summary.life.endorsements)}</b></div>`
+            : ''
+        }
         ${
           summary.life.upkeep > 0
             ? `<div class="reward"><span>Home &amp; upkeep</span><b class="down">−${formatMoney(summary.life.upkeep)}</b></div>`
@@ -185,6 +212,12 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
           <b>${cup ? tournamentAvg : battingAverage(save.player.season)}</b>
         </div>
         <div class="reward"><span>Stamina</span><b>${Math.round(save.player.stamina)}%</b></div>
+        <div class="reward">
+          <span>Fame · ${esc(fameLabel(summary.life.fame))}</span>
+          <b id="fameLine">${Math.round(summary.life.fame)}${
+            summary.life.fameGain >= 0.5 ? ` <i class="gear-up">+${Math.round(summary.life.fameGain)}</i>` : ''
+          }</b>
+        </div>
       </div>
 
       ${
@@ -217,4 +250,26 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
     // The year ends with the awards, then the front office review.
     app.go(summary.seasonComplete ? 'awards' : 'hub');
   });
+
+  // The quote is given once. The panel turns into what you said and what it
+  // did, and the moment is cleared so a reload doesn't ask again.
+  for (const button of qa<HTMLButtonElement>(mount, '[data-answer]')) {
+    button.addEventListener('click', () => {
+      const moment = summary.life.media;
+      if (!moment) return;
+      const answer = button.dataset.answer as MediaAnswer;
+      const life = lifestyleOf(save);
+      const result = answerMedia(life, answer, moment.win);
+      summary.life.media = null;
+      summary.life.fame = life.fame;
+      app.persist();
+      const fameNote =
+        result.fame > 0 ? `+${result.fame} fame.` : result.fame < 0 ? `${result.fame} fame.` : '';
+      q(mount, '#press').innerHTML = `
+        <h2>In the tunnel</h2>
+        <p class="tiny" style="margin:0 0 6px; line-height:1.55"><i>"${esc(MEDIA_ANSWERS[answer].quote)}"</i></p>
+        <p class="tiny muted" style="margin:0">${esc(result.line)} ${esc(fameNote)}</p>`;
+      q(mount, '#fameLine').textContent = String(Math.round(life.fame));
+    });
+  }
 }

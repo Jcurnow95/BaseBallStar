@@ -3052,3 +3052,19 @@ table.standings.fixtures tr.ahead td {
 .reward b.down {
   color: var(--red);
 }
+
+/* Fame reads gold, the colour of the hardware it's chasing. */
+.bar.fame > i {
+  background: var(--gold);
+}
+
+/* The three answers in the tunnel, side by side and wrapping on a narrow phone. */
+.press-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.press-btns .btn {
+  flex: 1 1 auto;
+}

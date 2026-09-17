@@ -7,6 +7,7 @@ import type { GameScore } from './core/gameSim';
 import type { PlayoffGameOutcome } from './core/playoffs';
 import type { CupGameOutcome } from './core/worldCup';
 import type { Trophy, GameFeats } from './core/trophies';
+import type { MediaMoment } from './core/lifestyle';
 
 export type Route =
   | 'title'
@@ -33,6 +34,13 @@ export type Route =
 export interface LifeSummary {
   /** The house and the toys, charged after the game. */
   upkeep: number;
+  /** What the sponsors paid tonight. */
+  endorsements: number;
+  /** Fame after the game, and how much of it the game added. */
+  fame: number;
+  fameGain: number;
+  /** A reporter waiting in the tunnel, until the player answers. */
+  media: MediaMoment | null;
   /** Anything else worth a line on the recap. */
   notes: string[];
 }

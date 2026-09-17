@@ -286,15 +286,18 @@ export class GameSim {
     if (this.pending) return this.pending;
     if (this.finished) return { kind: 'gameOver', ...this.gameResult() };
 
+    // Decide before announcing the next half: a game that's over at the end
+    // of the ninth never opens the tenth, and a home team ahead after the top
+    // of the ninth never comes up to bat.
+    if (this.checkGameEnd()) {
+      this.finished = true;
+      return { kind: 'gameOver', ...this.gameResult() };
+    }
+
     if (!this.inningAnnounced) {
       this.inningAnnounced = true;
       const batting = this.weAreBatting ? 'You bat' : `${this.opponentName} bats`;
       return { kind: 'inning', text: `${this.inningLabel} — ${batting}` };
-    }
-
-    if (this.checkGameEnd()) {
-      this.finished = true;
-      return { kind: 'gameOver', ...this.gameResult() };
     }
 
     this.inningsPlayed = Math.max(this.inningsPlayed, this.inning);
@@ -945,17 +948,21 @@ export class GameSim {
 
   private checkGameEnd(): boolean {
     if (this.inning > MAX_INNINGS && !this.mustDecide) return true;
-    if (this.inning <= REGULATION_INNINGS) {
-      // Home team doesn't bat in the ninth if already ahead.
-      const homeScore = this.playerIsHome ? this.score.us : this.score.them;
-      const awayScore = this.playerIsHome ? this.score.them : this.score.us;
-      if (this.inning === REGULATION_INNINGS && this.half === 'bottom' && homeScore > awayScore) {
-        return true;
-      }
-      return false;
-    }
-    // Extras: end as soon as a full inning finishes with a leader.
-    return this.half === 'top' && this.score.us !== this.score.them;
+    // Nothing is decided before the ninth.
+    if (this.inning < REGULATION_INNINGS) return false;
+
+    const homeScore = this.playerIsHome ? this.score.us : this.score.them;
+    const awayScore = this.playerIsHome ? this.score.them : this.score.us;
+
+    // Bottom of the ninth or later: the home team ahead ends it — either they
+    // never need to bat, or they just walked it off. The away side scoring in
+    // the top half never ends anything; the home team still gets its turn.
+    if (this.half === 'bottom') return homeScore > awayScore;
+
+    // Top of the tenth or later, before a pitch has been thrown: the previous
+    // inning closed with a leader. `inningAnnounced` flips as the first thing
+    // in a half, so it's false only while the half is still untouched.
+    return this.inning > REGULATION_INNINGS && !this.inningAnnounced && homeScore !== awayScore;
   }
 
   private gameResult(): { win: boolean; tie: boolean } {

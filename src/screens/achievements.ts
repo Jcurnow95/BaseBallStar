@@ -2,6 +2,7 @@ import type { App } from '../app';
 import {
   ACHIEVEMENTS,
   ACHIEVEMENT_GROUPS,
+  achievementsLocked,
   claimAchievement,
   isAchievementClaimed,
   isAchievementMet,
@@ -13,16 +14,19 @@ import { esc, meterHtml, q, qa } from '../ui/dom';
 
 const cardHtml = (def: AchievementDef, player: PlayerProfile): string => {
   const claimed = isAchievementClaimed(player, def.id);
-  const met = isAchievementMet(def, player);
+  const locked = achievementsLocked(player);
+  const met = !locked && isAchievementMet(def, player);
   const progress = Math.min(def.progress(player), def.target);
 
   const status = claimed
     ? 'Claimed'
-    : met
-      ? 'Done — claim your points'
-      : def.target === 1
-        ? 'Not yet'
-        : `${progress} / ${def.target}`;
+    : locked
+      ? 'Locked'
+      : met
+        ? 'Done — claim your points'
+        : def.target === 1
+          ? 'Not yet'
+          : `${progress} / ${def.target}`;
 
   return `
     <div class="gear-card ${claimed ? 'on' : ''}">
@@ -71,6 +75,15 @@ export function renderAchievements(app: App, mount: HTMLElement): void {
           </div>
           ${meterHtml('Unlocked', done, ACHIEVEMENTS.length, 'xp', 'slim')}
         </div>
+
+        ${
+          achievementsLocked(player)
+            ? `<div class="notice warn">
+                 The developer menu was opened on this career, so achievements no longer pay
+                 out here. Anything claimed before that stays claimed. A new career starts clean.
+               </div>`
+            : ''
+        }
 
         ${groupsHtml}
       </div>

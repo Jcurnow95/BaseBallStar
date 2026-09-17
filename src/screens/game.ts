@@ -35,7 +35,7 @@ import { TEAM_KITS, kitFor, uniformFor } from '../core/uniforms';
 import { effectiveAttributes, gameEarnings, playerWithGear, wearGear } from '../core/gear';
 import { addStats } from '../core/player';
 import { checkTrophies } from '../core/trophies';
-import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
+import { ACHIEVEMENTS, achievementsLocked, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
 import {
   addFame,
@@ -894,9 +894,13 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     player.fielding.putouts += sim.putouts;
     player.fielding.errors += sim.errors;
 
-    const newAchievements = ACHIEVEMENTS.filter(
-      (a) => !metBefore.has(a.id) && isAchievementMet(a, player),
-    ).map((a) => a.name);
+    // Nothing to announce on a career the developer menu has touched: the
+    // milestones can't pay out there, so they aren't reached either.
+    const newAchievements = achievementsLocked(player)
+      ? []
+      : ACHIEVEMENTS.filter((a) => !metBefore.has(a.id) && isAchievementMet(a, player)).map(
+          (a) => a.name,
+        );
 
     // A miserable player learns less from a night; a happy one, a little more.
     const xp = Math.round(gameXp(sim.gameStats, sim.putouts) * moraleXpMult(life));

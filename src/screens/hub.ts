@@ -65,7 +65,6 @@ import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog, wireHints } from '../ui/modal';
 import { HINTS } from '../ui/hints';
-import { devMenuEnabled } from './dev';
 import { openDerby } from './derby';
 import { howtoSeen, openHowto } from './howto';
 import { openTutorial } from './tutorial';
@@ -348,18 +347,8 @@ export function renderHub(app: App, mount: HTMLElement): void {
       ${storeButton}`;
   }
 
-  const devEnabled = devMenuEnabled();
-
   mount.innerHTML = `
     <div class="scroll">
-      ${
-        devEnabled
-          ? `<div class="dev-bar">
-               <span>DEV BUILD</span>
-               <button id="devmenu">Dev menu</button>
-             </div>`
-          : ''
-      }
       <div class="panel">
         <div class="hub-head">
           <div class="badge">${esc(player.position)}</div>
@@ -568,7 +557,35 @@ export function renderHub(app: App, mount: HTMLElement): void {
   q(mount, '#tutorial').addEventListener('click', () => openTutorial(app, 'hub'));
   q(mount, '#derby').addEventListener('click', () => openDerby(app, 'hub'));
 
-  if (devEnabled) q(mount, '#devmenu').addEventListener('click', () => app.go('dev'));
+  // The developer menu hides behind the position badge: seven quick taps.
+  // It's a testing tool, and opening it marks the career, so the way in is a
+  // warning first and nothing on screen that invites the tap.
+  let taps = 0;
+  let lastTap = 0;
+  q(mount, '.hub-head .badge').addEventListener('click', async () => {
+    const now = Date.now();
+    taps = now - lastTap < 1200 ? taps + 1 : 1;
+    lastTap = now;
+    if (taps < 7) return;
+    taps = 0;
+    const ok = await showDialog({
+      title: 'Developer menu',
+      body:
+        'This is a testing tool. It edits the save directly: attributes, stats, money, the ' +
+        'league you play in.\n\n' +
+        (player.modded
+          ? 'This career is already marked as modified.'
+          : 'Opening it marks this career as modified, and achievements stop paying out on it ' +
+            'for good. Everything claimed so far stays.'),
+      confirmLabel: player.modded ? 'Open it' : 'I understand, open it',
+      cancelLabel: 'Leave it',
+      danger: !player.modded,
+    });
+    if (!ok) return;
+    player.modded = true;
+    app.persist();
+    app.go('dev');
+  });
 
   // Everything is already persisted as it happens; switching characters is
   // just a walk back to the title screen.

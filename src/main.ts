@@ -20,7 +20,7 @@ import { renderHowto } from './screens/howto';
 import { renderTutorial } from './screens/tutorial';
 import { renderDerby } from './screens/derby';
 import { renderLife } from './screens/life';
-import { devMenuEnabled, renderDev } from './screens/dev';
+import { renderDev } from './screens/dev';
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app mount point missing');
@@ -44,7 +44,9 @@ app.register('howto', renderHowto);
 app.register('tutorial', renderTutorial);
 app.register('derby', renderDerby);
 app.register('life', renderLife);
-if (devMenuEnabled()) app.register('dev', renderDev);
+// Always registered, never linked: the clubhouse opens it behind a secret
+// gesture, and opening it marks the career. See `renderHub`.
+app.register('dev', renderDev);
 app.start();
 
 // No-op in the browser; wires up back button, status bar and splash on device.

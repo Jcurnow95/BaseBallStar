@@ -25,25 +25,12 @@ import type { BattingStats, Handedness, Position } from '../core/types';
 import { esc, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 
-const DEV_FLAG_KEY = 'baseball-star:dev';
-
 /**
- * The dev menu writes straight into the save, so it's only reachable where a
- * developer is: the dev server, or any build served from localhost — which
- * is what `npm start` and the Electron shell are. A production build on a
- * real device hides it unless `baseball-star:dev` is set to `1` in
- * localStorage, the escape hatch for testing on a phone.
+ * The dev menu writes straight into the save. There is no visible way in:
+ * the clubhouse opens it after seven quick taps on the position badge, and
+ * only after a warning, because opening it marks the career as modified and
+ * achievements stop paying out on it for good. See `renderHub`.
  */
-export function devMenuEnabled(): boolean {
-  if (import.meta.env.DEV) return true;
-  try {
-    const host = location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') return true;
-    return localStorage.getItem(DEV_FLAG_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
 
 /** Editable batting counters. `hits` is derived, so it isn't in here. */
 const STAT_FIELDS: { key: keyof BattingStats; label: string }[] = [
@@ -95,7 +82,7 @@ export function renderDev(app: App, mount: HTMLElement): void {
           <div class="dev-head">
             <div>
               <strong>Dev Menu</strong>
-              <span class="tiny muted">Edits apply to the live save immediately.</span>
+              <span class="tiny muted">Edits apply to the live save immediately. This career is marked as modified; achievements are locked on it.</span>
             </div>
             <div class="ovr"><b id="dev-ovr">0</b><span>OVR</span></div>
           </div>

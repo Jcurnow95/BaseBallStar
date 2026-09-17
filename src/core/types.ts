@@ -73,6 +73,12 @@ export interface PlayerProfile {
   attributePoints: number;
   /** Ids of career achievements already claimed for points. See `core/achievements.ts`. */
   achievements: string[];
+  /**
+   * True once the developer menu has been opened on this career. Edits made
+   * there write straight into the save, so from then on achievements stop
+   * paying out — what was already claimed stays. Never cleared.
+   */
+  modded?: boolean;
   season: BattingStats;
   career: BattingStats;
   fielding: FieldingStats;

@@ -229,8 +229,16 @@ export function isAchievementClaimed(player: PlayerProfile, id: string): boolean
   return player.achievements.includes(id);
 }
 
+/**
+ * A career the developer menu has touched can't earn any more. The numbers
+ * behind every milestone are editable there, so a claim would be worth
+ * nothing; what was claimed before stays claimed.
+ */
+export const achievementsLocked = (player: PlayerProfile): boolean => player.modded === true;
+
 /** Met but not yet claimed — what the clubhouse badge counts. */
 export function unclaimedAchievements(player: PlayerProfile): AchievementDef[] {
+  if (achievementsLocked(player)) return [];
   return ACHIEVEMENTS.filter(
     (def) => isAchievementMet(def, player) && !isAchievementClaimed(player, def.id),
   );
@@ -238,11 +246,12 @@ export function unclaimedAchievements(player: PlayerProfile): AchievementDef[] {
 
 /**
  * Pay out an achievement. Returns the points granted, or null when there was
- * nothing to pay — unknown id, not met yet, or already claimed.
+ * nothing to pay — unknown id, not met yet, already claimed, or a career
+ * that's been through the developer menu.
  */
 export function claimAchievement(player: PlayerProfile, id: string): number | null {
   const def = ACHIEVEMENTS.find((a) => a.id === id);
-  if (!def) return null;
+  if (!def || achievementsLocked(player)) return null;
   if (isAchievementClaimed(player, id) || !isAchievementMet(def, player)) return null;
   player.achievements.push(id);
   player.attributePoints += def.points;

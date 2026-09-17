@@ -51,6 +51,11 @@ export const FIELDER_HOME: Record<PositionId, Vec2> = {
   RF: { x: 150, y: 250 },
 };
 
+/** The three men with grass behind them. */
+export function isOutfielder(id: PositionId): boolean {
+  return id === 'LF' || id === 'CF' || id === 'RF';
+}
+
 /** The player's chosen position maps straight through; the demo has no DH. */
 export function toPositionId(position: Position): PositionId {
   return position as PositionId;

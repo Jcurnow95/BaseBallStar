@@ -29,7 +29,7 @@ leaving them pointing into the wrong part of a shorter file.
 
 ## License summary
 
-All 23 files are **Pixabay Content License**. At download time each source page
+All 23 files downloaded on 2026-08-12 are **Pixabay Content License** (`homerun-call.mp3`, added later, is the exception — see its row). At download time each source page
 carried the line "Free for use under the Pixabay Content License" — that was
 checked per file, not assumed from the site as a whole.
 
@@ -93,6 +93,7 @@ initial transient, and the leather one is the most convincing pop.
 | File | Size | Original title | Uploader | Source |
 |---|---|---|---|---|
 | `homerun.mp3` | 1.0 MB | baseball home run | [ballparkfanatic444](https://pixabay.com/users/ballparkfanatic444-22123207/) | [419442](https://pixabay.com/sound-effects/film-special-effects-baseball-home-run-419442/) |
+| `homerun-call.mp3` | 85 KB | *(added 2026-09-02 by John as `homeRun!.mp3`; source and license not yet recorded — fill in before shipping)* | ? | ? |
 | `sting-charge-long.mp3` | 144 KB | Baseball calvary sting long sustain | [freesound_community](https://pixabay.com/users/freesound_community-46691455/) | [102081](https://pixabay.com/sound-effects/musical-baseball-calvary-sting-long-sustain-102081/) |
 | `sting-charge-short.mp3` | 95 KB | Baseball cavalry sting short sustain | [freesound_community](https://pixabay.com/users/freesound_community-46691455/) | [80564](https://pixabay.com/sound-effects/musical-baseball-cavalry-sting-short-sustain-80564/) |
 
@@ -157,7 +158,8 @@ no per-file provenance, so nothing from it should be treated as clearable.
 | `catchMade` | Stretch catch held | `catch-leather-thud` |
 | `catchMissed` | Stretch catch dropped | `catch-palming-football` |
 | `homeRun` | Your home run — crowd only, the bat already cracked at contact | `homerun` |
-| `fanfare` | 1.4s after a home run, answering the roar | `sting-charge-long` |
+| `homeRunCall` | The call, on top of the roar, the instant the ball clears the fence | `homerun-call` |
+| `fanfare` | 2.3s after a home run, once the call is done | `sting-charge-long` |
 | `rally` | You step in with runners on | `sting-charge-short` |
 | `clap` | You step in with the bases empty, 25% of the time | `clap-rhythmic` |
 | `cheerBig` | Your hit drives in runs | `cheer-strong` |

@@ -1,25 +1,33 @@
 import type { PlayOutcome, PlaySim, RunnerState } from '../core/playSim';
-import type { BaseId, Vec2 } from '../core/fieldGeometry';
-import { BASES, BASE_LABELS } from '../core/fieldGeometry';
-import type { Ballpark } from '../core/ballpark';
-import { fenceAt, wallHeightAt } from '../core/ballpark';
+import type { BaseId, PositionId, Vec2 } from '../core/fieldGeometry';
+import { ALL_POSITIONS, BASES, BASE_LABELS } from '../core/fieldGeometry';
+import { wallHeightAt } from '../core/ballpark';
 import { clamp } from '../core/rng';
 import { createSurface, pointerPos, vibrate } from '../ui/canvas';
 import type { Surface } from '../ui/canvas';
-import type { PlayerColors, SpriteAnim } from '../ui/sprites';
-import { createAnim, drawPlayer, updateAnim } from '../ui/sprites';
-import { CROWD_COLOURS } from './atBatView';
+import type { Uniform } from '../core/uniforms';
+import { Camera, RISE, TILT } from '../gfx/camera';
+import { ParkRenderer } from '../gfx/park';
+import type { Lighting } from '../gfx/palette';
+import { CUE_GOLD, CUE_RED, lightingFor, skinFor } from '../gfx/palette';
+import type { FigureAnim } from '../gfx/figure';
+import { createAnim, drawFieldFigure, updateAnim } from '../gfx/figure';
+import { drawBallTail, drawFieldBall } from '../gfx/ball';
+import { drawCueRing, drawGuideLine, drawJoystick } from '../gfx/hud';
+import { drawLightning, drawRain, drawTint, drawWindFlag } from '../gfx/weather';
 import { CatchOverlay } from './catchOverlay';
-import { drawGloom, drawRain, drawWindFlag } from './weatherFx';
 
 /**
- * Top-down view of a live play. Camera tracks the ball and whoever the player
- * is controlling, zooming out when they spread apart so both stay on screen.
+ * The live play, from a high seat behind the plate: a tilted view of the
+ * diamond that tracks the ball and whoever the player is controlling, zooming
+ * out when they spread apart so both stay on screen.
  *
  * On defense you drag anywhere to steer your fielder, then tap a base to throw
  * — or run the ball to the bag yourself.
  * On offense you decide whether to take the extra base.
  */
+
+export type PlayerColors = Uniform;
 
 export interface PlayViewOptions {
   sim: PlaySim;
@@ -34,143 +42,21 @@ export interface PlayViewOptions {
    * dugout, the visitors sit on the third-base side.
    */
   homeSide: 'fielding' | 'batting';
+  /**
+   * The ball just cleared the fence, with `runs` coming home. Fires once, the
+   * frame it happens — a couple of seconds before `onComplete` — so the
+   * celebration lands with the moment rather than with the scorekeeping.
+   */
+  onHomeRun?(runs: number): void;
   onComplete(outcome: PlayOutcome): void;
 }
 
 const MIN_SCALE = 1.5;
 const MAX_SCALE = 3.2;
-/** Vertical squash applied to ball height, so a fly ball reads as elevation. */
-const HEIGHT_SCALE = 0.62;
-
-/**
- * The stand is one continuous ring round the whole field: the bowl behind
- * the outfield fence, carried past each foul pole until it meets a low wall
- * in foul ground, down both lines behind that wall, and round behind the
- * plate as a backstop curve. It is the same depth all the way round, so the
- * fans beside the players carry as much weight as the ones beyond the fence.
- */
-const STAND_DEPTH = 70;
-/**
- * How far the foul-ground wall sits off each line, in feet — flush behind
- * the dugouts, so the bleachers hug the field the way a small park's do.
- * The backstop is a circle round the plate of this same radius, which makes
- * it tangent to both walls: the ring turns the corner behind home without
- * a kink.
- */
-const STAND_OFFSET = 60;
-/** Square feet of deck per seat, so a bigger park holds a bigger crowd. */
-const SQFT_PER_SEAT = 26;
-/** Rows kept clear at the front and back of the deck — wall and walkway. */
-const SEAT_MARGIN = 6;
-/**
- * Aisles cut straight through the deck every so many feet round the ring,
- * so it reads as blocks of bleachers rather than one unbroken slab.
- */
-const AISLE_SPACING = 58;
-const AISLE_WIDTH = 4;
-
-/**
- * The ring's inner edge as a closed loop in world space, with what's needed
- * to push it outward: each segment's outward normal (for laying seats, which
- * must never leak past a corner) and a mitred push per vertex (for the outer
- * edge and tier lines, which must stay a constant width round corners).
- */
-interface StandRing {
-  inner: Vec2[];
-  normals: Vec2[];
-  push: Vec2[];
-  /** Feet round the ring from the first vertex to each vertex. */
-  along: number[];
-}
-
-function buildStandRing(park: Ballpark): StandRing {
-  const polar = (bearing: number, radius: number): Vec2 => ({
-    x: Math.sin(bearing) * radius,
-    y: Math.cos(bearing) * radius,
-  });
-  // A point on the foul wall: feet down the line, at the wall's offset.
-  const wallAt = (side: number, along: number): Vec2 => ({
-    x: (side * (along + STAND_OFFSET)) / Math.SQRT2,
-    y: (along - STAND_OFFSET) / Math.SQRT2,
-  });
-  // Where the bowl, carried round past the pole at the pole's radius, meets
-  // the foul wall — as a bearing from the plate and as feet down the line.
-  const corner = (side: number) => {
-    const r = fenceAt(park, polar((side * Math.PI) / 4, 1));
-    return {
-      bearing: side * (Math.PI / 4 + Math.asin(STAND_OFFSET / r)),
-      along: Math.sqrt(r * r - STAND_OFFSET * STAND_OFFSET),
-    };
-  };
-  const left = corner(-1);
-  const right = corner(1);
-
-  // Clockwise: backstop from the first-base wall round to the third-base
-  // wall, up the third-base line, over the bowl, and down the first-base
-  // line back to the start. Each piece starts where the last one ended, so
-  // the shared vertices are added once.
-  const inner: Vec2[] = [];
-  const BACKSTOP_STEPS = 12;
-  for (let i = 0; i <= BACKSTOP_STEPS; i++) {
-    const bearing = Math.PI * 0.75 + (i / BACKSTOP_STEPS) * (Math.PI / 2);
-    inner.push(polar(bearing, STAND_OFFSET));
-  }
-  inner.push(wallAt(-1, left.along));
-  const ARC_STEPS = 60;
-  for (let i = 1; i < ARC_STEPS; i++) {
-    const bearing = left.bearing + (i / ARC_STEPS) * (right.bearing - left.bearing);
-    inner.push(polar(bearing, fenceAt(park, polar(bearing, 1))));
-  }
-  inner.push(wallAt(1, right.along));
-
-  const n = inner.length;
-  const along: number[] = [0];
-  const normals: Vec2[] = inner.map((v, i) => {
-    const w = inner[(i + 1) % n];
-    const len = Math.hypot(w.x - v.x, w.y - v.y) || 1;
-    along.push(along[i] + len);
-    // The loop runs clockwise, so outward is the left of the direction of travel.
-    return { x: -(w.y - v.y) / len, y: (w.x - v.x) / len };
-  });
-  const push: Vec2[] = inner.map((_, i) => {
-    const a = normals[(i + n - 1) % n];
-    const b = normals[i];
-    const mx = a.x + b.x;
-    const my = a.y + b.y;
-    const len = Math.hypot(mx, my) || 1;
-    const m = { x: mx / len, y: my / len };
-    // Scale the mitre so the offset edge sits a full foot out from both
-    // neighbouring segments, capped so a sharp corner can't spike.
-    const k = 1 / Math.max(0.35, m.x * b.x + m.y * b.y);
-    return { x: m.x * k, y: m.y * k };
-  });
-
-  return { inner, normals, push, along };
-}
-
-/** Whether a point this many feet round the ring falls in an aisle. */
-const inAisle = (feet: number): boolean => feet % AISLE_SPACING < AISLE_WIDTH;
-
-/**
- * Dugouts sit in foul territory, parallel to the lines. Measured in feet:
- * how far down the line the bench is centred, how far off the line it sits,
- * and its footprint. Eight players fill each one — the rest of the side that
- * isn't on the field or the bases — split between the rail and the bench.
- */
-const DUGOUT_ALONG = 76;
-// Far enough off the line that the bench reads as scenery beyond the playing
-// field, not furniture parked in live foul ground.
-const DUGOUT_OFFSET = 46;
-const DUGOUT_LENGTH = 62;
-const DUGOUT_DEPTH = 13;
-const DUGOUT_BENCH = 8;
-/** How many of the eight stand at the rail; the rest sit the bench. */
-const DUGOUT_RAIL = 5;
-
-const GRASS_DARK = '#1f7a3f';
-const GRASS_LIGHT = '#26924b';
-const DIRT = '#b07a45';
-const LINE = 'rgba(255,255,255,0.85)';
+/** Seconds the glove takes to bring a caught ball back in to the body. */
+const CATCH_FX_SECONDS = 0.45;
+/** A fielder this close to a ball in the air (feet) reaches for it. */
+const REACH_RANGE = 14;
 
 interface Joystick {
   active: boolean;
@@ -181,6 +67,12 @@ interface Joystick {
   pointerId: number;
 }
 
+/** Anything standing on the field, so it can be drawn back to front. */
+interface Actor {
+  screen: Vec2;
+  draw(): void;
+}
+
 export class PlayView {
   private readonly root: HTMLElement;
   private readonly surface: Surface;
@@ -189,30 +81,33 @@ export class PlayView {
   private readonly banner: HTMLElement;
   private readonly controls: HTMLElement;
   private readonly status: HTMLElement;
+  private readonly park: ParkRenderer;
+  private readonly light: Lighting;
+  private readonly cam = new Camera();
 
   private raf = 0;
   private destroyed = false;
   private lastFrame = 0;
-  private camera: Vec2 = { x: 0, y: 90 };
-  private scale = 2.2;
   private lastEvent = '';
   private completed = false;
+  private homeRunCalled = false;
   private catchOverlay: CatchOverlay | null = null;
   private _paused = false;
   /** Last rendered control set, so the DOM is only rebuilt when it changes. */
   private controlSignature = '';
   private statusText = '';
-  /** Seconds the rain has been falling; frozen while paused. */
-  private weatherClock = 0;
+  /** Seconds the scene has been animating; frozen while paused. */
+  private clock = 0;
   /** Animation state per fielder/runner, so run cycles persist across frames. */
-  private anims = new Map<string, SpriteAnim>();
-  /** Recent ball positions in world space — the comet tail that makes a
-   * 4px ball trackable at a glance. */
+  private anims = new Map<string, FigureAnim>();
+  /** Recent ball positions in world space — the comet tail. */
   private ballTrail: { x: number; y: number; z: number }[] = [];
-  /** The stand's footprint, laid out once for this park. It never moves. */
-  private readonly ring: StandRing;
-  /** Every seat in the park in world space, built once from the ring. */
-  private readonly seats: (Vec2 & { colour: string })[];
+  /** Who had the ball last frame, to spot the moment a catch is made. */
+  private prevCarrier: PositionId | null = null;
+  /** Where the ball was last seen in the air, so the catch can be drawn from there. */
+  private lastAir: { x: number; y: number; z: number } | null = null;
+  /** The glove closing on a ball just caught: who, where it was taken, when. */
+  private catchFx: { id: PositionId; from: { x: number; y: number; z: number }; start: number } | null = null;
 
   private joystick: Joystick = {
     active: false,
@@ -231,8 +126,8 @@ export class PlayView {
     this.root.innerHTML = '';
 
     this.surface = createSurface(this.root);
-    this.ring = buildStandRing(this.sim.park);
-    this.seats = this.buildSeats();
+    this.park = new ParkRenderer(this.sim.park);
+    this.light = lightingFor(this.sim.weather);
 
     this.banner = document.createElement('div');
     this.banner.className = 'atbat-banner';
@@ -253,6 +148,7 @@ export class PlayView {
     canvas.addEventListener('pointercancel', this.onPointerUp, { passive: false });
     this.controls.addEventListener('pointerdown', this.onControlDown, { passive: false });
 
+    this.syncCamera();
     this.centreCamera();
     this.renderControls();
     this.lastFrame = performance.now();
@@ -388,7 +284,6 @@ export class PlayView {
           text = `RUNNING TO ${BASE_LABELS[target]}`;
           tone = 'going';
         } else if (runner.progress > 0) {
-          // Heading back — by choice, or because the bag ahead is taken.
           text = `BACK TO ${BASE_LABELS[runner.at]}`;
           tone = 'holding';
         } else {
@@ -443,6 +338,12 @@ export class PlayView {
     if (!this._paused) sim.update(dt);
     this.syncCatchOverlay();
 
+    if (!this.homeRunCalled && this.clearedTheFence()) {
+      this.homeRunCalled = true;
+      // Every runner on the play scores on a ball over the fence, batter included.
+      this.opts.onHomeRun?.(sim.runners.length);
+    }
+
     if (sim.userHasBall !== hadBall) this.controlSignature = '';
     this.renderControls();
     this.renderStatus();
@@ -455,6 +356,7 @@ export class PlayView {
       }
     }
 
+    this.syncCamera();
     this.updateCamera(dt);
     this.draw(dt);
 
@@ -470,6 +372,18 @@ export class PlayView {
 
     this.raf = requestAnimationFrame(this.loop);
   };
+
+  /**
+   * The batted ball has gone over the wall. Read off the sim when it says so;
+   * otherwise judged here from the ball against the park, the same way the
+   * derby rules it.
+   */
+  private clearedTheFence(): boolean {
+    const sim = this.sim as PlaySim & { overTheFence?: boolean };
+    if (typeof sim.overTheFence === 'boolean') return sim.overTheFence;
+    const ball = sim.ball;
+    return !sim.ballCarrier && this.park.isBeyondWall(ball) && ball.z > wallHeightAt(sim.park, ball);
+  }
 
   /**
    * The play pauses when the player reaches the ball at full stretch. Put the
@@ -515,6 +429,11 @@ export class PlayView {
 
   /* ----------------------------------------------------------------- camera */
 
+  private syncCamera(): void {
+    this.cam.width = this.surface.width;
+    this.cam.height = this.surface.height;
+  }
+
   private focusPoints(): Vec2[] {
     const sim = this.sim;
     const points: Vec2[] = [{ x: sim.ball.x, y: sim.ball.y }];
@@ -532,8 +451,9 @@ export class PlayView {
   }
 
   private centreCamera(): void {
-    const points = this.focusPoints();
-    this.camera = this.midpoint(points);
+    const mid = this.midpoint(this.focusPoints());
+    this.cam.x = mid.x;
+    this.cam.y = mid.y;
   }
 
   private midpoint(points: Vec2[]): Vec2 {
@@ -551,6 +471,7 @@ export class PlayView {
   }
 
   private updateCamera(dt: number): void {
+    const cam = this.cam;
     const points = this.focusPoints();
     const target = this.midpoint(points);
 
@@ -561,12 +482,9 @@ export class PlayView {
       spanY = Math.max(spanY, Math.abs(p.y - target.y) * 2);
     }
 
-    const W = this.surface.width;
-    const H = this.surface.height;
-    const fit = Math.min(
-      W / Math.max(spanX + 90, 1),
-      H / Math.max(spanY + 120, 1),
-    );
+    const W = cam.width;
+    const H = cam.height;
+    const fit = Math.min(W / Math.max(spanX + 90, 1), H / Math.max((spanY + 120) * TILT, 1));
     const desiredScale = clamp(fit, MIN_SCALE, MAX_SCALE);
 
     // When the view can't zoom out far enough to hold every focus point
@@ -575,7 +493,7 @@ export class PlayView {
     const ball = points[0];
     const overflow = Math.max(
       (spanX + 90) / (W / desiredScale),
-      (spanY + 120) / (H / desiredScale),
+      ((spanY + 120) * TILT) / (H / desiredScale),
       1,
     );
     const ballBias = clamp((overflow - 1) * 2, 0, 1);
@@ -584,359 +502,223 @@ export class PlayView {
 
     // Ease toward the target so the camera never snaps.
     const follow = 1 - Math.exp(-dt * 6);
-    this.camera.x += (target.x - this.camera.x) * follow;
-    this.camera.y += (target.y - this.camera.y) * follow;
-    this.scale += (desiredScale - this.scale) * (1 - Math.exp(-dt * 3.5));
+    cam.x += (target.x - cam.x) * follow;
+    cam.y += (target.y - cam.y) * follow;
+    cam.scale += (desiredScale - cam.scale) * (1 - Math.exp(-dt * 3.5));
 
     // Keep the camera roughly over the field.
-    this.camera.x = clamp(this.camera.x, -300, 300);
-    this.camera.y = clamp(this.camera.y, -30, 380);
+    cam.x = clamp(cam.x, -300, 300);
+    cam.y = clamp(cam.y, -30, 380);
 
-    // Hard guarantee: the ball (including its drawn height) never leaves the
-    // inner part of the screen, whatever the easing or clamps above did.
     this.keepBallOnScreen();
   }
 
+  /** Hard guarantee: the ball (including its drawn height) never leaves the inner screen. */
   private keepBallOnScreen(): void {
     const sim = this.sim;
-    const W = this.surface.width;
-    const H = this.surface.height;
+    const cam = this.cam;
+    const W = cam.width;
+    const H = cam.height;
     const marginX = Math.max(40, W * 0.18);
     const marginY = Math.max(40, H * 0.18);
-    const air = this.toScreen({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
-    const ground = this.toScreen({ x: sim.ball.x, y: sim.ball.y });
+    const air = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
+    const ground = cam.project({ x: sim.ball.x, y: sim.ball.y });
 
-    if (air.x < marginX) this.camera.x -= (marginX - air.x) / this.scale;
-    else if (air.x > W - marginX) this.camera.x += (air.x - (W - marginX)) / this.scale;
+    if (air.x < marginX) cam.x -= (marginX - air.x) / cam.scale;
+    else if (air.x > W - marginX) cam.x += (air.x - (W - marginX)) / cam.scale;
 
-    // Keep both the airborne ball and its shadow inside the vertical band.
     const top = Math.min(air.y, ground.y);
     const bottom = Math.max(air.y, ground.y);
-    if (top < marginY) this.camera.y += (marginY - top) / this.scale;
-    else if (bottom > H - marginY) this.camera.y -= (bottom - (H - marginY)) / this.scale;
-  }
-
-  private toScreen(p: Vec2, z = 0): Vec2 {
-    return {
-      x: (p.x - this.camera.x) * this.scale + this.surface.width / 2,
-      y:
-        this.surface.height / 2 -
-        (p.y - this.camera.y) * this.scale -
-        z * this.scale * HEIGHT_SCALE,
-    };
+    if (top < marginY) cam.y += (marginY - top) / (cam.scale * TILT);
+    else if (bottom > H - marginY) cam.y -= (bottom - (H - marginY)) / (cam.scale * TILT);
   }
 
   /* ----------------------------------------------------------------- render */
 
   private draw(dt: number): void {
     const { ctx } = this.surface;
-    const W = this.surface.width;
-    const H = this.surface.height;
+    const cam = this.cam;
+    const W = cam.width;
+    const H = cam.height;
     if (W <= 0 || H <= 0) return;
+    this.clock += dt;
 
-    this.drawGrass(ctx, W, H);
-    this.drawFence(ctx);
-    this.drawInfield(ctx);
-    this.drawBases(ctx);
-    this.drawForceRings(ctx);
-    this.drawDugouts(ctx, dt);
-    this.drawLandingMarker(ctx);
-    this.drawThrowTelegraph(ctx);
-    this.drawRunners(ctx, dt);
-    this.drawFielders(ctx, dt);
+    const sim = this.sim;
+    const park = this.park;
+    const light = this.light;
+    const ballBeyondWall = !sim.ballCarrier && park.isBeyondWall(sim.ball);
+    this.trackCatch();
+
+    park.drawGround(ctx, cam, light);
+    park.drawStands(ctx, cam, light, this.opts.crowd);
+    // A ball that has left the yard lands behind the wall, so it goes under it.
     this.updateBallTrail();
-    this.drawBall(ctx);
-    if (this.joystick.active) this.drawJoystick(ctx);
+    if (ballBeyondWall) this.drawBall(ctx);
+    park.drawWall(ctx, cam, light);
+    park.drawTowers(ctx, cam, light);
 
-    this.weatherClock += dt;
-    drawGloom(ctx, W, H, this.sim.weather);
-    drawRain(ctx, W, H, this.sim.weather, this.weatherClock);
+    this.drawDugouts(ctx, dt);
+    this.drawGroundCues(ctx);
+
+    // Everyone on the field, back to front.
+    const actors = this.collectActors(dt);
+    actors.sort((a, b) => a.screen.y - b.screen.y);
+    for (const actor of actors) actor.draw();
+
+    if (!ballBeyondWall) this.drawBall(ctx);
+    this.drawThrowTelegraph(ctx);
+    if (this.joystick.active) {
+      drawJoystick(ctx, this.joystick.originX, this.joystick.originY, this.joystick.x, this.joystick.y, 52);
+    }
+
+    drawRain(ctx, W, H, sim.weather, this.clock);
+    drawTint(ctx, W, H, light);
+    drawLightning(ctx, W, H, sim.weather, this.clock);
     // Under the pause button, clear of the coach tip once it's gone.
-    drawWindFlag(ctx, 10, 52, this.sim.weather);
+    drawWindFlag(ctx, 10, 52, sim.weather);
   }
 
-  private drawGrass(ctx: CanvasRenderingContext2D, W: number, H: number): void {
-    ctx.fillStyle = GRASS_DARK;
-    ctx.fillRect(0, 0, W, H);
-
-    // Mown stripes live in world space so they scroll and zoom with the
-    // camera — and they run parallel to the first-base line, so the pattern
-    // reads as cut for this diamond rather than for the screen. `d` runs
-    // along a stripe, `n` across them; a stripe is the slab of field where
-    // the n-coordinate falls in its band.
-    const band = 26;
-    const d = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
-    const n = { x: -Math.SQRT1_2, y: Math.SQRT1_2 };
-    const centreU = n.x * this.camera.x + n.y * this.camera.y;
-    const centreV = d.x * this.camera.x + d.y * this.camera.y;
-    // Generous half-span so the diagonal slabs cover the corners at any zoom.
-    const halfSpan = (W + H) / this.scale / 2 + band * 2;
-    const startBand = Math.floor((centreU - halfSpan) / band);
-    const endBand = Math.ceil((centreU + halfSpan) / band);
-
-    ctx.fillStyle = GRASS_LIGHT;
-    ctx.beginPath();
-    for (let i = startBand; i <= endBand; i++) {
-      if (i % 2 !== 0) continue;
-      const u0 = i * band;
-      const u1 = (i + 1) * band;
-      const corner = (u: number, v: number): Vec2 =>
-        this.toScreen({ x: n.x * u + d.x * v, y: n.y * u + d.y * v });
-      const c0 = corner(u0, centreV - halfSpan);
-      const c1 = corner(u1, centreV - halfSpan);
-      const c2 = corner(u1, centreV + halfSpan);
-      const c3 = corner(u0, centreV + halfSpan);
-      ctx.moveTo(c0.x, c0.y);
-      ctx.lineTo(c1.x, c1.y);
-      ctx.lineTo(c2.x, c2.y);
-      ctx.lineTo(c3.x, c3.y);
-      ctx.closePath();
-    }
-    ctx.fill();
+  private spriteHeight(): number {
+    // Kept well above true scale — at real proportions a ballplayer is a
+    // handful of pixels on a phone and the run cycle is invisible.
+    return clamp(15 * this.cam.scale, 28, 52);
   }
 
-  /** Warning track, wall, and the dead ground beyond it — shaped by the park. */
-  private drawFence(ctx: CanvasRenderingContext2D): void {
-    const park = this.sim.park;
-    const bearings: Vec2[] = [];
-    for (let i = 0; i <= 60; i++) {
-      const angle = -Math.PI / 4 + (i / 60) * (Math.PI / 2);
-      bearings.push({ x: Math.sin(angle), y: Math.cos(angle) });
-    }
+  /**
+   * Where the ball is drawn. The figures stand about three times life size,
+   * so a ball drawn at its true height arrives at their ankles when it's
+   * really at the glove. Near the ground the ball's height is stretched by
+   * the same factor as the figures; high up the stretch levels off to a
+   * fixed offset, so a fly ball still flies the same arc and the camera
+   * isn't chasing it off the top of the screen.
+   */
+  private ballScreen(x: number, y: number, z: number): Vec2 {
+    const lifeSize = 6 * this.cam.scale * RISE;
+    const exaggeration = this.spriteHeight() / lifeSize;
+    const gloveBand = 8;
+    const stretched = z + (exaggeration - 1) * gloveBand * (1 - Math.exp(-z / gloveBand));
+    return this.cam.project({ x, y }, stretched);
+  }
 
-    const arc = (radiusOffset: number): Vec2[] =>
-      bearings.map((dir) => {
-        const radius = fenceAt(park, dir) + radiusOffset;
-        return this.toScreen({ x: dir.x * radius, y: dir.y * radius });
+  /** Animation state is keyed per entity so run cycles carry across frames. */
+  private animFor(key: string, p: Vec2, dt: number): FigureAnim {
+    let anim = this.anims.get(key);
+    if (!anim) {
+      anim = createAnim(p.x, p.y);
+      this.anims.set(key, anim);
+    }
+    updateAnim(anim, p.x, p.y, dt, this.spriteHeight() * 0.85);
+    return anim;
+  }
+
+  /**
+   * Notice the frame a fielder takes the ball, and remember where it was in
+   * the air just before, so the glove can be drawn closing on that spot and
+   * bringing the ball in rather than the ball simply vanishing.
+   */
+  private trackCatch(): void {
+    const sim = this.sim;
+    const carrier = sim.ballCarrier;
+    if (carrier && carrier !== this.prevCarrier) {
+      this.catchFx = {
+        id: carrier,
+        from: this.lastAir ?? { x: sim.ball.x, y: sim.ball.y, z: sim.ball.z },
+        start: this.clock,
+      };
+    }
+    this.prevCarrier = carrier;
+    if (!carrier) this.lastAir = { x: sim.ball.x, y: sim.ball.y, z: sim.ball.z };
+  }
+
+  /** The one fielder near enough to a ball in the air to be reaching for it. */
+  private reachingFielder(): PositionId | null {
+    const sim = this.sim;
+    const ball = sim.ball;
+    if (sim.ballCarrier || ball.atRest || ball.z > 12 || sim.phase === 'dead') return null;
+    let best: PositionId | null = null;
+    let bestDist = REACH_RANGE;
+    for (const f of sim.fielders) {
+      const d = Math.hypot(f.x - ball.x, f.y - ball.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = f.id;
+      }
+    }
+    return best;
+  }
+
+  private collectActors(dt: number): Actor[] {
+    const { ctx } = this.surface;
+    const sim = this.sim;
+    const cam = this.cam;
+    const height = this.spriteHeight();
+    const actors: Actor[] = [];
+    const reacher = this.reachingFielder();
+    const airBall = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
+    const fx = this.catchFx && this.clock - this.catchFx.start < CATCH_FX_SECONDS ? this.catchFx : null;
+
+    for (const runner of sim.runners) {
+      if (runner.out || runner.at >= 4) continue;
+      const p = cam.project(sim.runnerPosition(runner));
+      const anim = this.animFor(`r:${runner.id}`, p, dt);
+      actors.push({
+        screen: p,
+        draw: () => {
+          drawFieldFigure(ctx, p.x, p.y, {
+            height,
+            kit: this.opts.battingKit,
+            anim,
+            skin: skinFor(runner.id.length * 31 + runner.startBase),
+            helmet: true,
+            highlight: runner.isUser,
+            shadow: this.light.shadow,
+          });
+          if (runner.isUser) this.drawIntentArrow(ctx, p, runner);
+        },
       });
-
-    const trace = (points: Vec2[], reverse = false) => {
-      const list = reverse ? [...points].reverse() : points;
-      list.forEach((p, i) => (i === 0 ? ctx.lineTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-    };
-
-    const inner = arc(-18);
-    const wall = arc(0);
-
-    // Warning track.
-    ctx.save();
-    ctx.fillStyle = '#9a6b3f';
-    ctx.beginPath();
-    ctx.moveTo(inner[0].x, inner[0].y);
-    trace(inner);
-    trace(wall, true);
-    ctx.closePath();
-    ctx.fill();
-
-    // Everything past the wall is out of play.
-    ctx.fillStyle = '#0e2a1c';
-    ctx.beginPath();
-    ctx.moveTo(wall[0].x, wall[0].y);
-    trace(wall);
-    const far = arc(220);
-    trace(far, true);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.restore();
-
-    // The stand sits on the dead ground behind the wall and wraps on round
-    // the field from there.
-    this.drawStands(ctx);
-    this.drawCrowd(ctx);
-    ctx.save();
-
-    // The wall itself, drawn thicker where it's taller so a 36-foot monster in
-    // left actually looks like one.
-    for (let i = 0; i < wall.length - 1; i++) {
-      const height = wallHeightAt(park, bearings[i]);
-      ctx.strokeStyle = height > 18 ? '#2f6b48' : '#1c5c3c';
-      ctx.lineWidth = Math.max(3, (2 + height * 0.22) * this.scale * 0.6);
-      ctx.beginPath();
-      ctx.moveTo(wall[i].x, wall[i].y);
-      ctx.lineTo(wall[i + 1].x, wall[i + 1].y);
-      ctx.stroke();
     }
-    ctx.restore();
-  }
 
-  /**
-   * The crowd — in the outfield bowl and the side grandstands alike.
-   *
-   * Seats are generated in *world* space from an index hash, so they scroll
-   * and zoom with the camera instead of swimming across it, and stay put frame
-   * to frame. How many of them are occupied is the level: a Single-A crowd is
-   * a scattering, the Majors is solid.
-   */
-  private drawCrowd(ctx: CanvasRenderingContext2D): void {
-    const taken = Math.round(this.seats.length * clamp(this.opts.crowd, 0, 1));
-    if (taken <= 0) return;
+    for (const fielder of sim.fielders) {
+      const p = cam.project({ x: fielder.x, y: fielder.y });
+      const anim = this.animFor(`f:${fielder.id}`, p, dt);
+      const index = ALL_POSITIONS.indexOf(fielder.id);
 
-    const W = this.surface.width;
-    const H = this.surface.height;
-    const size = Math.max(1.5, 1.1 * this.scale);
-
-    ctx.save();
-    for (let i = 0; i < taken; i++) {
-      const seat = this.seats[i];
-      const p = this.toScreen(seat);
-      if (p.x < -8 || p.x > W + 8 || p.y < -8 || p.y > H + 8) continue;
-      ctx.fillStyle = seat.colour;
-      ctx.fillRect(p.x, p.y, size, size);
-    }
-    ctx.restore();
-  }
-
-  /**
-   * Lay the seats out once, segment by segment round the ring, as many per
-   * segment as its area allows. Each seat is placed by hash so it stays put
-   * frame to frame, and the finished list is shuffled by hash too, so taking
-   * the first N of it for a given crowd size scatters people right round
-   * the park instead of packing them in from one end.
-   */
-  private buildSeats(): (Vec2 & { colour: string })[] {
-    const { inner, normals, along } = this.ring;
-    const n = inner.length;
-    const rows = STAND_DEPTH - SEAT_MARGIN * 2;
-    const seats: (Vec2 & { colour: string; order: number })[] = [];
-
-    let index = 0;
-    for (let i = 0; i < n; i++) {
-      const v = inner[i];
-      const w = inner[(i + 1) % n];
-      const length = along[i + 1] - along[i];
-      const count = Math.round((length * rows) / SQFT_PER_SEAT);
-      for (let k = 0; k < count; k++) {
-        let h = Math.imul(++index, 2654435761) >>> 0;
-        h ^= h >>> 13;
-        h = Math.imul(h, 0x5bd1e995) >>> 0;
-        h ^= h >>> 15;
-        const t = (h % 1024) / 1024;
-        if (inAisle(along[i] + t * length)) continue;
-        const d = SEAT_MARGIN + ((h >>> 10) % rows);
-        seats.push({
-          x: v.x + (w.x - v.x) * t + normals[i].x * d,
-          y: v.y + (w.y - v.y) * t + normals[i].y * d,
-          colour: CROWD_COLOURS[h % CROWD_COLOURS.length],
-          order: Math.imul(h ^ 0x9e3779b9, 2246822519) >>> 0,
-        });
+      // The glove: closing on a ball just taken and drawing it in, stretched
+      // toward one about to arrive, or the ball up by the ear ready to throw.
+      let reach: Vec2 | undefined;
+      let ballInGlove = false;
+      let holdingBall = false;
+      if (fx && fx.id === fielder.id) {
+        const t = (this.clock - fx.start) / CATCH_FX_SECONDS;
+        const ease = t * t * (3 - 2 * t);
+        const from = this.ballScreen(fx.from.x, fx.from.y, fx.from.z);
+        reach = { x: from.x + (p.x - from.x) * ease, y: from.y + (p.y - height * 0.46 - from.y) * ease };
+        ballInGlove = true;
+      } else if (fielder.hasBall) {
+        holdingBall = true;
+      } else if (reacher === fielder.id) {
+        reach = airBall;
       }
+
+      actors.push({
+        screen: p,
+        draw: () =>
+          drawFieldFigure(ctx, p.x, p.y, {
+            height,
+            kit: this.opts.fieldingKit,
+            anim,
+            skin: skinFor(index + 11),
+            glove: true,
+            number: String(index + 1),
+            highlight: fielder.isUser,
+            holdingBall,
+            reach,
+            ballInGlove,
+            shadow: this.light.shadow,
+          }),
+      });
     }
-
-    seats.sort((p, q) => p.order - q.order);
-    return seats;
-  }
-
-  /**
-   * The stand itself — the concrete deck right round the ring, tier breaks
-   * across it, aisles cut through it, and the low wall along its front. The
-   * outfield fence is drawn over the front edge later, so only the foul-
-   * ground stretch shows this wall.
-   */
-  private drawStands(ctx: CanvasRenderingContext2D): void {
-    const { inner, push, along } = this.ring;
-    const n = inner.length;
-    const edge = (depth: number): Vec2[] =>
-      inner.map((v, i) =>
-        this.toScreen({ x: v.x + push[i].x * depth, y: v.y + push[i].y * depth }),
-      );
-    const loop = (points: Vec2[]) => {
-      points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-      ctx.closePath();
-    };
-    const front = edge(0);
-    const back = edge(STAND_DEPTH);
-
-    ctx.save();
-    // The deck: the band between the two loops.
-    ctx.fillStyle = '#141c30';
-    ctx.beginPath();
-    loop(front);
-    loop(back);
-    ctx.fill('evenodd');
-
-    // Faint breaks so the deck reads as tiers of seating.
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = Math.max(1, 0.5 * this.scale);
-    for (let k = 1; k < 4; k++) {
-      ctx.beginPath();
-      loop(edge((STAND_DEPTH * k) / 4));
-      ctx.stroke();
-    }
-
-    // Aisles, front to back, wherever the ring's length crosses one.
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-    ctx.lineWidth = Math.max(1, AISLE_WIDTH * 0.5 * this.scale);
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      const v = inner[i];
-      const w = inner[(i + 1) % n];
-      const length = along[i + 1] - along[i];
-      const first = Math.ceil(along[i] / AISLE_SPACING) * AISLE_SPACING;
-      for (let s = first; s < along[i + 1]; s += AISLE_SPACING) {
-        const t = (s + AISLE_WIDTH / 2 - along[i]) / length;
-        const x = v.x + (w.x - v.x) * t;
-        const y = v.y + (w.y - v.y) * t;
-        const nrm = this.ring.normals[i];
-        const a = this.toScreen({ x, y });
-        const b = this.toScreen({ x: x + nrm.x * STAND_DEPTH, y: y + nrm.y * STAND_DEPTH });
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-      }
-    }
-    ctx.stroke();
-
-    // Low wall between the front row and the field.
-    ctx.strokeStyle = '#2c3a5c';
-    ctx.lineWidth = Math.max(2, 1.4 * this.scale);
-    ctx.beginPath();
-    loop(front);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  private drawInfield(ctx: CanvasRenderingContext2D): void {
-    // Base paths as dirt strips.
-    ctx.save();
-    ctx.strokeStyle = DIRT;
-    ctx.lineWidth = Math.max(4, 13 * this.scale);
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    for (let i = 0; i <= 4; i++) {
-      const p = this.toScreen(BASES[i % 4]);
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    }
-    ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
-
-    // Mound and home circles.
-    ctx.fillStyle = DIRT;
-    const mound = this.toScreen({ x: 0, y: 60.5 });
-    ctx.beginPath();
-    ctx.arc(mound.x, mound.y, 9 * this.scale, 0, Math.PI * 2);
-    ctx.fill();
-
-    const home = this.toScreen(BASES[0]);
-    ctx.beginPath();
-    ctx.arc(home.x, home.y, 13 * this.scale, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Foul lines out to the fence.
-    ctx.save();
-    ctx.strokeStyle = LINE;
-    ctx.lineWidth = Math.max(1.5, 1.2 * this.scale);
-    for (const side of [-1, 1]) {
-      const end = { x: side * 250, y: 250 };
-      ctx.beginPath();
-      const a = this.toScreen(BASES[0]);
-      const b = this.toScreen(end);
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    }
-    ctx.restore();
+    return actors;
   }
 
   /**
@@ -953,306 +735,87 @@ export class PlayView {
     this.drawDugout(ctx, dt, -1, awayKit);
   }
 
-  private drawDugout(
-    ctx: CanvasRenderingContext2D,
-    dt: number,
-    side: 1 | -1,
-    kit: PlayerColors,
-  ): void {
-    // Unit vectors along the foul line and away from it, into foul ground.
-    const along: Vec2 = { x: side / Math.SQRT2, y: 1 / Math.SQRT2 };
-    const out: Vec2 = { x: side / Math.SQRT2, y: -1 / Math.SQRT2 };
-    const at = (a: number, o: number): Vec2 =>
-      this.toScreen({ x: along.x * a + out.x * o, y: along.y * a + out.y * o });
+  private drawDugout(ctx: CanvasRenderingContext2D, dt: number, side: 1 | -1, kit: PlayerColors): void {
+    const cam = this.cam;
+    const spots = this.park.drawDugoutPit(ctx, cam, this.light, side, kit.shirt);
+    if (!spots) return;
 
-    const a0 = DUGOUT_ALONG - DUGOUT_LENGTH / 2;
-    const a1 = DUGOUT_ALONG + DUGOUT_LENGTH / 2;
-    const o0 = DUGOUT_OFFSET;
-    const o1 = DUGOUT_OFFSET + DUGOUT_DEPTH;
-
-    const W = this.surface.width;
-    const H = this.surface.height;
-    const corners = [at(a0, o0), at(a1, o0), at(a1, o1), at(a0, o1)];
-    const xs = corners.map((c) => c.x);
-    const ys = corners.map((c) => c.y);
-    const margin = 60;
-    if (
-      Math.max(...xs) < -margin || Math.min(...xs) > W + margin ||
-      Math.max(...ys) < -margin || Math.min(...ys) > H + margin
-    ) {
-      return;
-    }
-
-    const poly = (points: Vec2[]) => {
-      ctx.beginPath();
-      points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-      ctx.closePath();
+    const plate = cam.project(BASES[0]);
+    const height = this.spriteHeight();
+    // Fed a fixed point rather than the screen position, so a camera pan
+    // doesn't set their legs churning — they only idle.
+    const idle = (key: string, p: Vec2): FigureAnim => {
+      const anim = this.animFor(key, { x: 0, y: 0 }, dt);
+      anim.facing = Math.atan2(plate.y - p.y, plate.x - p.x);
+      return anim;
     };
-
-    // The whole dugout, bench included, is drawn a touch faded — it's
-    // scenery, and at full strength it competed with the play for the eye.
-    ctx.save();
-    ctx.globalAlpha = 0.85;
-
-    ctx.save();
-
-    // Dirt apron in front, so the dugout doesn't sit straight on the grass.
-    ctx.fillStyle = DIRT;
-    poly([at(a0 - 3, o0 - 5), at(a1 + 3, o0 - 5), at(a1 + 3, o0 + 1), at(a0 - 3, o0 + 1)]);
-    ctx.fill();
-
-    // Concrete walls wrap the pit on three sides; their tops show as a
-    // lighter band round the sunken floor. The field side stays open.
-    ctx.fillStyle = '#6a7490';
-    poly([at(a0 - 2, o0), at(a1 + 2, o0), at(a1 + 2, o1 + 2), at(a0 - 2, o1 + 2)]);
-    ctx.fill();
-
-    // The sunken floor.
-    ctx.fillStyle = '#4a5468';
-    poly(corners);
-    ctx.fill();
-
-    // Steps down into the pit at each end, where the rail leaves a gap.
-    const stepShades = ['#707a96', '#5f6984', '#525c76'];
-    for (const [s0, s1] of [
-      [a0 + 0.5, a0 + 6],
-      [a1 - 6, a1 - 0.5],
-    ]) {
-      stepShades.forEach((shade, k) => {
-        ctx.fillStyle = shade;
-        poly([
-          at(s0, o0 + k * 1.3),
-          at(s1, o0 + k * 1.3),
-          at(s1, o0 + (k + 1) * 1.3),
-          at(s0, o0 + (k + 1) * 1.3),
-        ]);
-        ctx.fill();
+    spots.bench.forEach((w, i) => {
+      const p = cam.project(w, 1.5);
+      drawFieldFigure(ctx, p.x, p.y, {
+        height: height * 0.62,
+        kit,
+        anim: idle(`d:${side}:b${i}`, p),
+        skin: skinFor(i + 40 + side * 7),
+        shadow: 0.15,
       });
-    }
-
-    // The bench itself — a slab along the back wall in the team's colour,
-    // not just a painted line.
-    const benchPoly = [
-      at(a0 + 3, o1 - 4.4),
-      at(a1 - 3, o1 - 4.4),
-      at(a1 - 3, o1 - 1.8),
-      at(a0 + 3, o1 - 1.8),
-    ];
-    ctx.fillStyle = kit.shirt;
-    poly(benchPoly);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-    ctx.lineWidth = Math.max(1, 0.6 * this.scale);
-    poly(benchPoly);
-    ctx.stroke();
-
-    // The sitters, drawn before the canopy so it shades them. Fed a fixed
-    // point rather than the screen position, so a camera pan doesn't set
-    // their legs churning — they only idle.
-    const plate = this.toScreen(BASES[0]);
-    const seatedHeight = this.spriteHeight() * 0.66;
-    for (let i = DUGOUT_RAIL; i < DUGOUT_BENCH; i++) {
-      const p = at(DUGOUT_ALONG + (i - DUGOUT_RAIL - 1) * 10, o1 - 3.4);
-      const anim = this.animFor(`d:${side}:${i}`, { x: 0, y: 0 }, dt);
-      anim.facing = Math.atan2(plate.y - p.y, plate.x - p.x);
-      drawPlayer(ctx, p.x, p.y, { height: seatedHeight, colors: kit, anim });
-    }
-
-    // Roof canopy over the back of the pit, semi-transparent so the bench
-    // ghosts through beneath it, with a pale leading edge.
-    ctx.fillStyle = 'rgba(20, 25, 42, 0.55)';
-    poly([at(a0 - 2, o1 - 5.2), at(a1 + 2, o1 - 5.2), at(a1 + 2, o1 + 2), at(a0 - 2, o1 + 2)]);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(215, 219, 230, 0.55)';
-    ctx.lineWidth = Math.max(1, 0.8 * this.scale);
-    const e0 = at(a0 - 2, o1 - 5.2);
-    const e1 = at(a1 + 2, o1 - 5.2);
-    ctx.beginPath();
-    ctx.moveTo(e0.x, e0.y);
-    ctx.lineTo(e1.x, e1.y);
-    ctx.stroke();
-
-    // Outline of the whole structure, and the rail on the field side —
-    // broken at the ends where the steps come down.
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-    ctx.lineWidth = Math.max(1, 0.8 * this.scale);
-    poly([at(a0 - 2, o0), at(a1 + 2, o0), at(a1 + 2, o1 + 2), at(a0 - 2, o1 + 2)]);
-    ctx.stroke();
-    ctx.strokeStyle = '#d7dbe6';
-    ctx.lineWidth = Math.max(1.5, 1.1 * this.scale);
-    const r0 = at(a0 + 7, o0);
-    const r1 = at(a1 - 7, o0);
-    ctx.beginPath();
-    ctx.moveTo(r0.x, r0.y);
-    ctx.lineTo(r1.x, r1.y);
-    ctx.stroke();
-
-    ctx.restore();
-
-    // The rest stand at the rail, all watching the plate. A touch smaller
-    // than the nine in play so the dugout reads as background.
-    const height = this.spriteHeight() * 0.8;
-    const stride = (DUGOUT_LENGTH - 18) / (DUGOUT_RAIL - 1);
-    for (let i = 0; i < DUGOUT_RAIL; i++) {
-      // A little stagger so they don't stand in a parade line.
-      const stagger = ((i * 7 + (side > 0 ? 3 : 0)) % 5) * 0.6;
-      const p = at(a0 + 9 + i * stride, o0 + 3.5 + stagger);
-      const anim = this.animFor(`d:${side}:${i}`, { x: 0, y: 0 }, dt);
-      anim.facing = Math.atan2(plate.y - p.y, plate.x - p.x);
-      drawPlayer(ctx, p.x, p.y, { height, colors: kit, anim });
-    }
-
-    ctx.restore();
+    });
+    this.park.drawDugoutRoof(ctx, cam, this.light, side);
+    spots.rail.forEach((w, i) => {
+      const p = cam.project(w);
+      drawFieldFigure(ctx, p.x, p.y, {
+        height: height * 0.78,
+        kit,
+        anim: idle(`d:${side}:r${i}`, p),
+        skin: skinFor(i + 50 + side * 7),
+        shadow: this.light.shadow,
+      });
+    });
   }
 
-  private drawBases(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = '#f4f6fa';
-    for (let i = 1; i <= 3; i++) {
-      const p = this.toScreen(BASES[i]);
-      const size = Math.max(5, 4.2 * this.scale);
-      ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
-    }
-
-    // Home plate.
-    const home = this.toScreen(BASES[0]);
-    const s = Math.max(5, 4 * this.scale);
-    ctx.beginPath();
-    ctx.moveTo(home.x - s / 2, home.y - s / 2);
-    ctx.lineTo(home.x + s / 2, home.y - s / 2);
-    ctx.lineTo(home.x + s / 2, home.y + s / 4);
-    ctx.lineTo(home.x, home.y + s / 1.4);
-    ctx.lineTo(home.x - s / 2, home.y + s / 4);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  /**
-   * With the ball in the player's glove, ring every bag where a force is still
-   * on. Getting the ball there first — throw it, or run it in yourself — is
-   * the out. Without this the "step on the bag" play was invisible: nothing
-   * told the player that the base ten feet away was worth running to.
-   */
-  private drawForceRings(ctx: CanvasRenderingContext2D): void {
-    const bases = this.sim.forcePlayBases;
-    if (bases.length === 0) return;
-
-    const pulse = 0.5 + Math.sin(performance.now() / 220) * 0.18;
-    ctx.save();
-    ctx.strokeStyle = `rgba(255, 209, 102, ${pulse})`;
-    ctx.lineWidth = 2.5;
-    for (const base of bases) {
-      const p = this.toScreen(BASES[base]);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(11, 9 * this.scale), 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  /** The circle a fly ball is coming down into — the whole point of the mode. */
-  private drawLandingMarker(ctx: CanvasRenderingContext2D): void {
+  /** Rings on the ground: where a fly ball lands, and bags with a play on. */
+  private drawGroundCues(ctx: CanvasRenderingContext2D): void {
     const sim = this.sim;
-    if (sim.phase !== 'live' || sim.ball.bounced || sim.ball.z < 6) return;
+    const cam = this.cam;
 
-    const p = this.toScreen(sim.landingPoint);
-    const pulse = 0.6 + Math.sin(performance.now() / 140) * 0.25;
-    const radius = Math.max(9, 7 * this.scale);
-
-    ctx.save();
-    ctx.strokeStyle = `rgba(255, 225, 120, ${pulse})`;
-    ctx.lineWidth = 2.5;
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255, 225, 120, ${pulse})`;
-    ctx.fill();
-    ctx.restore();
-  }
-
-  private spriteHeight(): number {
-    // Kept well above true scale — at real proportions a ballplayer is a
-    // handful of pixels on a phone and the run cycle is invisible.
-    return clamp(14 * this.scale, 26, 48);
-  }
-
-  /** Animation state is keyed per entity so run cycles carry across frames. */
-  private animFor(key: string, p: Vec2, dt: number): SpriteAnim {
-    let anim = this.anims.get(key);
-    if (!anim) {
-      anim = createAnim(p.x, p.y);
-      this.anims.set(key, anim);
+    // The circle a fly ball is coming down into — the whole point of the mode.
+    if (sim.phase === 'live' && !sim.ball.bounced && sim.ball.z >= 6) {
+      const p = cam.project(sim.landingPoint);
+      const pulse = 0.65 + Math.sin(this.clock * 7) * 0.25;
+      drawCueRing(ctx, p.x, p.y, Math.max(9, 7 * cam.scale), { pulse, dashed: true, squash: TILT, dot: true });
     }
-    updateAnim(anim, p.x, p.y, dt, this.spriteHeight() * 0.85);
-    return anim;
-  }
 
-  private drawRunners(ctx: CanvasRenderingContext2D, dt: number): void {
-    for (const runner of this.sim.runners) {
-      if (runner.out || runner.at >= 4) continue;
-      const p = this.toScreen(this.sim.runnerPosition(runner));
-      drawPlayer(ctx, p.x, p.y, {
-        height: this.spriteHeight(),
-        colors: this.opts.battingKit,
-        anim: this.animFor(`r:${runner.id}`, p, dt),
-        highlight: runner.isUser,
-      });
-      if (runner.isUser) this.drawIntentArrow(ctx, p, runner);
-    }
-  }
-
-  private drawFielders(ctx: CanvasRenderingContext2D, dt: number): void {
-    for (const fielder of this.sim.fielders) {
-      const p = this.toScreen({ x: fielder.x, y: fielder.y });
-      drawPlayer(ctx, p.x, p.y, {
-        height: this.spriteHeight(),
-        colors: this.opts.fieldingKit,
-        anim: this.animFor(`f:${fielder.id}`, p, dt),
-        highlight: fielder.isUser,
-        holdingBall: fielder.hasBall,
-      });
+    // With the ball in the player's glove, ring every bag where a play is on.
+    const bases = sim.forcePlayBases;
+    if (bases.length > 0) {
+      const pulse = 0.55 + Math.sin(this.clock * 4.5) * 0.2;
+      for (const base of bases) {
+        const p = cam.project(BASES[base]);
+        drawCueRing(ctx, p.x, p.y, Math.max(11, 9 * cam.scale), { pulse, squash: TILT });
+      }
     }
   }
 
   /**
    * Where you're headed and whether it's contested: a line to the bag you're
    * running into, a ring on it, and both turning red when a throw is beating
-   * you there. Without this the hold-or-go call is guesswork.
+   * you there.
    */
   private drawIntentArrow(ctx: CanvasRenderingContext2D, p: Vec2, runner: RunnerState): void {
-    // Stood on a bag: nothing to point at. Between bases it points wherever
-    // they're headed — ahead, or back to the one they left.
     if (runner.progress <= 0 && runner.at >= runner.intent) return;
     const next = this.sim.userRunnerNextBase;
     if (next === null) return;
 
     const contested = this.sim.throwBeatingUserRunner;
-    const colour = contested ? '255, 107, 107' : '255, 209, 102';
-    const target = this.toScreen(BASES[next]);
-
-    ctx.save();
-    ctx.strokeStyle = `rgba(${colour}, 0.85)`;
-    ctx.lineWidth = 2.5;
-    ctx.setLineDash([6, 5]);
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y - 4);
-    ctx.lineTo(target.x, target.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Ring on the bag you're running into, pulsing when a throw is coming.
-    const pulse = contested
-      ? 0.55 + Math.sin(performance.now() / 90) * 0.35
-      : 0.5 + Math.sin(performance.now() / 220) * 0.18;
-    ctx.strokeStyle = `rgba(${colour}, ${pulse})`;
-    ctx.lineWidth = contested ? 3.5 : 2.5;
-    ctx.beginPath();
-    ctx.arc(target.x, target.y, Math.max(11, 9 * this.scale), 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    const colour = contested ? CUE_RED : CUE_GOLD;
+    const target = this.cam.project(BASES[next]);
+    drawGuideLine(ctx, { x: p.x, y: p.y - 4 }, target, colour, 0.85, 2.5);
+    const pulse = contested ? 0.55 + Math.sin(this.clock * 11) * 0.35 : 0.5 + Math.sin(this.clock * 4.5) * 0.18;
+    drawCueRing(ctx, target.x, target.y, Math.max(11, 9 * this.cam.scale), {
+      colour,
+      pulse,
+      squash: TILT,
+      width: contested ? 3.5 : 2.5,
+    });
   }
 
   /**
@@ -1266,43 +829,27 @@ export class PlayView {
     if (!flight) return;
 
     const sim = this.sim;
-    const target = this.toScreen(BASES[flight.base]);
-    const ball = this.toScreen({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
-    const contested =
-      sim.setup.userSide === 'offense' && sim.userRunnerNextBase === flight.base;
-    const colour = contested ? '255, 107, 107' : '255, 209, 102';
+    const cam = this.cam;
+    const target = cam.project(BASES[flight.base]);
+    const ball = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
+    const contested = sim.setup.userSide === 'offense' && sim.userRunnerNextBase === flight.base;
+    const colour = contested ? CUE_RED : CUE_GOLD;
 
-    ctx.save();
-    // Where the throw is going, off the ball itself.
-    ctx.strokeStyle = `rgba(${colour}, 0.45)`;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 6]);
-    ctx.beginPath();
-    ctx.moveTo(ball.x, ball.y);
-    ctx.lineTo(target.x, target.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // The countdown: wide when the throw is released, snapping shut on the
-    // bag as it lands.
-    const bagR = Math.max(11, 9 * this.scale);
-    const r = bagR + (1 - flight.progress) * Math.max(26, 22 * this.scale);
-    ctx.strokeStyle = `rgba(${colour}, ${0.5 + flight.progress * 0.45})`;
-    ctx.lineWidth = 2 + flight.progress * 2;
-    ctx.beginPath();
-    ctx.arc(target.x, target.y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    drawGuideLine(ctx, ball, target, colour, 0.45, 1.5);
+    const bagR = Math.max(11, 9 * cam.scale);
+    const r = bagR + (1 - flight.progress) * Math.max(26, 22 * cam.scale);
+    drawCueRing(ctx, target.x, target.y, r, {
+      colour,
+      pulse: 0.5 + flight.progress * 0.45,
+      squash: TILT,
+      width: 2 + flight.progress * 2,
+    });
   }
 
-  /**
-   * Feed the comet tail. Points are kept in world space so the trail marks
-   * where the ball actually flew, panning and zooming with the camera.
-   */
+  /** Feed the comet tail. Points are kept in world space so the trail marks where the ball flew. */
   private updateBallTrail(): void {
     const sim = this.sim;
     if (sim.ballCarrier || sim.ball.atRest || this._paused) {
-      // Held or settled: let the tail burn down rather than vanish.
       if (this.ballTrail.length > 0) this.ballTrail.shift();
       return;
     }
@@ -1317,68 +864,11 @@ export class PlayView {
   private drawBall(ctx: CanvasRenderingContext2D): void {
     const sim = this.sim;
     if (sim.ballCarrier) return;
-
-    const ground = this.toScreen({ x: sim.ball.x, y: sim.ball.y });
-    const air = this.toScreen({ x: sim.ball.x, y: sim.ball.y }, sim.ball.z);
-
-    if (sim.ball.z > 1) {
-      const shrink = clamp(1 - sim.ball.z / 260, 0.55, 1);
-      ctx.fillStyle = 'rgba(0,0,0,0.3)';
-      ctx.beginPath();
-      ctx.ellipse(ground.x, ground.y, 4 * shrink, 2.2 * shrink, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Small fixed-pixel ball, growing a little with height so a fly ball reads
-    // as airborne. A canvas-scaled version was tried and read as far too big
-    // against the fielders and the diamond.
-    const radius = clamp(3.2 + sim.ball.z / 34, 3, 7.5);
-
-    // Comet tail: the last few world positions, fading and shrinking toward
-    // the oldest, so the eye finds a moving 4px dot instantly.
-    ctx.save();
-    ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < this.ballTrail.length; i++) {
-      const t = this.ballTrail[i];
-      const p = this.toScreen({ x: t.x, y: t.y }, t.z);
-      const frac = (i + 1) / (this.ballTrail.length + 1);
-      ctx.globalAlpha = frac * frac * 0.45;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, radius * (0.25 + frac * 0.65), 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.4)';
-    ctx.shadowBlur = 5;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(air.x, air.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  private drawJoystick(ctx: CanvasRenderingContext2D): void {
-    const j = this.joystick;
-    const dx = j.x - j.originX;
-    const dy = j.y - j.originY;
-    const range = Math.hypot(dx, dy);
-    const capped = Math.min(range, 52);
-    const nx = range > 0 ? (dx / range) * capped : 0;
-    const ny = range > 0 ? (dy / range) * capped : 0;
-
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(j.originX, j.originY, 52, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.arc(j.originX + nx, j.originY + ny, 20, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    const cam = this.cam;
+    const ground = cam.project({ x: sim.ball.x, y: sim.ball.y });
+    const air = this.ballScreen(sim.ball.x, sim.ball.y, sim.ball.z);
+    const radius = Math.min(7.5, Math.max(3, 3 + sim.ball.z / 40));
+    drawBallTail(ctx, this.ballTrail.map((t) => this.ballScreen(t.x, t.y, t.z)).concat([air]), radius);
+    drawFieldBall(ctx, air, ground, sim.ball.z, cam.scale, this.light.shadow);
   }
 }

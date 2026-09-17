@@ -1,8 +1,10 @@
 import { Rng, clamp, lerp } from '../core/rng';
-import { drawBaseball } from './baseball';
 import { createSurface, pointerPos, vibrate } from '../ui/canvas';
 import type { Surface } from '../ui/canvas';
 import { playSound } from '../ui/audio';
+import { drawBaseball } from '../gfx/ball';
+import { drawTapMark } from '../gfx/hud';
+import { CUE_GREEN, CUE_RED, alpha } from '../gfx/palette';
 
 /**
  * The stretch catch. Fires mid-play when the player got *near* the ball but
@@ -204,31 +206,37 @@ export class CatchOverlay {
     const H = this.surface.height;
     if (W <= 0 || H <= 0) return;
 
+    // Dim the play underneath and vignette the edges, so the eye has nothing
+    // to look at but the ball.
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(6, 12, 22, 0.62)';
+    ctx.fillStyle = 'rgba(6, 12, 22, 0.55)';
+    ctx.fillRect(0, 0, W, H);
+    const vignette = ctx.createRadialGradient(W / 2, H * 0.52, Math.min(W, H) * 0.25, W / 2, H * 0.52, Math.max(W, H) * 0.75);
+    vignette.addColorStop(0, 'rgba(6,12,22,0)');
+    vignette.addColorStop(1, 'rgba(6,12,22,0.55)');
+    ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, W, H);
 
-    const ball = this.phase === 'freeze' && this.frozen ? this.frozen : this.ballAt(this.progress());
+    const t = this.progress();
+    const ball = this.phase === 'freeze' && this.frozen ? this.frozen : this.ballAt(t);
 
-    // A short trail so the eye can lead the ball rather than chase it. No
-    // target ring: you tap the ball itself, and a fixed ring in the middle
-    // reads as "tap here", which is the wrong instruction.
     if (this.phase === 'incoming') {
-      const t = this.progress();
-      for (let i = 1; i <= 3; i++) {
-        const past = this.ballAt(Math.max(0, t - i * 0.05));
-        ctx.fillStyle = `rgba(255,255,255,${0.16 - i * 0.04})`;
-        ctx.beginPath();
-        ctx.arc(past.x, past.y, past.r * 0.85, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // Motion streak toward the glove; no target ring — you tap the ball
+      // itself, and a fixed ring in the middle would say "tap here", which
+      // is the wrong instruction.
+      const prev = this.ballAt(Math.max(0, t - 0.04));
+      drawBaseball(ctx, ball.x, ball.y, ball.r, {
+        rot: ball.rot,
+        vx: (ball.x - prev.x) * 0.6,
+        vy: (ball.y - prev.y) * 0.6,
+      });
+    } else {
+      drawBaseball(ctx, ball.x, ball.y, ball.r, { rot: ball.rot });
     }
-
-    drawBaseball(ctx, ball.x, ball.y, ball.r, ball.rot);
 
     if (this.phase === 'freeze' && this.frozen) {
       ctx.save();
-      ctx.strokeStyle = this.success ? 'rgba(80,230,140,0.9)' : 'rgba(255,120,120,0.9)';
+      ctx.strokeStyle = alpha(this.success ? CUE_GREEN : CUE_RED, 0.9);
       ctx.lineWidth = 2.5;
       ctx.setLineDash([5, 4]);
       ctx.beginPath();
@@ -236,20 +244,7 @@ export class CatchOverlay {
       ctx.stroke();
       ctx.restore();
 
-      if (this.tap) {
-        ctx.save();
-        ctx.strokeStyle = '#ffd166';
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        const s = 11;
-        ctx.beginPath();
-        ctx.moveTo(this.tap.x - s, this.tap.y - s);
-        ctx.lineTo(this.tap.x + s, this.tap.y + s);
-        ctx.moveTo(this.tap.x + s, this.tap.y - s);
-        ctx.lineTo(this.tap.x - s, this.tap.y + s);
-        ctx.stroke();
-        ctx.restore();
-      }
+      if (this.tap) drawTapMark(ctx, this.tap.x, this.tap.y, 11);
     }
   }
 }

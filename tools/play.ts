@@ -11,6 +11,8 @@ import { Rng, clamp } from '../src/core/rng';
 import type { PositionId } from '../src/core/fieldGeometry';
 
 const DT = 1 / 60;
+/** Opposition quality, 10-99. Override with RATING=82 to check the top level. */
+const RATING = Number(process.env.RATING ?? 50);
 const MAX_FRAMES = 60 * 40;
 
 function randomBattedBall(rng: Rng): BattedBall {
@@ -84,7 +86,7 @@ function runCohort(
       userSide: side,
       runnersOn: [...runnersOn],
       outs: 0,
-      opponentRating: 50,
+      opponentRating: RATING,
       rng,
     });
 
@@ -226,7 +228,7 @@ function runCohort(
 }
 
 const PLAYS = 300;
-console.log(`\n=== Live play resolution (${PLAYS} plays each) ===\n`);
+console.log(`\n=== Live play resolution (${PLAYS} plays each, rating ${RATING}) ===\n`);
 
 runCohort('offense, bases empty', 'offense', 'CF', false, [false, false, false], PLAYS);
 runCohort('offense, runner on first', 'offense', 'CF', false, [true, false, false], PLAYS);

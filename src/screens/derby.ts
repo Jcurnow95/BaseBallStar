@@ -7,10 +7,11 @@ import { LEVELS, teamKit } from '../core/league';
 import { TEAM_KITS, uniformFor } from '../core/uniforms';
 import { AtBatView } from '../game/atBatView';
 import { DerbyFlightView } from '../game/derbyFlight';
+import { Celebration } from '../game/celebrationFx';
 import { BALLPARKS } from '../core/ballpark';
 import { CALM, airFor } from '../core/weather';
 import { readKey, writeKey } from '../core/storage';
-import { playSound, startAmbience, stopAmbience } from '../ui/audio';
+import { playHomeRunCall, playSound, startAmbience, stopAmbience } from '../ui/audio';
 import { q } from '../ui/dom';
 
 /**
@@ -192,6 +193,7 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
         <div class="tut-note" id="note"></div>
       </div>
     `;
+    const stage = q(mount, '.stage');
     const host = q(mount, '#host');
     const goal = q(mount, '#goal');
     const note = q(mount, '#note');
@@ -199,7 +201,9 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
     let view: AtBatView | null = null;
     let flight: DerbyFlightView | null = null;
     let noteTimer = 0;
-    let soundTimer = 0;
+    /** Cancels the organ sting still pending after a home run. */
+    let cancelFanfare = (): void => {};
+    let party: Celebration | null = null;
     let finished = false;
     let swings = 0;
     let homers = 0;
@@ -230,7 +234,9 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
       finished = true;
       destroyView();
       clearTimeout(noteTimer);
-      clearTimeout(soundTimer);
+      cancelFanfare();
+      party?.destroy();
+      party = null;
       stopAmbience();
       mount.classList.remove('game-screen');
     };
@@ -293,12 +299,15 @@ export function renderDerby(app: App, mount: HTMLElement): () => void {
         park: PARK,
         air,
         onHomeRun: () => {
-          playSound('homeRun');
-          clearTimeout(soundTimer);
-          soundTimer = window.setTimeout(() => playSound('fanfare'), 1400);
+          cancelFanfare();
+          cancelFanfare = playHomeRunCall();
+          // Nobody on base in a derby, so every one is a solo shot's worth.
+          party?.destroy();
+          party = new Celebration(stage, 1);
         },
         onDone: ({ homeRun, distance }) => {
           flight?.destroy();
+          party?.wrapUp();
           flight = null;
           if (finished) return;
           if (homeRun) {

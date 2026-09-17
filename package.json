@@ -1,7 +1,7 @@
 {
   "name": "baseball-star",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "A mobile career-mode baseball game.",
   "main": "electron/main.js",

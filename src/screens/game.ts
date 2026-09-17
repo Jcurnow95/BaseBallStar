@@ -37,6 +37,8 @@ import { addStats } from '../core/player';
 import { checkTrophies } from '../core/trophies';
 import { ACHIEVEMENTS, isAchievementMet } from '../core/achievements';
 import { gameXp, grantXp, recoverOvernight } from '../core/progression';
+import { gameStaminaGuard, overnightEnergyBonus, upkeepPerGame } from '../core/lifestyle';
+import { lifestyleOf } from '../core/save';
 import { clamp } from '../core/rng';
 import type { BattedBall } from '../core/types';
 import type { PlayOutcome, UserSide } from '../core/playSim';
@@ -66,6 +68,7 @@ const FAST_DELAY = 220;
 export function renderGame(app: App, mount: HTMLElement): () => void {
   const save = app.requireSave();
   const { player, league } = save;
+  const life = lifestyleOf(save);
   const level = LEVELS[league.levelId];
   const upcoming = nextGame(league);
 
@@ -870,12 +873,21 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
     player.money += earnings.total;
     const wornOut = wearGear(player).map((g) => g.name);
 
+    // Life off the field sends its bill: the house and whatever is parked
+    // outside it are paid for out of tonight's cheque. The bank can go
+    // negative — a rookie who bought a boat finds out what upkeep means.
+    const upkeep = upkeepPerGame(life);
+    player.money -= upkeep;
+    const lifeNotes: string[] = [];
+
     // A game takes a real bite out of conditioning, then the day rolls over.
+    // A proper bed and no red-eye flights take a little of that bite back.
     // No front-office churn during the tournament: you are on the other side
     // of the world, and a trade rumour has nothing to do with tonight.
-    player.stamina = clamp(player.stamina - (6 + Math.round(app.rng.next() * 4)), 0, 100);
+    const wear = Math.max(2, 6 + Math.round(app.rng.next() * 4) - gameStaminaGuard(life));
+    player.stamina = clamp(player.stamina - wear, 0, 100);
     advanceDay(league, cup ? undefined : app.rng);
-    recoverOvernight(player);
+    recoverOvernight(player, overnightEnergyBonus(life));
 
     // Move the tournament along first, so the trophy case can see a final
     // reached or a Trough won on the game that actually did it.
@@ -946,6 +958,7 @@ export function renderGame(app: App, mount: HTMLElement): () => void {
       // Not `nextGame(league) === null` — that's also true on an ordinary off
       // day, which would end the season after the first one.
       seasonComplete: isSeasonOver(league),
+      life: { upkeep, notes: lifeNotes },
     };
 
     app.lastGame = summary;

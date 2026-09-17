@@ -59,6 +59,8 @@ import {
 import { mvpSeasons } from '../core/awards';
 import { seasonScore, xpForLevel } from '../core/progression';
 import { unclaimedAchievements } from '../core/achievements';
+import { homeById } from '../core/lifestyle';
+import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 import { devMenuEnabled } from './dev';
@@ -100,8 +102,12 @@ export function renderHub(app: App, mount: HTMLElement): void {
   // Saves from before named rosters get theirs generated on the way in, and
   // any front-office news is shown once, then cleared.
   ensureRosters(league, app.rng);
-  const news = league.news ?? [];
+  // Front-office news and life news share the one board: both are things that
+  // happened while you weren't looking, and both are shown once.
+  const life = lifestyleOf(save);
+  const news = [...(league.news ?? []), ...life.notices];
   league.news = undefined;
+  life.notices = [];
   app.persist();
 
   const upcoming = nextGame(league);
@@ -216,6 +222,9 @@ export function renderHub(app: App, mount: HTMLElement): void {
   const storeButton = `
     <button class="btn ghost" id="store" style="margin-top:8px">
       Gear Store · ${formatMoney(player.money)}${fraying > 0 ? `<span class="btn-badge warn">${fraying} wearing out</span>` : ''}
+    </button>
+    <button class="btn ghost" id="life" style="margin-top:8px">
+      Life Off the Field · ${esc(homeById(life.home).name)}
     </button>
     <button class="btn ghost" id="trophies" style="margin-top:8px">
       Trophy Case${caseBadge}
@@ -541,6 +550,7 @@ export function renderHub(app: App, mount: HTMLElement): void {
   q(mount, '#seasonLog').addEventListener('click', () => app.go('fixtures'));
   q(mount, '#allStandings').addEventListener('click', () => app.go('standings'));
   q(mount, '#store').addEventListener('click', () => app.go('store'));
+  q(mount, '#life').addEventListener('click', () => app.go('life'));
   q(mount, '#trophies').addEventListener('click', () => app.go('trophies'));
   if (cup) q(mount, '#worldcup').addEventListener('click', () => app.go('worldCup'));
   q(mount, '#achievements').addEventListener('click', () => app.go('achievements'));

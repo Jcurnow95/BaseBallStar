@@ -3045,3 +3045,10 @@ table.standings.fixtures tr.ahead td {
   z-index: 7;
   pointer-events: none;
 }
+
+/* ------------------------------------------------------- life off the field */
+
+/* Money going the other way on a payday line. */
+.reward b.down {
+  color: var(--red);
+}

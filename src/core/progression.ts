@@ -190,8 +190,10 @@ export function applyTraining(
  * now roughly covers an ordinary game, and the schedule is the thing that
  * grinds you down rather than arithmetic.
  */
-export function recoverOvernight(player: PlayerProfile): void {
-  player.energy = clamp(player.energy + 55, 0, 100);
+export function recoverOvernight(player: PlayerProfile, extraEnergy = 0): void {
+  // `extraEnergy` is what a better bed and a quicker drive home are worth —
+  // see `overnightEnergyBonus` in `core/lifestyle.ts`.
+  player.energy = clamp(player.energy + 55 + extraEnergy, 0, 100);
   player.stamina = clamp(player.stamina + 9, 0, 100);
 }
 

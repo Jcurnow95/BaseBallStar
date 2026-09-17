@@ -26,7 +26,16 @@ export type Route =
   | 'howto'
   | 'tutorial'
   | 'derby'
+  | 'life'
   | 'dev';
+
+/** What the game meant off the field. See `core/lifestyle.ts`. */
+export interface LifeSummary {
+  /** The house and the toys, charged after the game. */
+  upkeep: number;
+  /** Anything else worth a line on the recap. */
+  notes: string[];
+}
 
 export interface PostGameSummary {
   win: boolean;
@@ -55,6 +64,8 @@ export interface PostGameSummary {
   /** Anything the game just added to the trophy case, in display order. */
   unlocked: Trophy[];
   seasonComplete: boolean;
+  /** What the game meant off the field. */
+  life: LifeSummary;
 }
 
 export type ScreenRenderer = (app: App, mount: HTMLElement) => (() => void) | void;

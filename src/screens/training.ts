@@ -25,6 +25,8 @@ import {
 } from '../core/progression';
 import type { LevelUpReport, TrainingOption } from '../core/progression';
 import { advanceDay, isGameDay, isSeasonOver } from '../core/league';
+import { overnightEnergyBonus } from '../core/lifestyle';
+import { lifestyleOf } from '../core/save';
 import { esc, meterHtml, q, qa } from '../ui/dom';
 import { showDialog } from '../ui/modal';
 import { runBpChallenge, runFungoFrenzy } from './trainingGames';
@@ -266,7 +268,7 @@ export function renderTraining(app: App, mount: HTMLElement): () => void {
           if (!ok) return;
         }
         advanceDay(save.league, app.rng);
-        recoverOvernight(player);
+        recoverOvernight(player, overnightEnergyBonus(lifestyleOf(save)));
         app.persist();
         app.go('hub');
       });

@@ -150,9 +150,19 @@ export function renderPostGame(app: App, mount: HTMLElement): void {
         <h2>Payday</h2>
         <div class="reward"><span>${esc(contractById(save.player.contract).name)}</span><b>${formatMoney(summary.earnings.salary)}</b></div>
         <div class="reward"><span>Performance bonus</span><b>${formatMoney(summary.earnings.bonus)}</b></div>
+        ${
+          summary.life.upkeep > 0
+            ? `<div class="reward"><span>Home &amp; upkeep</span><b class="down">−${formatMoney(summary.life.upkeep)}</b></div>`
+            : ''
+        }
         <div class="reward total"><span>In the bank</span><b>${formatMoney(save.player.money)}</b></div>
       </div>
 
+      ${
+        summary.life.notes.length > 0
+          ? `<div class="notice">${summary.life.notes.map((n) => esc(n)).join('<br/>')}</div>`
+          : ''
+      }
       ${
         summary.wornOut.length > 0
           ? `<div class="notice warn">

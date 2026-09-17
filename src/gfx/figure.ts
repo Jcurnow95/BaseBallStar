@@ -88,7 +88,7 @@ export interface FieldFigureOptions {
   glove?: boolean;
   /** Batting helmet instead of a cap. */
   helmet?: boolean;
-  /** Ball held up in the throwing hand. */
+  /** Ball secured in the glove, tucked in at the chest. */
   holdingBall?: boolean;
   /**
    * Screen point the glove stretches toward — an incoming ball, or the spot
@@ -262,19 +262,16 @@ export function drawFieldFigure(
       ctx.stroke();
     }
   } else if (holding) {
-    // Ball up by the ear, ready to throw.
-    const hx = shoulderX + (side ? -dir : 1) * h * 0.14;
-    const hy = shoulderY - h * 0.16;
-    limb(shoulderX + (side ? -dir : 1) * h * 0.03, shoulderY + h * 0.03, hx, hy, armW, kit.shirt, 0, h * 0.06);
-    ballAt = { x: hx, y: hy };
-    if (side) {
-      // Glove hand out front for balance.
-      limb(shoulderX, shoulderY + h * 0.03, shoulderX + dir * h * 0.24, shoulderY + h * 0.1, armW, kit.shirt);
-      if (o.glove) glove(ctx, shoulderX + dir * h * 0.26, shoulderY + h * 0.1, h * 0.075);
-    } else {
-      limb(shoulderX - h * 0.02, shoulderY + h * 0.03, f.hx, f.hy, armW, kit.shirt);
-      if (o.glove) glove(ctx, f.hx, f.hy, h * 0.075);
-    }
+    // Ball secured in the glove, tucked in at the chest, with the throwing
+    // hand come across to cover it — where the catch animation leaves it.
+    const gx = shoulderX + (side ? dir * h * 0.1 : h * 0.06);
+    const gy = shoulderY + h * 0.14;
+    // Throwing arm reaches over to the glove.
+    limb(shoulderX + (side ? -dir : -1) * h * 0.03, shoulderY + h * 0.03, gx - (side ? dir : 1) * h * 0.04, gy + h * 0.02, armW, kit.shirt, 0, h * 0.05);
+    // Glove arm, bent in to hold the ball at the chest.
+    limb(shoulderX + (side ? 0 : h * 0.02), shoulderY + h * 0.03, gx, gy, armW, kit.shirt, (side ? dir : 1) * h * 0.06, h * 0.03);
+    if (o.glove) glove(ctx, gx, gy, h * 0.085);
+    ballAt = { x: gx + (side ? dir : 1) * h * 0.02, y: gy - h * 0.025 };
   } else {
     limb(shoulderX + (side ? 0 : h * 0.02), shoulderY + h * 0.03, f.hx, f.hy, armW, kit.shirt);
     if (o.glove) glove(ctx, f.hx, f.hy + h * 0.02, h * 0.075);

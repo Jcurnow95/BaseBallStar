@@ -692,7 +692,7 @@ export class PlayView {
         const t = (this.clock - fx.start) / CATCH_FX_SECONDS;
         const ease = t * t * (3 - 2 * t);
         const from = this.ballScreen(fx.from.x, fx.from.y, fx.from.z);
-        reach = { x: from.x + (p.x - from.x) * ease, y: from.y + (p.y - height * 0.5 - from.y) * ease };
+        reach = { x: from.x + (p.x - from.x) * ease, y: from.y + (p.y - height * 0.46 - from.y) * ease };
         ballInGlove = true;
       } else if (fielder.hasBall) {
         holdingBall = true;
